@@ -13,6 +13,14 @@ on:
     branches: [main]
   workflow_dispatch:
 
+# 2026-06-02 から GitHub Actions が Node.js 24 をデフォルトに強制し、
+# Node.js 20 actions (actions/checkout@v4 等) は deprecated になる。
+# https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/
+# それまでの暫定対応として、明示的に Node 24 で実行させる。
+# action 側が Node 24 対応版をリリースしたタイミングで本 env を削除する。
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
+
 jobs:
   metadata-integrity:
     name: License metadata 整合チェック
