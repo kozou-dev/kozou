@@ -1,0 +1,30 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "kozou"
+version = "0.0.1"
+description = "Kozou — Package name reserved for the upcoming release."
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+authors = [
+  { name = "Takashi Matsuyama" }
+]
+keywords = ["kozou"]
+classifiers = [
+  "Development Status :: 1 - Planning",
+  "Programming Language :: Python :: 3",
+  "License :: OSI Approved :: MIT License",
+]
+
+[project.urls]
+Homepage = "https://kozou.org"
+Repository = "https://github.com/kozou-dev/kozou"
+Issues = "https://github.com/kozou-dev/kozou/issues"
+"npm Package" = "https://www.npmjs.com/package/kozou"
+"npm Organization" = "https://www.npmjs.com/org/kozou"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/kozou"]
