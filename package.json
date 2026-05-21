@@ -1,0 +1,29 @@
+{
+  "name": "kozou",
+  "version": "0.0.2",
+  "description": "PostgreSQL compiler. Generates admin UI, MCP context, TypeScript types, GraphQL endpoints, and docs from a single schema.",
+  "keywords": [
+    "postgresql",
+    "postgres",
+    "compiler",
+    "schema",
+    "code-generation",
+    "mcp",
+    "admin-ui",
+    "typescript",
+    "graphql"
+  ],
+  "homepage": "https://kozou.org",
+  "bugs": {
+    "url": "https://github.com/kozou-dev/kozou/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kozou-dev/kozou.git"
+  },
+  "license": "MIT",
+  "author": "Takashi Matsuyama",
+  "files": [
+    "README.md"
+  ]
+}
