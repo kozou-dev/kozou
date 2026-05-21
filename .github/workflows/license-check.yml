@@ -71,20 +71,25 @@ jobs:
           echo "✓ README.md License = Apache 2.0"
 
       - name: コードファイルに AGPL/GPL/PostgREST 関連語が混入していないか
-        # NOTE: 検査対象はコード/ビルド設定ファイルのみ。policy / README / CONTRIBUTING
-        # 等の markdown 文書、GitHub Actions workflow ファイル (この workflow を含む)、
-        # .eslintrc.cjs (PostgREST 言及は dev_spec §18.1.1 由来の防御 rule) は exclude。
+        # NOTE: 検査対象は TypeScript / JavaScript / Svelte / SQL のコードのみ。
+        # exclude されるもの:
+        # - markdown 文書 (policy / README / CONTRIBUTING / dev_spec を意図的に言及)
+        # - YAML / YML (config / spec、kozou.config.yaml で `type: postgrest` を
+        #   adapter type として指定するのは dev_spec §9.2 の正当な記述)
+        # - TOML (pyproject.toml は別 step で license check 済み)
+        # - GitHub Actions workflow ファイル (この workflow を含む)
+        # - .eslintrc.cjs (PostgREST 言及は dev_spec §18.1.1 由来の防御 rule)
         # 混入リスクは配布 artifact (npm pack / python -m build) を grep する
         # artifact-grep job 側で別途検証する。
         run: |
           if git grep -i -n -E 'postgrest|pgrst|agpl|gnu affero|gpl-3|gnu general public' \
-             -- '*.ts' '*.tsx' '*.js' '*.cjs' '*.mjs' '*.svelte' '*.sql' '*.yaml' '*.yml' '*.toml' \
+             -- '*.ts' '*.tsx' '*.js' '*.cjs' '*.mjs' '*.svelte' '*.sql' \
              ':(exclude).github/workflows/*.yml' \
              ':(exclude).eslintrc.cjs'; then
             echo "ERROR: code files に AGPL/GPL/PostgREST 関連語が含まれています"
             exit 1
           fi
-          echo "✓ code files (*.ts/*.svelte/*.sql/*.yaml 等) に AGPL/GPL/PostgREST 関連語なし"
+          echo "✓ code files (*.ts/*.tsx/*.js/*.cjs/*.mjs/*.svelte/*.sql) に AGPL/GPL/PostgREST 関連語なし"
 
   artifact-grep:
     name: Build artifact 混入チェック
@@ -117,6 +122,7 @@ jobs:
           mkdir -p _npm_inspect && tar -xzf "$TGZ" -C _npm_inspect
           FILES=$(find _npm_inspect -type f \
               ! -name '*.md' ! -name '*.rst' ! -name '*.txt' \
+              ! -name '*.yaml' ! -name '*.yml' ! -name '*.toml' \
               ! -name 'LICENSE' ! -name 'LICENSE.*' ! -name 'NOTICE' ! -name 'NOTICE.*' \
               ! -name 'package.json' ! -name 'pyproject.toml' \
               -print)
@@ -143,6 +149,7 @@ jobs:
           mkdir -p _sdist_inspect && tar -xzf "$SDIST" -C _sdist_inspect
           FILES=$(find _sdist_inspect -type f \
               ! -name '*.md' ! -name '*.rst' ! -name '*.txt' \
+              ! -name '*.yaml' ! -name '*.yml' ! -name '*.toml' \
               ! -name 'LICENSE' ! -name 'LICENSE.*' ! -name 'NOTICE' ! -name 'NOTICE.*' \
               ! -name 'PKG-INFO' ! -name 'package.json' ! -name 'pyproject.toml' \
               -print)
@@ -167,7 +174,7 @@ jobs:
           print(f"Inspecting {whl} (excluding *.md / LICENSE / NOTICE / METADATA / WHEEL / RECORD)")
           z = zipfile.ZipFile(whl)
           pat = re.compile(rb'(?i)postgrest|pgrst|agpl|gnu affero|gpl-3|gnu general public')
-          exclude_suffixes = ('.md', '.rst', '.txt')
+          exclude_suffixes = ('.md', '.rst', '.txt', '.yaml', '.yml', '.toml')
           exclude_basenames = {'LICENSE', 'NOTICE', 'METADATA', 'PKG-INFO', 'RECORD', 'WHEEL', 'AUTHORS'}
           hits = []
           for n in z.namelist():
