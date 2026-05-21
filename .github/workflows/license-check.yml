@@ -1,0 +1,117 @@
+name: License integrity check
+
+# License 整合 (LICENSE / package.json / pyproject.toml / README.md がすべて
+# Apache 2.0 を指していること) と、build artifact への AGPL/GPL/PostgREST
+# 関連語の混入禁止 (LICENSING_POLICY.md §4) を自動チェックする。
+#
+# Policy 詳細: planning repo (private) の LICENSING_POLICY.md を参照。
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  metadata-integrity:
+    name: License metadata 整合チェック
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: LICENSE が Apache License 2.0 か
+        run: |
+          head -5 LICENSE | grep -q -i "Apache License" \
+            || { echo "ERROR: LICENSE は Apache License 2.0 ではありません"; exit 1; }
+          echo "✓ LICENSE は Apache License 2.0"
+
+      - name: package.json の license フィールドが Apache-2.0 か
+        run: |
+          grep -E '"license"[[:space:]]*:[[:space:]]*"Apache-2.0"' package.json \
+            || { echo "ERROR: package.json の license が Apache-2.0 ではありません"; exit 1; }
+          echo "✓ package.json license = Apache-2.0"
+
+      - name: pyproject.toml の license / classifier が Apache か
+        run: |
+          grep -E 'license[[:space:]]*=[[:space:]]*\{[[:space:]]*text[[:space:]]*=[[:space:]]*"Apache-2.0"' pyproject.toml \
+            || { echo "ERROR: pyproject.toml の license が Apache-2.0 ではありません"; exit 1; }
+          grep -E '"License :: OSI Approved :: Apache Software License"' pyproject.toml \
+            || { echo "ERROR: pyproject.toml の classifier が Apache Software License ではありません"; exit 1; }
+          echo "✓ pyproject.toml license + classifier = Apache"
+
+      - name: README.md の License 節が Apache 2.0 か
+        run: |
+          grep -E '^Apache 2\.0' README.md \
+            || { echo "ERROR: README.md の License 節が 'Apache 2.0' ではありません"; exit 1; }
+          echo "✓ README.md License = Apache 2.0"
+
+      - name: 既存ソースに AGPL/GPL/PostgREST 関連語が混入していないか
+        run: |
+          if git grep -i -n -E 'postgrest|pgrst|agpl|gnu affero|gpl-3|gnu general public' -- ':(exclude).github/workflows/license-check.yml'; then
+            echo "ERROR: tracked files に AGPL/GPL/PostgREST 関連語が含まれています"
+            exit 1
+          fi
+          echo "✓ tracked files に AGPL/GPL/PostgREST 関連語なし"
+
+  artifact-grep:
+    name: Build artifact 混入チェック
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Python build tool を install
+        run: pip install build
+
+      - name: npm pack で tarball を生成し中身を grep
+        run: |
+          npm pack
+          TGZ=$(ls kozou-*.tgz)
+          echo "Inspecting $TGZ"
+          if tar -xzOf "$TGZ" | grep -i -E 'postgrest|pgrst|agpl|gnu affero|gpl-3|gnu general public'; then
+            echo "ERROR: npm tarball に禁則語が混入しています"
+            exit 1
+          fi
+          echo "✓ npm tarball clean"
+
+      - name: python -m build で sdist + wheel を生成し中身を grep
+        run: |
+          python -m build
+          # sdist (.tar.gz)
+          SDIST=$(ls dist/kozou-*.tar.gz)
+          echo "Inspecting $SDIST"
+          if tar -xzOf "$SDIST" | grep -i -E 'postgrest|pgrst|agpl|gnu affero|gpl-3|gnu general public'; then
+            echo "ERROR: PyPI sdist に禁則語が混入しています"
+            exit 1
+          fi
+          echo "✓ PyPI sdist clean"
+
+          # wheel (.whl) — ZipFile は glob を解釈しないので glob.glob で展開
+          python <<'PY'
+          import zipfile, re, glob, sys
+          whl = glob.glob('dist/kozou-*.whl')[0]
+          print(f"Inspecting {whl}")
+          z = zipfile.ZipFile(whl)
+          pat = re.compile(rb'(?i)postgrest|pgrst|agpl|gnu affero|gpl-3|gnu general public')
+          hits = []
+          for n in z.namelist():
+              if n.endswith('/'):
+                  continue
+              data = z.read(n)
+              if pat.search(data):
+                  hits.append((n, data[:200]))
+          if hits:
+              for n, snippet in hits:
+                  print(f"HIT: {n}: {snippet!r}")
+              print("ERROR: PyPI wheel に禁則語が混入しています")
+              sys.exit(1)
+          print("✓ PyPI wheel clean")
+          PY
