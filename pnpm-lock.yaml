@@ -24,7 +24,11 @@ importers:
         specifier: ^5.6.0
         version: 5.9.3
 
-  packages/core: {}
+  packages/core:
+    dependencies:
+      zod:
+        specifier: ^3.23.0
+        version: 3.25.76
 
   packages/introspect: {}
 
@@ -558,6 +562,9 @@ packages:
     resolution: {integrity: sha512-rVksvsnNCdJ/ohGc6xgPwyN8eheCxsiLM8mxuE/t/mOVqJewPuO1miLpTHQiRgTKCLexL4MeAFVagts7HmNZ2Q==}
     engines: {node: '>=10'}
 
+  zod@3.25.76:
+    resolution: {integrity: sha512-gzUt/qt81nXsFGKIFcC3YnfEAx5NkunCfnDlvuBSSFS02bcXu4Lmea0AFIUwbLWxWPx3d9p8S5QoaujKcNQxcQ==}
+
 snapshots:
 
   '@eslint-community/eslint-utils@4.9.1(eslint@8.57.1)':
@@ -1090,3 +1097,5 @@ snapshots:
   wrappy@1.0.2: {}
 
   yocto-queue@0.1.0: {}
+
+  zod@3.25.76: {}
