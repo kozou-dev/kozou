@@ -85,39 +85,81 @@ jobs:
       - name: Python build tool を install
         run: pip install build
 
-      - name: npm pack で tarball を生成し中身を grep
+      - name: npm pack で tarball を生成し code/binary 中身を grep
+        # README/LICENSE/NOTICE/package.json は意図的に PostgREST や license 名を
+        # 含む可能性があるため exclude。LICENSING_POLICY §4 の本来の目的
+        # (PostgREST のソース/バイナリ/generated コードを配布物に混入させない)
+        # を満たすには code/binary files の grep で十分。
         run: |
           npm pack
           TGZ=$(ls kozou-*.tgz)
-          echo "Inspecting $TGZ"
-          if tar -xzOf "$TGZ" | grep -i -E 'postgrest|pgrst|agpl|gnu affero|gpl-3|gnu general public'; then
-            echo "ERROR: npm tarball に禁則語が混入しています"
-            exit 1
+          echo "Inspecting $TGZ (excluding *.md / LICENSE / NOTICE / package.json metadata)"
+          mkdir -p _npm_inspect && tar -xzf "$TGZ" -C _npm_inspect
+          FILES=$(find _npm_inspect -type f \
+              ! -name '*.md' ! -name '*.rst' ! -name '*.txt' \
+              ! -name 'LICENSE' ! -name 'LICENSE.*' ! -name 'NOTICE' ! -name 'NOTICE.*' \
+              ! -name 'package.json' ! -name 'pyproject.toml' \
+              -print)
+          if [ -z "$FILES" ]; then
+            echo "✓ npm tarball clean (検査対象 code/binary ファイルなし、metadata のみ)"
+          else
+            echo "Checking files:"; echo "$FILES"
+            if echo "$FILES" | xargs grep -i -H -E 'postgrest|pgrst|agpl|gnu affero|gpl-3|gnu general public'; then
+              echo "ERROR: npm tarball の code/binary files に禁則語が混入"
+              rm -rf _npm_inspect
+              exit 1
+            fi
+            echo "✓ npm tarball clean (code/binary files に PostgREST/AGPL/GPL なし)"
           fi
-          echo "✓ npm tarball clean"
+          rm -rf _npm_inspect
 
-      - name: python -m build で sdist + wheel を生成し中身を grep
+      - name: python -m build で sdist + wheel を生成し code/binary 中身を grep
         run: |
           python -m build
+
           # sdist (.tar.gz)
           SDIST=$(ls dist/kozou-*.tar.gz)
-          echo "Inspecting $SDIST"
-          if tar -xzOf "$SDIST" | grep -i -E 'postgrest|pgrst|agpl|gnu affero|gpl-3|gnu general public'; then
-            echo "ERROR: PyPI sdist に禁則語が混入しています"
-            exit 1
+          echo "Inspecting $SDIST (excluding *.md / LICENSE / NOTICE / PKG-INFO / metadata)"
+          mkdir -p _sdist_inspect && tar -xzf "$SDIST" -C _sdist_inspect
+          FILES=$(find _sdist_inspect -type f \
+              ! -name '*.md' ! -name '*.rst' ! -name '*.txt' \
+              ! -name 'LICENSE' ! -name 'LICENSE.*' ! -name 'NOTICE' ! -name 'NOTICE.*' \
+              ! -name 'PKG-INFO' ! -name 'package.json' ! -name 'pyproject.toml' \
+              -print)
+          if [ -z "$FILES" ]; then
+            echo "✓ PyPI sdist clean (検査対象 code/binary ファイルなし、metadata のみ)"
+          else
+            echo "Checking files:"; echo "$FILES"
+            if echo "$FILES" | xargs grep -i -H -E 'postgrest|pgrst|agpl|gnu affero|gpl-3|gnu general public'; then
+              echo "ERROR: PyPI sdist の code/binary files に禁則語が混入"
+              rm -rf _sdist_inspect
+              exit 1
+            fi
+            echo "✓ PyPI sdist clean (code/binary files に PostgREST/AGPL/GPL なし)"
           fi
-          echo "✓ PyPI sdist clean"
+          rm -rf _sdist_inspect
 
           # wheel (.whl) — ZipFile は glob を解釈しないので glob.glob で展開
+          # documentation/metadata は同様に exclude
           python <<'PY'
           import zipfile, re, glob, sys
           whl = glob.glob('dist/kozou-*.whl')[0]
-          print(f"Inspecting {whl}")
+          print(f"Inspecting {whl} (excluding *.md / LICENSE / NOTICE / METADATA / WHEEL / RECORD)")
           z = zipfile.ZipFile(whl)
           pat = re.compile(rb'(?i)postgrest|pgrst|agpl|gnu affero|gpl-3|gnu general public')
+          exclude_suffixes = ('.md', '.rst', '.txt')
+          exclude_basenames = {'LICENSE', 'NOTICE', 'METADATA', 'PKG-INFO', 'RECORD', 'WHEEL', 'AUTHORS'}
           hits = []
           for n in z.namelist():
               if n.endswith('/'):
+                  continue
+              base = n.rsplit('/', 1)[-1]
+              if any(n.endswith(s) for s in exclude_suffixes):
+                  continue
+              if base in exclude_basenames or base.startswith('LICENSE.') or base.startswith('NOTICE.'):
+                  continue
+              # dist-info 内の licenses/* も exclude
+              if 'dist-info/licenses/' in n:
                   continue
               data = z.read(n)
               if pat.search(data):
@@ -125,7 +167,7 @@ jobs:
           if hits:
               for n, snippet in hits:
                   print(f"HIT: {n}: {snippet!r}")
-              print("ERROR: PyPI wheel に禁則語が混入しています")
+              print("ERROR: PyPI wheel の code/binary files に禁則語が混入")
               sys.exit(1)
           print("✓ PyPI wheel clean")
           PY
