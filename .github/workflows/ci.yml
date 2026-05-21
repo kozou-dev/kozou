@@ -1,0 +1,45 @@
+name: CI
+
+# pnpm workspace の typecheck / lint / test を毎 push と PR で実行する。
+# Step 3 で実装が入るまでは typecheck + lint のみ。test は --if-present で
+# skeleton 段階の package を skip する。
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+# 2026-06-02 から GitHub Actions が Node.js 24 をデフォルトに強制する暫定対応。
+# license-check.yml と同じ env を workflow level に置く。
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
+
+jobs:
+  typecheck-lint-test:
+    name: Typecheck / Lint / Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: pnpm を install
+        uses: pnpm/action-setup@v4
+
+      - name: Node を setup (with pnpm cache)
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+          cache: 'pnpm'
+
+      - name: dependencies を install
+        run: pnpm install --frozen-lockfile
+
+      - name: typecheck (pnpm -r)
+        run: pnpm -r typecheck
+
+      - name: lint (root eslint .)
+        run: pnpm run lint
+
+      - name: test (--if-present, skeleton 段階では skip)
+        run: pnpm -r --if-present test
