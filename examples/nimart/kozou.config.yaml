@@ -1,0 +1,27 @@
+# Nimart sample 用 kozou.config.yaml (v0.1)
+# dev_spec §9.2 の最小例。すべての項目に default があり、本ファイルなしでも
+# DATABASE_URL 環境変数だけで起動可能。
+
+database:
+  url: ${DATABASE_URL}
+  schemas: [public]
+
+server:
+  ui:
+    port: 3333
+    host: 0.0.0.0
+  mcp:
+    http:
+      port: 3334
+      host: 0.0.0.0
+    stdio: false
+
+adapter:
+  type: postgrest
+  url: ${KOZOU_ADAPTER_URL:-http://postgrest:3000}
+
+uiHints:
+  path: ./ui-hints.yaml
+
+cache:
+  ttlMs: 60000
