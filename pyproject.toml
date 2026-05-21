@@ -8,7 +8,7 @@ version = "0.0.1"
 description = "Kozou — Package name reserved for the upcoming release."
 readme = "README.md"
 requires-python = ">=3.9"
-license = { text = "MIT" }
+license = { text = "Apache-2.0" }
 authors = [
   { name = "Takashi Matsuyama" }
 ]
@@ -16,7 +16,7 @@ keywords = ["kozou"]
 classifiers = [
   "Development Status :: 1 - Planning",
   "Programming Language :: Python :: 3",
-  "License :: OSI Approved :: MIT License",
+  "License :: OSI Approved :: Apache Software License",
 ]
 
 [project.urls]

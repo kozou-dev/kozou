@@ -27,4 +27,4 @@ Pre-release (v0.0.x). Core architecture and public API are being designed. Sourc
 
 ## License
 
-MIT
+Apache 2.0
