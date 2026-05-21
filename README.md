@@ -8,6 +8,16 @@ Kozou reads a PostgreSQL schema once and produces every form a modern team and i
 
 Pre-release (v0.0.x). Core architecture and public API are being designed. Source code and documentation will land in this package as development proceeds.
 
+## Requirements
+
+When Kozou v0.1 lands, the runtime requirements will be:
+
+- **PostgreSQL 16 or later** — the canonical source of truth
+- **Docker 24 or later** — recommended for the bundled `docker compose up` stack (PostgreSQL + PostgREST + Kozou); PostgREST is run as a side-by-side container and is **not** bundled inside the Kozou image
+- **Node.js 20 or later** — only when running Kozou directly from npm rather than the prebuilt Docker image
+
+Contributors additionally need **pnpm 9 or later**. See [CONTRIBUTING.md](CONTRIBUTING.md) for the development environment setup.
+
 ## Roadmap
 
 - v0.1: schema reader (DDL + comments + constraints)

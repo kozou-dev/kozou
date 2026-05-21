@@ -54,13 +54,19 @@ jobs:
             || { echo "ERROR: README.md の License 節が 'Apache 2.0' ではありません"; exit 1; }
           echo "✓ README.md License = Apache 2.0"
 
-      - name: 既存ソースに AGPL/GPL/PostgREST 関連語が混入していないか
+      - name: コードファイルに AGPL/GPL/PostgREST 関連語が混入していないか
+        # NOTE: 検査対象はコード/ビルド設定ファイルのみ。policy / README / CONTRIBUTING
+        # 等の markdown 文書は意図的に PostgREST や AGPL について言及する必要があるため、
+        # *.md は exclude する。混入リスクは配布 artifact (npm pack / python -m build)
+        # を grep する artifact-grep job 側で別途検証する。
         run: |
-          if git grep -i -n -E 'postgrest|pgrst|agpl|gnu affero|gpl-3|gnu general public' -- ':(exclude).github/workflows/license-check.yml'; then
-            echo "ERROR: tracked files に AGPL/GPL/PostgREST 関連語が含まれています"
+          if git grep -i -n -E 'postgrest|pgrst|agpl|gnu affero|gpl-3|gnu general public' \
+             -- '*.ts' '*.tsx' '*.js' '*.cjs' '*.mjs' '*.svelte' '*.sql' '*.yaml' '*.yml' '*.toml' \
+             ':(exclude).github/workflows/license-check.yml'; then
+            echo "ERROR: code files に AGPL/GPL/PostgREST 関連語が含まれています"
             exit 1
           fi
-          echo "✓ tracked files に AGPL/GPL/PostgREST 関連語なし"
+          echo "✓ code files (*.ts/*.svelte/*.sql/*.yaml 等) に AGPL/GPL/PostgREST 関連語なし"
 
   artifact-grep:
     name: Build artifact 混入チェック

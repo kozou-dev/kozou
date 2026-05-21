@@ -23,6 +23,24 @@ Please use [GitHub Issues](https://github.com/kozou-dev/kozou/issues) for:
 
 Search existing issues before opening a new one.
 
+## Development Environment
+
+Required:
+
+- **Node.js 20 or later** — install via `nvm install 20` (a `.nvmrc` will be added once the monorepo skeleton lands)
+- **pnpm 9 or later** — enable via `corepack enable && corepack prepare pnpm@latest --activate`, or install with `npm install -g pnpm`
+- **Docker 24 or later** — used by the test harness (testcontainers) and the `docker compose up` development stack
+- **PostgreSQL 16 or later** — automatically managed by testcontainers in unit tests; for manual integration testing, run `postgres:16` via Docker
+
+Once the monorepo skeleton is in place (in progress), the standard workflow will be:
+
+```sh
+pnpm install
+pnpm -r typecheck
+pnpm -r lint
+pnpm -r test
+```
+
 ## Submitting Pull Requests
 
 1. Fork the repository and create a branch from `main`.
