@@ -1,29 +1,34 @@
 {
-  "name": "kozou",
-  "version": "0.0.2",
-  "description": "PostgreSQL compiler. Generates admin UI, MCP context, TypeScript types, GraphQL endpoints, and docs from a single schema.",
-  "keywords": [
-    "postgresql",
-    "postgres",
-    "compiler",
-    "schema",
-    "code-generation",
-    "mcp",
-    "admin-ui",
-    "typescript",
-    "graphql"
-  ],
+  "name": "@kozou/monorepo",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Kozou monorepo (private). Public OSS packages live under packages/*. See kozou-planning/docs/kozou_v0.1_dev_spec.md.",
+  "license": "Apache-2.0",
+  "author": "Takashi Matsuyama",
   "homepage": "https://kozou.org",
-  "bugs": {
-    "url": "https://github.com/kozou-dev/kozou/issues"
-  },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/kozou-dev/kozou.git"
   },
-  "license": "Apache-2.0",
-  "author": "Takashi Matsuyama",
-  "files": [
-    "README.md"
-  ]
+  "bugs": {
+    "url": "https://github.com/kozou-dev/kozou/issues"
+  },
+  "engines": {
+    "node": ">=20",
+    "pnpm": ">=9"
+  },
+  "packageManager": "pnpm@10.32.1",
+  "scripts": {
+    "typecheck": "pnpm -r typecheck",
+    "build": "pnpm -r build",
+    "lint": "eslint .",
+    "test": "pnpm -r --if-present test"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.0",
+    "@types/node": "^22.0.0",
+    "eslint": "^8.57.0",
+    "@typescript-eslint/parser": "^7.18.0",
+    "@typescript-eslint/eslint-plugin": "^7.18.0"
+  }
 }
