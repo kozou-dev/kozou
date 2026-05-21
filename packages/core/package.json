@@ -1,0 +1,16 @@
+{
+  "name": "@kozou/core",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Kozou core: Schema Context, type definitions, UI Hints merge (skeleton; v0.1 implementation pending).",
+  "license": "Apache-2.0",
+  "type": "module",
+  "main": "./src/index.ts",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "build": "tsc"
+  }
+}

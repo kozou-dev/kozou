@@ -1,0 +1,16 @@
+{
+  "name": "kozou",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Kozou CLI / unified entry point (skeleton; v0.1 implementation pending). See kozou-planning/docs/kozou_v0.1_dev_spec.md.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "main": "./src/index.ts",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "build": "tsc"
+  }
+}
