@@ -28,3 +28,11 @@ Issues = "https://github.com/kozou-dev/kozou/issues"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/kozou"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+  "/src",
+  "/README.md",
+  "/LICENSE",
+  "/pyproject.toml",
+]
