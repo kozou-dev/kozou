@@ -34,11 +34,27 @@ jobs:
             || { echo "ERROR: LICENSE は Apache License 2.0 ではありません"; exit 1; }
           echo "✓ LICENSE は Apache License 2.0"
 
-      - name: package.json の license フィールドが Apache-2.0 か
+      - name: root package.json の license フィールドが Apache-2.0 か
         run: |
           grep -E '"license"[[:space:]]*:[[:space:]]*"Apache-2.0"' package.json \
-            || { echo "ERROR: package.json の license が Apache-2.0 ではありません"; exit 1; }
-          echo "✓ package.json license = Apache-2.0"
+            || { echo "ERROR: root package.json の license が Apache-2.0 ではありません"; exit 1; }
+          echo "✓ root package.json license = Apache-2.0"
+
+      - name: packages/*/package.json の license フィールドが Apache-2.0 か
+        run: |
+          shopt -s nullglob
+          pkgs=(packages/*/package.json)
+          if [ ${#pkgs[@]} -eq 0 ]; then
+            echo "✓ packages/* が空 (skeleton 段階)"
+          else
+            for pkg in "${pkgs[@]}"; do
+              if ! grep -q -E '"license"[[:space:]]*:[[:space:]]*"Apache-2.0"' "$pkg"; then
+                echo "ERROR: $pkg の license が Apache-2.0 ではありません"
+                exit 1
+              fi
+              echo "✓ $pkg license = Apache-2.0"
+            done
+          fi
 
       - name: pyproject.toml の license / classifier が Apache か
         run: |
@@ -56,13 +72,15 @@ jobs:
 
       - name: コードファイルに AGPL/GPL/PostgREST 関連語が混入していないか
         # NOTE: 検査対象はコード/ビルド設定ファイルのみ。policy / README / CONTRIBUTING
-        # 等の markdown 文書は意図的に PostgREST や AGPL について言及する必要があるため、
-        # *.md は exclude する。混入リスクは配布 artifact (npm pack / python -m build)
-        # を grep する artifact-grep job 側で別途検証する。
+        # 等の markdown 文書、GitHub Actions workflow ファイル (この workflow を含む)、
+        # .eslintrc.cjs (PostgREST 言及は dev_spec §18.1.1 由来の防御 rule) は exclude。
+        # 混入リスクは配布 artifact (npm pack / python -m build) を grep する
+        # artifact-grep job 側で別途検証する。
         run: |
           if git grep -i -n -E 'postgrest|pgrst|agpl|gnu affero|gpl-3|gnu general public' \
              -- '*.ts' '*.tsx' '*.js' '*.cjs' '*.mjs' '*.svelte' '*.sql' '*.yaml' '*.yml' '*.toml' \
-             ':(exclude).github/workflows/license-check.yml'; then
+             ':(exclude).github/workflows/*.yml' \
+             ':(exclude).eslintrc.cjs'; then
             echo "ERROR: code files に AGPL/GPL/PostgREST 関連語が含まれています"
             exit 1
           fi
@@ -85,11 +103,13 @@ jobs:
       - name: Python build tool を install
         run: pip install build
 
-      - name: npm pack で tarball を生成し code/binary 中身を grep
+      - name: npm pack で packages/kozou の tarball を生成し code/binary 中身を grep
+        # Step 2-4 で publish target を root から packages/kozou に retarget。
         # README/LICENSE/NOTICE/package.json は意図的に PostgREST や license 名を
         # 含む可能性があるため exclude。LICENSING_POLICY §4 の本来の目的
         # (PostgREST のソース/バイナリ/generated コードを配布物に混入させない)
         # を満たすには code/binary files の grep で十分。
+        working-directory: packages/kozou
         run: |
           npm pack
           TGZ=$(ls kozou-*.tgz)
