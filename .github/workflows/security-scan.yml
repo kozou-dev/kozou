@@ -73,6 +73,7 @@ jobs:
     permissions:
       contents: read
       security-events: write  # SARIF を GitHub Security tab に upload
+      actions: read           # CodeQL の telemetry / workflow info に必要
     strategy:
       fail-fast: false
       matrix:
