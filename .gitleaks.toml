@@ -1,0 +1,34 @@
+title = "kozou v0.1 gitleaks config"
+
+# GitHub default ruleset + custom allowlist (Step 4-A4-b で追加)
+[extend]
+useDefault = true
+
+# Demo / test / example credentials が誤検知されないよう allowlist。
+# 実 secret は .gitignore (Step 4-A4-a) + secret-scanning でブロックする。
+[allowlist]
+description = "kozou demo / test / example credentials"
+
+paths = [
+  # *.example file: template、実値ではない
+  '''\.example$''',
+  # demo documentation: docker run --rm の demo password 言及
+  '''docs/demo/.*\.md''',
+  # demo shell scripts: scripts/demo/run-comparison.sh の demo password
+  '''scripts/demo/.*\.sh''',
+  # test fixture file: vitest fixture / setup
+  '''packages/.*/test/.*\.ts''',
+  # CI workflow file: services postgres の test password (KOZOU_TEST_DATABASE_URL)
+  '''\.github/workflows/.*\.yml''',
+  # .mcp.json.example: demo MCP 設定 template
+  '''\.mcp\.json\.example''',
+]
+
+regexes = [
+  # demo password literal: docker --rm container で即廃棄、漏洩リスク限定的
+  '''postgres:demo@''',
+  # CI test password: services postgres container 内のみ有効
+  '''POSTGRES_PASSWORD:?\s*(demo|kozou)''',
+  # 環境変数名: KOZOU_TEST_DATABASE_URL は test 用 env name、値ではない
+  '''KOZOU_TEST_DATABASE_URL''',
+]

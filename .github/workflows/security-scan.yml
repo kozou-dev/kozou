@@ -1,0 +1,84 @@
+name: Security scan
+
+# 機密漏洩 / dependency 脆弱性 / code analysis の自動スキャン。
+# Step 4-A4-b で追加 (Codex publish 前 security review の延長)。
+#
+# 3 job 構成:
+# - secret-scan (gitleaks, MIT): git history + working tree の hardcoded secret
+# - dependency-scan (OSV-Scanner, Apache 2.0): pnpm-lock.yaml の CVE
+# - code-analysis (CodeQL, MIT): JavaScript/TypeScript の vulnerability 静的検出
+#
+# trufflehog (AGPL-3) は LICENSING_POLICY §4 の禁則語に該当、不採用。
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    # 毎週日曜 00:00 UTC (日本時間 月曜 09:00) に full scan
+    - cron: '0 0 * * 0'
+  workflow_dispatch:
+
+# Supply chain hardening (Step 4-A3-c と同 pattern): 最小 permissions top-level、
+# 必要な job だけ additive (security-events: write を code-analysis に追加)
+permissions:
+  contents: read
+
+# 2026-06-02 から GitHub Actions が Node.js 24 をデフォルトに強制する暫定対応
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
+
+jobs:
+  secret-scan:
+    name: Secret scan (gitleaks)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          # gitleaks は git history も走査するため full clone が必要
+          fetch-depth: 0
+
+      - name: gitleaks scan
+        uses: gitleaks/gitleaks-action@dcedce43c6f43de0b836d1fe38946645c9c638dc # v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_CONFIG: .gitleaks.toml
+
+  dependency-scan:
+    name: Dependency CVE (OSV-Scanner)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: OSV-Scanner
+        uses: google/osv-scanner-action/.github/actions/osv-scanner-action@9a498708959aeaef5ef730655706c5a1df1edbc2 # v2.3.8
+        with:
+          scan-args: |-
+            -r
+            --skip-git
+            ./
+
+  code-analysis:
+    name: Code analysis (CodeQL)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write  # SARIF を GitHub Security tab に upload
+    strategy:
+      fail-fast: false
+      matrix:
+        language: ['javascript-typescript']
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@fee9466b8957867761f2d78f922ab084e3e2dd17 # v3
+        with:
+          languages: ${{ matrix.language }}
+          queries: security-extended
+
+      - name: Perform CodeQL analysis
+        uses: github/codeql-action/analyze@fee9466b8957867761f2d78f922ab084e3e2dd17 # v3
+        with:
+          category: '/language:${{ matrix.language }}'
