@@ -40,10 +40,14 @@ jobs:
           fetch-depth: 0
 
       - name: gitleaks scan
-        uses: gitleaks/gitleaks-action@dcedce43c6f43de0b836d1fe38946645c9c638dc # v2
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GITLEAKS_CONFIG: .gitleaks.toml
+        # gitleaks-action v2 は organization 向けに commercial license 化された
+        # (free repo でも GITLEAKS_LICENSE secret 必要)。代わりに gitleaks CLI
+        # (MIT) を docker で直接実行することで license fee 不要かつ kozou OSS
+        # と整合する形に統一。zricethezav/gitleaks image は gitleaks 公式。
+        run: |
+          docker run --rm -v "$PWD:/repo" -w /repo \
+            zricethezav/gitleaks:latest \
+            detect --source . --config .gitleaks.toml --verbose --redact
 
   dependency-scan:
     name: Dependency CVE (OSV-Scanner)
@@ -55,7 +59,9 @@ jobs:
         # OSV-Scanner v2 で `--skip-git` flag は削除された (migration guide 参照)。
         # v2 default では git history を scan しない (manifest のみ)、`-r ./` で
         # working tree を recursive scan する標準動作で十分。
-        uses: google/osv-scanner-action/.github/actions/osv-scanner-action@9a498708959aeaef5ef730655706c5a1df1edbc2 # v2.3.8
+        # action path は v2.3.8 で root action.yml に統一されており、過去版の
+        # `/.github/actions/osv-scanner-action` sub-path は存在しない。
+        uses: google/osv-scanner-action@9a498708959aeaef5ef730655706c5a1df1edbc2 # v2.3.8
         with:
           scan-args: |-
             -r
