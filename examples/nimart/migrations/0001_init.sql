@@ -54,9 +54,7 @@ COMMENT ON TABLE code_values IS
         値を取り出すには code_set_id でフィルタしてから code で JOIN する。';
 
 COMMENT ON COLUMN code_values.code IS
-  '機械可読な値 (例: JP, US / oil_on_canvas, lithograph / print, unique, ap)。
-
-   @widget: text-readonly';
+  '機械可読な値 (例: JP, US / oil_on_canvas, lithograph / print, unique, ap)。';
 
 COMMENT ON COLUMN code_values.label IS '人間向け表示名 (例: 日本, アメリカ / 油彩, リトグラフ)。';
 
@@ -84,9 +82,7 @@ COMMENT ON TABLE artists IS
         deleted_at IS NOT NULL のレコードは全 query から除外する。';
 
 COMMENT ON COLUMN artists.display_name IS
-  '公開向け表示名。UI 一覧と外部 API で使う。
-
-   @widget: text-required';
+  '公開向け表示名。UI 一覧と外部 API で使う。';
 
 COMMENT ON COLUMN artists.legal_name IS
   '戸籍上の名前など、内部記録用。公開しない。
@@ -129,9 +125,7 @@ COMMENT ON TABLE artworks IS
         作品一覧の表示には title + artists.display_name の JOIN を推奨。';
 
 COMMENT ON COLUMN artworks.title IS
-  '作品名。
-
-   @widget: text-required';
+  '作品名。';
 
 COMMENT ON COLUMN artworks.medium_code IS
   '媒体 (code_values.code、code_sets.code = ''medium''の値)。例: oil_on_canvas, lithograph。
@@ -170,7 +164,6 @@ COMMENT ON TABLE editions IS
 COMMENT ON COLUMN editions.edition_label IS
   'エディション名 (例: 1st edition, AP, original)。同一 artwork 内でユニーク。
 
-   @widget: text-required
    @policy: 一度確定したら原則変更しない (カタログ整合性のため)。';
 
 COMMENT ON COLUMN editions.total_count IS
