@@ -37,45 +37,70 @@ bash scripts/demo/run-comparison.sh setup
 立ち上がり、それぞれに `scripts/demo/nimart-no-comment.sql` と
 `examples/nimart/migrations/0001_init.sql` が流し込まれる。
 
-### 2. Without COMMENT 版 MCP server を起動
+### 2. `.mcp.json` を local 作成 + Claude Code から MCP 接続
 
-別ターミナルで:
-
-```bash
-bash scripts/demo/run-comparison.sh mcp-without
-```
-
-### 3. Claude Code (別 session) で MCP 接続 + prompt 投入
-
-Claude Code の MCP 設定で `KOZOU_DATABASE_URL=postgres://postgres:demo@localhost:5500/postgres`
-に接続。`scripts/demo/prompts/01-sales-by-artist.md` の prompt 本文を投入。
-
-得られた AI 出力 (思考プロセス含む) を `docs/demo/before.md` に貼り付け。
-
-### 4. With COMMENT 版 MCP server を起動 (Without を Ctrl+C で止めてから)
+リポジトリ root に `.mcp.json.example` (template) が含まれている。これを
+local の `.mcp.json` に copy する (実体は `.gitignore` で git 管理外):
 
 ```bash
-bash scripts/demo/run-comparison.sh mcp-with
+cd ~/projects/kozou
+cp .mcp.json.example .mcp.json
 ```
 
-### 5. Claude Code を再起動 + With COMMENT MCP に接続 + 同じ prompt
+`.mcp.json.example` には以下 2 つの MCP server が定義済み:
 
-`KOZOU_DATABASE_URL=postgres://postgres:demo@localhost:5501/postgres` に接続。
-同じ prompt を投入。
+- `kozou-without`: COMMENT なし DB (`localhost:5500`)
+- `kozou-with`: COMMENT 付き DB (`localhost:5501`)
+
+> **Demo-only credentials**: `.mcp.json.example` 内の `postgres:demo@localhost`
+> は **demo 専用 password** で、production では絶対に使わないこと。
+> `scripts/demo/run-comparison.sh setup` で立てた docker container は `--rm` で
+> 即廃棄される設計。
+
+別 Claude Code session を kozou repo のルートディレクトリで起動すると、
+`.mcp.json` を自動 detect し、両 MCP server が利用可能になる:
+
+```bash
+cd ~/projects/kozou
+claude  # 別ターミナルで起動
+```
+
+Claude Code が `kozou-without` / `kozou-with` MCP server を自動 spawn する。
+ターミナルで `bash scripts/demo/run-comparison.sh mcp-without` を手動起動する
+必要は **無い** (subcommand は debug 用、Claude Code は子プロセスで spawn
+する仕組みのため手動起動 server には接続不可)。
+
+### 3. Phase 1: Without COMMENT 版で実証
+
+別 Claude Code session で、`kozou-without` MCP tools を使って以下の prompt を投入
+(`scripts/demo/prompts/01-sales-by-artist.md` 参照):
+
+> 販売可能在庫を作家別に集計する API エンドポイントを書いてください。
+> Node.js + Express + node-postgres で実装してください。レスポンスは
+> `[{ artist_name, for_sale_count }]` の JSON 配列で、販売可能在庫数の
+> 降順でソートしてください。
+
+明示的に「kozou-without の MCP tools のみ使って」と指示すると区別が明確。
+得られた AI 出力 (思考プロセス + コード) を `docs/demo/before.md` に貼り付け。
+
+### 4. Phase 2: With COMMENT 版で同じ prompt
+
+同じ Claude Code session で、今度は `kozou-with` MCP tools を使って同じ
+prompt を投入 (「kozou-with の MCP tools のみ使って」と明示)。
 
 得られた AI 出力を `docs/demo/after.md` に貼り付け。
 
-### 6. transcript.md を更新
+### 5. transcript.md を更新
 
 `docs/demo/transcript.md` に prompt + 両出力サマリ + 観察される差分を記録。
 
-### 7. cleanup
+### 6. cleanup
 
 ```bash
 bash scripts/demo/run-comparison.sh stop
 ```
 
-### 8. 再現性検証 (最低 3 回独立実行)
+### 7. 再現性検証 (最低 3 回独立実行)
 
 Kozou v0.1 spec §18.6 「AI 出力 non-deterministic」への対応として、上記手順を最低 3 回
 独立して実行し、Before/After の差分が安定的に観察できることを確認する。

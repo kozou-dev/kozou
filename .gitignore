@@ -38,6 +38,20 @@ Thumbs.db
 .env.*
 !.env.example
 
+# Security: local secrets / credentials (Step 4-A4)
+# .mcp.json は .mcp.json.example から `cp` で local 作成、git には含めない
+.mcp.json
+# 証明書 / 秘密鍵
+*.pem
+*.key
+*.p12
+*.pfx
+*.cer
+# credential 系
+credentials.json
+secrets/
+*.secret
+
 # AI / agent local state
 .agents/local/
 .agents/tmp/
