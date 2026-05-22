@@ -1,6 +1,6 @@
 # Prompt: 販売可能在庫を作家別に集計する API エンドポイント
 
-dev_spec §11.1 シナリオ。MCP 接続済みの状態 (または未接続の対照群) で以下の
+Kozou v0.1 spec §11.1 シナリオ。MCP 接続済みの状態 (または未接続の対照群) で以下の
 プロンプトを Claude Code に投げる:
 
 ---
@@ -12,7 +12,7 @@ Node.js + Express + node-postgres で実装してください。
 
 ---
 
-## 期待される対比 (dev_spec §11.2)
+## 期待される対比 (Kozou v0.1 spec §11.2)
 
 ### Before (COMMENT なし、素の DDL のみ — `scripts/demo/nimart-no-comment.sql`)
 
@@ -33,7 +33,7 @@ Node.js + Express + node-postgres で実装してください。
 - `deleted_at` / `visibility` の処理を MCP の `aiNotes` 経由で正しく扱う
   (`@ai: 販売可能在庫の抽出には vw_inventory_for_sale を優先利用すること`)
 
-## 実証手順 (dev_spec §11.3)
+## 実証手順 (Kozou v0.1 spec §11.3)
 
 1. `bash scripts/demo/run-comparison.sh` で 2 つの PostgreSQL container を起動
 2. Claude Code を開いて Without COMMENT 用の MCP server に接続
@@ -45,4 +45,4 @@ Node.js + Express + node-postgres で実装してください。
 6. `docs/demo/transcript.md` に prompt + 観察される差分の説明を追記
 7. cleanup: `docker stop kozou-demo-without kozou-demo-with`
 
-最低 3 回独立実行で「演出」でないことを確認 (dev_spec §18.6)。
+最低 3 回独立実行で「演出」でないことを確認 (Kozou v0.1 spec §18.6)。

@@ -25,5 +25,5 @@
 
 - `before.md` / `after.md` に実 AI 出力が貼り付けられている
 - 本ファイルに prompt + 観察される差分の説明が記録されている
-- 最低 3 回独立実行で「演出」でないことを確認 (dev_spec §18.6)
+- 最低 3 回独立実行で「演出」でないことを確認 (Kozou v0.1 spec §18.6)
 - `.github/workflows/demo-recheck.yml` 週次 CI が追加される (Step 4-B commit と同時)

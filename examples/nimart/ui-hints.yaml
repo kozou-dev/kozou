@@ -1,5 +1,5 @@
 # UI Hints (Nimart sample, optional minimal)
-# このファイルは optional。DDL + COMMENT だけで合理的なデフォルト UI が生成される (dev_spec §6.4)。
+# このファイルは optional。DDL + COMMENT だけで合理的なデフォルト UI が生成される (Kozou v0.1 spec §6.4)。
 # UI Hints は presentation の好みのみを上書きする (label の言語化、widget の明示など)。
 #
 # YAML 文法の最終形は §16.1 の意図的 open item として実装中 (@kozou/core) で確定する。

@@ -1,5 +1,5 @@
 # Nimart sample 用 kozou.config.yaml (v0.1)
-# dev_spec §9.2 の最小例。すべての項目に default があり、本ファイルなしでも
+# Kozou v0.1 spec §9.2 の最小例。すべての項目に default があり、本ファイルなしでも
 # DATABASE_URL 環境変数だけで起動可能。
 
 database:

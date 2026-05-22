@@ -4,7 +4,7 @@
 AI agent が業務概念を理解した SQL を生成できる。
 
 このディレクトリは v0.1 DoD「サンプル業務スキーマで COMMENT あり/なしの AI 出力差を
-示す」(dev_spec §1.2) を **静的 transcript** で実証する。動画化は v0.1.1 以降。
+示す」(Kozou v0.1 spec §1.2) を **静的 transcript** で実証する。動画化は v0.1.1 以降。
 
 ## ファイル
 
@@ -73,10 +73,10 @@ bash scripts/demo/run-comparison.sh stop
 
 ### 8. 再現性検証 (最低 3 回独立実行)
 
-dev_spec §18.6 「AI 出力 non-deterministic」への対応として、上記手順を最低 3 回
+Kozou v0.1 spec §18.6 「AI 出力 non-deterministic」への対応として、上記手順を最低 3 回
 独立して実行し、Before/After の差分が安定的に観察できることを確認する。
 
-## 期待される対比 (dev_spec §11.2)
+## 期待される対比 (Kozou v0.1 spec §11.2)
 
 ### Before (COMMENT なし)
 - `inventory_items.status = 'sale'` のような誤った値 (実際は `for_sale`)
@@ -92,6 +92,6 @@ dev_spec §18.6 「AI 出力 non-deterministic」への対応として、上記�
 
 ## 関連 spec
 
-- dev_spec §1.2: v0.1 DoD
-- dev_spec §11: 比較デモ仕様
-- dev_spec §18.6: 比較デモ「演出化」リスク
+- Kozou v0.1 spec §1.2: v0.1 DoD
+- Kozou v0.1 spec §11: 比較デモ仕様
+- Kozou v0.1 spec §18.6: 比較デモ「演出化」リスク

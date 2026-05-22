@@ -2,7 +2,7 @@
   "name": "@kozou/introspect",
   "version": "0.0.0",
   "private": true,
-  "description": "PostgreSQL DDL / COMMENT / VIEW introspection (dev_spec §5).",
+  "description": "PostgreSQL DDL / COMMENT / VIEW introspection (Kozou v0.1 spec §5).",
   "license": "Apache-2.0",
   "type": "module",
   "main": "./src/index.ts",

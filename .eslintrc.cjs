@@ -20,7 +20,7 @@ module.exports = {
     '.pnpm-store/',
   ],
   overrides: [
-    // dev_spec §18.1.1 + LICENSING_POLICY §3: PostgREST URL hardcode 防止
+    // Kozou v0.1 spec §18.1.1 + LICENSING_POLICY §3: PostgREST URL hardcode 防止
     // svelte-ui の adapter / server 以外から PostgREST に直接アクセスすることを禁止。
     // v1.0 で `@kozou/api` に切替するときの breaking change を防ぐ regression guard。
     {
@@ -35,7 +35,7 @@ module.exports = {
           {
             selector: "Literal[value=/postgrest/i]",
             message:
-              'PostgREST への直接参照は禁止。DataAdapter 経由で呼び出すこと (dev_spec §18.1, LICENSING_POLICY §3)。',
+              'PostgREST への直接参照は禁止。DataAdapter 経由で呼び出すこと (Kozou v0.1 spec §18.1, LICENSING_POLICY §3)。',
           },
           {
             selector: "Literal[value=/^https?:\\/\\/postgrest/i]",

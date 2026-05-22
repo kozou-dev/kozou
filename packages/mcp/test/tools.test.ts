@@ -20,7 +20,7 @@ const nimartSql = readFileSync(
   'utf8',
 );
 
-describe('MCP tools (nimart fixture, dev_spec §13.2)', () => {
+describe('MCP tools (nimart fixture, Kozou v0.1 spec §13.2)', () => {
   let db: DatabaseHandle;
   let cache: SchemaCache;
 

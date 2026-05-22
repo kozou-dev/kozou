@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# kozou v0.1 比較デモ setup (dev_spec §11)
+# kozou v0.1 比較デモ setup (Kozou v0.1 spec §11)
 #
 # 2 つの PostgreSQL container を立てて、それぞれに nimart 全 DDL (COMMENT 付き)
 # と nimart-no-comment.sql (COMMENT 削除版) を流す。各 DB に対応する @kozou/mcp
 # server を起動 (stdio mode、フォアグラウンドで)。
 #
-# AI への prompt 投入は Claude Code で手動 (dev_spec §11.4 「実証してから映像化」)。
+# AI への prompt 投入は Claude Code で手動 (Kozou v0.1 spec §11.4 「実証してから映像化」)。
 # 結果を docs/demo/{before,after}.md に貼り付け、docs/demo/transcript.md を
 # 更新する。
 #

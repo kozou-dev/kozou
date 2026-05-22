@@ -1,11 +1,11 @@
-// dev_spec §4.3 の UIHints 型定義 + zod schema。
+// Kozou v0.1 spec §4.3 の UIHints 型定義 + zod schema。
 //
-// dev_spec §16.1 で「UI Hints YAML の最終文法は実装中に確定」と意図的に open
+// Kozou v0.1 spec §16.1 で「UI Hints YAML の最終文法は実装中に確定」と意図的に open
 // にされている open item。v0.1 では本書 §4.3 の TypeScript shape を最小限の
 // 正本とし、loadUIHints での YAML パース後に zod で validation する。
 //
 // 拡張余地: v0.2 で関係や validation rule 等を追加する場合は本 schema を
-// 拡張し、dev_spec §4.3 を同 PR で更新する (§0 規約)。
+// 拡張し、Kozou v0.1 spec §4.3 を同 PR で更新する (§0 規約)。
 
 import { z } from 'zod';
 

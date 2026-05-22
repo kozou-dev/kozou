@@ -1,12 +1,12 @@
 -- Nimart sample schema (v0.1).
--- 美術品 (絵画) 販売管理の最小サンプル。kozou の比較デモ (dev_spec §11.1
+-- 美術品 (絵画) 販売管理の最小サンプル。kozou の比較デモ (Kozou v0.1 spec §11.1
 -- 「販売可能在庫を作家別に集計する」) を成立させるための最小限の構造を持つ。
 --
 -- 階層: artists -< artworks -< editions -< inventory_items
 -- メタデータ: images (artwork / artist / inventory_item のいずれか 1 つに紐づく)
 -- マスタ: code_sets / code_values (nationality, medium, edition_type)
 --
--- COMMENT 記法は dev_spec §10.1 に準拠 (@ai / @widget / @policy / @example tag)。
+-- COMMENT 記法は Kozou v0.1 spec §10.1 に準拠 (@ai / @widget / @policy / @example tag)。
 -- 業務概念は §1.2 単独 source 原則に従い、CREATE VIEW + COMMENT ON VIEW で表現する。
 
 -- ========== code masters ==========
@@ -99,7 +99,7 @@ CREATE TABLE editions (
 
 
 -- ========== inventory_items ==========
--- dev_spec §10.2.3 の正本。
+-- Kozou v0.1 spec §10.2.3 の正本。
 
 CREATE TABLE inventory_items (
   id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),

@@ -14,7 +14,7 @@ function col(name: string, udtName: string, dataType = udtName): RawColumn {
   };
 }
 
-describe('inferWidget (dev_spec §6.4)', () => {
+describe('inferWidget (Kozou v0.1 spec §6.4)', () => {
   it('FK → relation-select (最優先)', () => {
     expect(
       inferWidget({

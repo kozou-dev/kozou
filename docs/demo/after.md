@@ -5,7 +5,7 @@
 
 実証手順は [README.md](README.md) を参照。
 
-## 期待される成功パターン (dev_spec §11.2)
+## 期待される成功パターン (Kozou v0.1 spec §11.2)
 
 - `vw_inventory_for_sale` を起点に SELECT
 - `GROUP BY artist_name` (VIEW に既存、再 JOIN 不要)

@@ -1,6 +1,6 @@
-// dev_spec §4.1 の RawIntrospection 型定義。@kozou/introspect の出力契約。
-// dev_spec §0 の規約により本 file をコード側の正本とする (本書と乖離した場合
-// は PR で dev_spec を同期更新する)。
+// Kozou v0.1 spec §4.1 の RawIntrospection 型定義。@kozou/introspect の出力契約。
+// Kozou v0.1 spec §0 の規約により本 file をコード側の正本とする (本書と乖離した場合
+// は PR で Kozou v0.1 spec を同期更新する)。
 
 /** introspect の output: PostgreSQL から取得した生の構造情報。 */
 export type RawIntrospection = {

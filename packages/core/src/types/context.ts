@@ -1,6 +1,6 @@
-// dev_spec §4.2 の SchemaContext 型定義。@kozou/core.buildSchemaContext の
+// Kozou v0.1 spec §4.2 の SchemaContext 型定義。@kozou/core.buildSchemaContext の
 // output 契約であり、@kozou/mcp と @kozou/svelte-ui の入力契約。
-// dev_spec §0 の規約によりコード側を正本とする。
+// Kozou v0.1 spec §0 の規約によりコード側を正本とする。
 
 import type { RawTable, RawView } from './raw.js';
 
@@ -30,7 +30,7 @@ export type TableContext = {
   /** COMMENT 内 @ai: 行を抽出したもの */
   aiDescription: string | null;
   primaryKey: string[];
-  /** UI Hints 由来、なければ heuristic (dev_spec §6.5) */
+  /** UI Hints 由来、なければ heuristic (Kozou v0.1 spec §6.5) */
   displayField: string | null;
   columns: ColumnContext[];
   relations: RelationContext[];
@@ -48,7 +48,7 @@ export type ColumnContext = {
   label: string;
   description: string | null;
   aiDescription: string | null;
-  /** UI Hints > @widget: tag > heuristic (dev_spec §6.4) */
+  /** UI Hints > @widget: tag > heuristic (Kozou v0.1 spec §6.4) */
   widget: WidgetType;
   /** CHECK 制約から抽出された列挙値、または ENUM */
   enumValues: string[] | null;
@@ -56,7 +56,7 @@ export type ColumnContext = {
   readonly: boolean;
 };
 
-/** dev_spec §6.4 widget 推論の domain。 */
+/** Kozou v0.1 spec §6.4 widget 推論の domain。 */
 export type WidgetType =
   | 'text'
   | 'textarea'
@@ -107,7 +107,7 @@ export type EnumContext = {
   description: string | null;
 };
 
-/** v0.1: ConceptContext は ViewContext の薄いラッパー。dev_spec §4.2 末尾。 */
+/** v0.1: ConceptContext は ViewContext の薄いラッパー。Kozou v0.1 spec §4.2 末尾。 */
 export type ConceptContext = {
   /** ViewContext.name と一致 */
   name: string;

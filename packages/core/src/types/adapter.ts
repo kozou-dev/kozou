@@ -1,8 +1,8 @@
-// dev_spec §4.4 の DataAdapter interface。
+// Kozou v0.1 spec §4.4 の DataAdapter interface。
 //
 // v0.1 では @kozou/core 配下に最初の concrete adapter を実装する想定。差し
 // 替え可能な境界を作っておくことで v0.2 の `@kozou/api` 導入を non-breaking
-// にする (dev_spec §4.4 末尾)。具体的な adapter 実装名は dev_spec §4.4 を参照。
+// にする (Kozou v0.1 spec §4.4 末尾)。具体的な adapter 実装名は Kozou v0.1 spec §4.4 を参照。
 
 export interface DataAdapter {
   /** 一覧取得 (ページネーション、検索、ソート) */

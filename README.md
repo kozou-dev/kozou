@@ -19,7 +19,7 @@ AI agent (Claude Code 経由) が業務概念を理解した SQL を生成でき
 - After (COMMENT あり): [docs/demo/after.md](docs/demo/after.md)
 
 シナリオ: 「販売可能在庫を作家別に集計する API エンドポイント」
-(dev_spec §11.1)。Setup script: `bash scripts/demo/run-comparison.sh setup`。
+(Kozou v0.1 spec §11.1)。Setup script: `bash scripts/demo/run-comparison.sh setup`。
 
 v0.1 では静的 transcript で実証。動画化は v0.1.1 以降。
 

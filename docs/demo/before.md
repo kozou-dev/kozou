@@ -5,7 +5,7 @@
 
 実証手順は [README.md](README.md) を参照。
 
-## 期待される失敗パターン (dev_spec §11.2)
+## 期待される失敗パターン (Kozou v0.1 spec §11.2)
 
 - `inventory_items.status = 'sale'` のような誤った値
 - `deleted_at IS NULL` の付け忘れ

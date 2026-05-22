@@ -14,7 +14,7 @@ function col(name: string): RawColumn {
   };
 }
 
-describe('inferDisplayField (dev_spec §6.5)', () => {
+describe('inferDisplayField (Kozou v0.1 spec §6.5)', () => {
   it('name 列あり → name', () => {
     expect(
       inferDisplayField({ columns: [col('id'), col('name')], primaryKey: ['id'] }),
