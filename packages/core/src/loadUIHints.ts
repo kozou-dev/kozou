@@ -1,4 +1,5 @@
 import { readFile } from 'node:fs/promises';
+import { basename } from 'node:path';
 import { parseDocument } from 'yaml';
 import { ZodError } from 'zod';
 import { uiHintsSchema, type UIHints } from './types/ui-hints.js';
@@ -18,8 +19,13 @@ export class KozouUIHintsError extends Error {
   }
 }
 
+// Codex N2 反映: default error message には basename のみを含める。
+// 絶対 path は KozouUIHintsError.filePath field で保持し、caller が必要に応じて
+// debug log に出すかを判断する (CLI / MCP の error 経路でユーザー env path が
+// 第三者に漏洩することを抑止)。
 export async function loadUIHints(filePath: string): Promise<UIHints> {
   const content = await readFile(filePath, 'utf8');
+  const fileLabel = basename(filePath);
 
   const doc = parseDocument(content, { prettyErrors: true });
   if (doc.errors.length > 0) {
@@ -29,7 +35,7 @@ export async function loadUIHints(filePath: string): Promise<UIHints> {
       line: e.linePos?.[0]?.line,
     }));
     throw new KozouUIHintsError(
-      `YAML 構文エラー (${filePath}): ${doc.errors.length} 件`,
+      `YAML 構文エラー (${fileLabel}): ${doc.errors.length} 件`,
       filePath,
       issues,
     );
@@ -49,7 +55,7 @@ export async function loadUIHints(filePath: string): Promise<UIHints> {
         message: issue.message,
       }));
       throw new KozouUIHintsError(
-        `UIHints 検証エラー (${filePath}): ${issues.length} 件`,
+        `UIHints 検証エラー (${fileLabel}): ${issues.length} 件`,
         filePath,
         issues,
       );

@@ -3,6 +3,10 @@
 `kozou` の核心: PostgreSQL スキーマに `COMMENT ON` と `CREATE VIEW` を書くだけで、
 AI agent が業務概念を理解した SQL を生成できる。
 
+> **Demo-only credentials**: 本書中の `postgres:demo@localhost:5500/postgres` 等は
+> **demo 専用 password で、production では絶対に使わないこと**。`scripts/demo/run-comparison.sh`
+> は `docker run --rm` で立ち上げ、即廃棄するため漏洩リスクは限定的。
+
 このディレクトリは v0.1 DoD「サンプル業務スキーマで COMMENT あり/なしの AI 出力差を
 示す」(Kozou v0.1 spec §1.2) を **静的 transcript** で実証する。動画化は v0.1.1 以降。
 

@@ -1,0 +1,38 @@
+# Dependabot 設定 (Codex W2 反映、Step 4-A3-c):
+# SHA pin した GitHub Actions を Dependabot で自動更新する。
+# major upgrade は PR としてレビュー、patch/minor は auto-merge を要 GitHub
+# 設定 (本 file では PR 生成までを保証、auto-merge は repo settings).
+
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: '09:00'
+      timezone: 'Asia/Tokyo'
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+      - github-actions
+    commit-message:
+      prefix: 'Update'
+      include: scope
+
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: '09:00'
+      timezone: 'Asia/Tokyo'
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+      - npm
+    commit-message:
+      prefix: 'Update'
+      include: scope
+    # workspace 全 package を target (root + packages/*)
+    versioning-strategy: increase

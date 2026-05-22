@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 # kozou v0.1 比較デモ setup (Kozou v0.1 spec §11)
 #
+# SECURITY NOTE (Codex N1): 以下の POSTGRES_PASSWORD=demo / postgres:demo@...
+# は **demo only, NOT for production use**。container は --rm で立ち上げ
+# 即廃棄、外部公開も localhost binding のみ。production 環境では強い
+# password / env / secret 管理を使うこと。
+#
 # 2 つの PostgreSQL container を立てて、それぞれに nimart 全 DDL (COMMENT 付き)
 # と nimart-no-comment.sql (COMMENT 削除版) を流す。各 DB に対応する @kozou/mcp
 # server を起動 (stdio mode、フォアグラウンドで)。

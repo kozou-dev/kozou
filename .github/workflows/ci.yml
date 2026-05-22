@@ -11,6 +11,12 @@ on:
     branches: [main]
   workflow_dispatch:
 
+# Supply chain hardening (Codex W2 反映、Step 4-A3-c):
+# 最小 permissions を top-level で明示。各 job が必要な scope は job 側で
+# additive に上書きする (本 workflow は read のみで十分)。
+permissions:
+  contents: read
+
 # 2026-06-02 から GitHub Actions が Node.js 24 をデフォルトに強制する暫定対応。
 # license-check.yml と同じ env を workflow level に置く。
 env:
@@ -39,13 +45,14 @@ jobs:
     env:
       KOZOU_TEST_DATABASE_URL: postgres://postgres:kozou@localhost:5432/kozou_test
     steps:
-      - uses: actions/checkout@v4
+      # Codex W2: third-party actions は SHA pin (Dependabot で自動更新)。
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - name: pnpm を install
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
 
       - name: Node を setup (with pnpm cache)
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version-file: '.nvmrc'
           cache: 'pnpm'
