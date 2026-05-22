@@ -51,15 +51,19 @@ jobs:
             detect --source . --config .gitleaks.toml --verbose --redact
 
   dependency-scan:
-    # OSV-Scanner v2.3.8 は root action.yml に runs: section がなく (brand info
-    # のみ)、reusable workflow form (.github/workflows/osv-scanner-reusable.yml)
-    # で呼び出す必要がある。Step 4-A4-d で確認、Step 4-A4-f で修正反映。
-    permissions:
-      contents: read
-      actions: read
-      security-events: write  # OSV-Scanner reusable workflow が SARIF upload
-    uses: google/osv-scanner-action/.github/workflows/osv-scanner-reusable.yml@9a498708959aeaef5ef730655706c5a1df1edbc2 # v2.3.8
-    with:
-      scan-args: |-
-        -r
-        ./
+    name: Dependency CVE (OSV-Scanner)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: OSV-Scanner
+        # google/osv-scanner-action の reusable workflow form は SARIF を
+        # code-scanning に upload するため GHAS (Advanced Security) 必須。
+        # public repo の GHAS は default disable のことが多いため、osv-scanner
+        # CLI を docker で直接実行する形に統一 (gitleaks と同 pattern)。
+        # 結果は CI log に出力、high CVE 検出時は exit code != 0 で fail。
+        # GHAS + reusable workflow + CodeQL の完全 setup は v0.1.1 で対応予定。
+        run: |
+          docker run --rm -v "$PWD:/repo" -w /repo \
+            ghcr.io/google/osv-scanner:latest \
+            -r ./
