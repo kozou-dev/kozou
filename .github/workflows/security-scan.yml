@@ -1,13 +1,16 @@
 name: Security scan
 
-# 機密漏洩 / dependency 脆弱性 / code analysis の自動スキャン。
-# Step 4-A4-b で追加 (Codex publish 前 security review の延長)。
+# 機密漏洩 / dependency 脆弱性の自動スキャン。Step 4-A4-b で追加、Step 4-A4-d/e/f
+# で action 形式の修正を反映。
 #
-# 3 job 構成:
-# - secret-scan (gitleaks, MIT): git history + working tree の hardcoded secret
-# - dependency-scan (OSV-Scanner, Apache 2.0): pnpm-lock.yaml の CVE
-# - code-analysis (CodeQL, MIT): JavaScript/TypeScript の vulnerability 静的検出
+# 2 job 構成:
+# - secret-scan (gitleaks, MIT): gitleaks CLI を docker で直接実行
+#   (gitleaks-action v2 は organization 向け commercial license のため不採用)
+# - dependency-scan (OSV-Scanner, Apache 2.0): google/osv-scanner-action の
+#   reusable workflow form (root action.yml は brand info のみで runs: なし)
 #
+# CodeQL は v0.1.1 で別途追加予定 (GHAS code-scanning enable 設定が必要、
+# Step 4-A4 の CI で SARIF upload に失敗したため一旦削除)。
 # trufflehog (AGPL-3) は Kozou v0.1 license compliance §4 の禁則語に該当、不採用。
 
 on:
@@ -20,12 +23,10 @@ on:
     - cron: '0 0 * * 0'
   workflow_dispatch:
 
-# Supply chain hardening (Step 4-A3-c と同 pattern): 最小 permissions top-level、
-# 必要な job だけ additive (security-events: write を code-analysis に追加)
+# Supply chain hardening (Step 4-A3-c と同 pattern): 最小 permissions top-level
 permissions:
   contents: read
 
-# 2026-06-02 から GitHub Actions が Node.js 24 をデフォルトに強制する暫定対応
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
 
@@ -42,52 +43,23 @@ jobs:
       - name: gitleaks scan
         # gitleaks-action v2 は organization 向けに commercial license 化された
         # (free repo でも GITLEAKS_LICENSE secret 必要)。代わりに gitleaks CLI
-        # (MIT) を docker で直接実行することで license fee 不要かつ kozou OSS
-        # と整合する形に統一。zricethezav/gitleaks image は gitleaks 公式。
+        # (MIT) を docker (zricethezav/gitleaks) で直接実行することで license
+        # fee 不要かつ kozou OSS と整合する形に統一。
         run: |
           docker run --rm -v "$PWD:/repo" -w /repo \
             zricethezav/gitleaks:latest \
             detect --source . --config .gitleaks.toml --verbose --redact
 
   dependency-scan:
-    name: Dependency CVE (OSV-Scanner)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-
-      - name: OSV-Scanner
-        # OSV-Scanner v2 で `--skip-git` flag は削除された (migration guide 参照)。
-        # v2 default では git history を scan しない (manifest のみ)、`-r ./` で
-        # working tree を recursive scan する標準動作で十分。
-        # action path は v2.3.8 で root action.yml に統一されており、過去版の
-        # `/.github/actions/osv-scanner-action` sub-path は存在しない。
-        uses: google/osv-scanner-action@9a498708959aeaef5ef730655706c5a1df1edbc2 # v2.3.8
-        with:
-          scan-args: |-
-            -r
-            ./
-
-  code-analysis:
-    name: Code analysis (CodeQL)
-    runs-on: ubuntu-latest
+    # OSV-Scanner v2.3.8 は root action.yml に runs: section がなく (brand info
+    # のみ)、reusable workflow form (.github/workflows/osv-scanner-reusable.yml)
+    # で呼び出す必要がある。Step 4-A4-d で確認、Step 4-A4-f で修正反映。
     permissions:
       contents: read
-      security-events: write  # SARIF を GitHub Security tab に upload
-      actions: read           # CodeQL の telemetry / workflow info に必要
-    strategy:
-      fail-fast: false
-      matrix:
-        language: ['javascript-typescript']
-    steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-
-      - name: Initialize CodeQL
-        uses: github/codeql-action/init@fee9466b8957867761f2d78f922ab084e3e2dd17 # v3
-        with:
-          languages: ${{ matrix.language }}
-          queries: security-extended
-
-      - name: Perform CodeQL analysis
-        uses: github/codeql-action/analyze@fee9466b8957867761f2d78f922ab084e3e2dd17 # v3
-        with:
-          category: '/language:${{ matrix.language }}'
+      actions: read
+      security-events: write  # OSV-Scanner reusable workflow が SARIF upload
+    uses: google/osv-scanner-action/.github/workflows/osv-scanner-reusable.yml@9a498708959aeaef5ef730655706c5a1df1edbc2 # v2.3.8
+    with:
+      scan-args: |-
+        -r
+        ./
