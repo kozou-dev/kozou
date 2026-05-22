@@ -2,9 +2,7 @@ name: License integrity check
 
 # License 整合 (LICENSE / package.json / pyproject.toml / README.md がすべて
 # Apache 2.0 を指していること) と、build artifact への AGPL/GPL/PostgREST
-# 関連語の混入禁止 (LICENSING_POLICY.md §4) を自動チェックする。
-#
-# Policy 詳細: planning repo (private) の LICENSING_POLICY.md を参照。
+# 関連語の混入禁止 (Kozou v0.1 license compliance §4) を自動チェックする。
 
 on:
   push:
@@ -118,7 +116,7 @@ jobs:
       - name: npm pack で packages/kozou の tarball を生成し code/binary 中身を grep
         # Step 2-4 で publish target を root から packages/kozou に retarget。
         # README/LICENSE/NOTICE/package.json は意図的に PostgREST や license 名を
-        # 含む可能性があるため exclude。LICENSING_POLICY §4 の本来の目的
+        # 含む可能性があるため exclude。Kozou v0.1 license compliance §4 の本来の目的
         # (PostgREST のソース/バイナリ/generated コードを配布物に混入させない)
         # を満たすには code/binary files の grep で十分。
         working-directory: packages/kozou

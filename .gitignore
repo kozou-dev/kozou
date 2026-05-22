@@ -47,6 +47,18 @@ Thumbs.db
 *.p12
 *.pfx
 *.cer
+*.crt
+# SSH 鍵 (id_rsa / id_ed25519 / id_ecdsa など全 SSH 秘密鍵)
+id_rsa
+id_rsa.pub
+id_ed25519
+id_ed25519.pub
+id_ecdsa
+id_ecdsa.pub
+# クラウドプロバイダ credential ディレクトリ
+.aws/
+.azure/
+.gcp/
 # credential 系
 credentials.json
 secrets/

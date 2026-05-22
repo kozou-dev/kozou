@@ -8,7 +8,7 @@ name: Security scan
 # - dependency-scan (OSV-Scanner, Apache 2.0): pnpm-lock.yaml の CVE
 # - code-analysis (CodeQL, MIT): JavaScript/TypeScript の vulnerability 静的検出
 #
-# trufflehog (AGPL-3) は LICENSING_POLICY §4 の禁則語に該当、不採用。
+# trufflehog (AGPL-3) は Kozou v0.1 license compliance §4 の禁則語に該当、不採用。
 
 on:
   push:
@@ -52,11 +52,13 @@ jobs:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - name: OSV-Scanner
+        # OSV-Scanner v2 で `--skip-git` flag は削除された (migration guide 参照)。
+        # v2 default では git history を scan しない (manifest のみ)、`-r ./` で
+        # working tree を recursive scan する標準動作で十分。
         uses: google/osv-scanner-action/.github/actions/osv-scanner-action@9a498708959aeaef5ef730655706c5a1df1edbc2 # v2.3.8
         with:
           scan-args: |-
             -r
-            --skip-git
             ./
 
   code-analysis:
