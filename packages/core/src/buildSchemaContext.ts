@@ -265,6 +265,7 @@ function buildViewContext(input: {
     purpose: firstParagraph(parsed.body),
     columns,
     underlyingTables: view.underlyingTables,
+    rawView: view,
   };
 }
 

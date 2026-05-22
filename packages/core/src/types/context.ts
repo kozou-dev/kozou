@@ -2,7 +2,7 @@
 // output 契約であり、@kozou/mcp と @kozou/svelte-ui の入力契約。
 // dev_spec §0 の規約によりコード側を正本とする。
 
-import type { RawTable } from './raw.js';
+import type { RawTable, RawView } from './raw.js';
 
 /** core.buildSchemaContext の output。MCP / UI の入力。 */
 export type SchemaContext = {
@@ -96,6 +96,8 @@ export type ViewContext = {
   purpose: string | null;
   columns: ColumnContext[];
   underlyingTables: { schema: string; name: string }[];
+  /** 後段で必要な原情報 (MCP describe_view.definition 等) */
+  rawView: RawView;
 };
 
 export type EnumContext = {
