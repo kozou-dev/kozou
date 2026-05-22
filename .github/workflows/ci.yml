@@ -20,6 +20,24 @@ jobs:
   typecheck-lint-test:
     name: Typecheck / Lint / Test
     runs-on: ubuntu-latest
+    # Step 3-4: @kozou/introspect の test を dual mode で実行するため、
+    # postgres:16 を service container として常時起動する。
+    # ローカルでは testcontainers が代替する (KOZOU_TEST_DATABASE_URL 未設定時)。
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: kozou
+          POSTGRES_DB: kozou_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      KOZOU_TEST_DATABASE_URL: postgres://postgres:kozou@localhost:5432/kozou_test
     steps:
       - uses: actions/checkout@v4
 

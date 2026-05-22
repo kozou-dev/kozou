@@ -2,15 +2,24 @@
   "name": "@kozou/introspect",
   "version": "0.0.0",
   "private": true,
-  "description": "PostgreSQL DDL / COMMENT / VIEW introspection (skeleton; v0.1 implementation pending).",
+  "description": "PostgreSQL DDL / COMMENT / VIEW introspection (dev_spec §5).",
   "license": "Apache-2.0",
   "type": "module",
   "main": "./src/index.ts",
+  "types": "./src/index.ts",
   "files": [
     "dist"
   ],
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "build": "tsc"
+    "build": "tsc",
+    "test": "vitest run --coverage"
+  },
+  "dependencies": {
+    "@kozou/core": "workspace:*",
+    "pg": "^8.13.0"
+  },
+  "devDependencies": {
+    "@types/pg": "^8.11.0"
   }
 }

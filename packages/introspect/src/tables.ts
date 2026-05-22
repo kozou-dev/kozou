@@ -1,0 +1,193 @@
+import type { Client } from 'pg';
+import type { RawCheck, RawColumn, RawForeignKey, RawIndex, RawTable } from '@kozou/core';
+import { runQuery } from './errors.js';
+
+type TableRow = {
+  schema: string;
+  name: string;
+  comment: string | null;
+};
+
+type ColumnRow = {
+  schema: string;
+  table: string;
+  name: string;
+  data_type: string;
+  udt_name: string;
+  is_nullable: boolean;
+  column_default: string | null;
+  comment: string | null;
+  position: number;
+};
+
+type PrimaryKeyRow = {
+  schema: string;
+  table: string;
+  column: string;
+  ordinal: number;
+};
+
+type IndexRow = {
+  schema: string;
+  table: string;
+  name: string;
+  columns: string[];
+  is_unique: boolean;
+};
+
+export async function fetchTables(client: Client, schemas: string[]): Promise<RawTable[]> {
+  if (schemas.length === 0) return [];
+
+  const tableRows = await runQuery<TableRow>(
+    client,
+    `SELECT
+       n.nspname AS schema,
+       c.relname AS name,
+       d.description AS comment
+     FROM pg_class c
+     JOIN pg_namespace n ON n.oid = c.relnamespace
+     LEFT JOIN pg_description d ON d.objoid = c.oid AND d.objsubid = 0
+     WHERE c.relkind = 'r'
+       AND n.nspname = ANY($1)
+     ORDER BY n.nspname, c.relname`,
+    [schemas],
+    'fetchTables (table list)',
+  );
+
+  if (tableRows.length === 0) {
+    return [];
+  }
+
+  const tableNames = tableRows.map((r) => r.name);
+
+  const columnRows = await runQuery<ColumnRow>(
+    client,
+    `SELECT
+       n.nspname AS schema,
+       c.relname AS table,
+       a.attname AS name,
+       format_type(a.atttypid, a.atttypmod) AS data_type,
+       t.typname AS udt_name,
+       NOT a.attnotnull AS is_nullable,
+       pg_get_expr(ad.adbin, ad.adrelid) AS column_default,
+       d.description AS comment,
+       a.attnum::int AS position
+     FROM pg_attribute a
+     JOIN pg_class c ON c.oid = a.attrelid
+     JOIN pg_namespace n ON n.oid = c.relnamespace
+     JOIN pg_type t ON t.oid = a.atttypid
+     LEFT JOIN pg_attrdef ad ON ad.adrelid = a.attrelid AND ad.adnum = a.attnum
+     LEFT JOIN pg_description d ON d.objoid = a.attrelid AND d.objsubid = a.attnum
+     WHERE c.relkind = 'r'
+       AND n.nspname = ANY($1)
+       AND a.attnum > 0
+       AND NOT a.attisdropped
+     ORDER BY n.nspname, c.relname, a.attnum`,
+    [schemas],
+    'fetchTables (columns)',
+  );
+
+  const pkRows = await runQuery<PrimaryKeyRow>(
+    client,
+    `SELECT
+       n.nspname AS schema,
+       c.relname AS table,
+       a.attname AS column,
+       ord.n::int AS ordinal
+     FROM pg_constraint con
+     JOIN pg_class c ON c.oid = con.conrelid
+     JOIN pg_namespace n ON n.oid = c.relnamespace
+     JOIN LATERAL unnest(con.conkey) WITH ORDINALITY AS ord(attnum, n) ON true
+     JOIN pg_attribute a ON a.attrelid = con.conrelid AND a.attnum = ord.attnum
+     WHERE con.contype = 'p'
+       AND n.nspname = ANY($1)
+     ORDER BY n.nspname, c.relname, ord.n`,
+    [schemas],
+    'fetchTables (primary keys)',
+  );
+
+  const indexRows = await runQuery<IndexRow>(
+    client,
+    `SELECT
+       n.nspname AS schema,
+       t.relname AS table,
+       ic.relname AS name,
+       (
+         SELECT array_agg(a.attname ORDER BY ord.n)::text[]
+         FROM unnest(ix.indkey) WITH ORDINALITY AS ord(attnum, n)
+         JOIN pg_attribute a ON a.attrelid = ix.indrelid AND a.attnum = ord.attnum
+       ) AS columns,
+       ix.indisunique AS is_unique
+     FROM pg_index ix
+     JOIN pg_class ic ON ic.oid = ix.indexrelid
+     JOIN pg_class t ON t.oid = ix.indrelid
+     JOIN pg_namespace n ON n.oid = t.relnamespace
+     WHERE t.relkind = 'r'
+       AND n.nspname = ANY($1)
+       AND NOT ix.indisprimary
+     ORDER BY n.nspname, t.relname, ic.relname`,
+    [schemas],
+    'fetchTables (indexes)',
+  );
+
+  const tableKey = (schema: string, name: string) => `${schema}.${name}`;
+  const columnsByTable = new Map<string, RawColumn[]>();
+  for (const row of columnRows) {
+    if (!tableNames.includes(row.table)) continue;
+    const key = tableKey(row.schema, row.table);
+    if (!columnsByTable.has(key)) columnsByTable.set(key, []);
+    columnsByTable.get(key)!.push({
+      name: row.name,
+      dataType: row.data_type,
+      udtName: row.udt_name,
+      nullable: row.is_nullable,
+      defaultExpr: row.column_default,
+      comment: row.comment,
+      position: row.position,
+    });
+  }
+
+  const pkByTable = new Map<string, string[]>();
+  for (const row of pkRows) {
+    const key = tableKey(row.schema, row.table);
+    if (!pkByTable.has(key)) pkByTable.set(key, []);
+    pkByTable.get(key)!.push(row.column);
+  }
+
+  const indexByTable = new Map<string, RawIndex[]>();
+  for (const row of indexRows) {
+    const key = tableKey(row.schema, row.table);
+    if (!indexByTable.has(key)) indexByTable.set(key, []);
+    indexByTable.get(key)!.push({
+      name: row.name,
+      columns: row.columns ?? [],
+      unique: row.is_unique,
+    });
+  }
+
+  return tableRows.map<RawTable>((row) => {
+    const key = tableKey(row.schema, row.name);
+    return {
+      schema: row.schema,
+      name: row.name,
+      comment: row.comment,
+      columns: columnsByTable.get(key) ?? [],
+      primaryKey: pkByTable.get(key) ?? [],
+      foreignKeys: [],
+      checks: [],
+      indexes: indexByTable.get(key) ?? [],
+    };
+  });
+}
+
+export function mergeTableMetadata(
+  tables: RawTable[],
+  fks: Map<string, RawForeignKey[]>,
+  checks: Map<string, RawCheck[]>,
+): void {
+  for (const table of tables) {
+    const key = `${table.schema}.${table.name}`;
+    table.foreignKeys = fks.get(key) ?? [];
+    table.checks = checks.get(key) ?? [];
+  }
+}
