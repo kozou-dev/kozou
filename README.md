@@ -23,6 +23,16 @@ AI agent (Claude Code 経由) が業務概念を理解した SQL を生成でき
 
 v0.1 では静的 transcript で実証。動画化は v0.1.1 以降。
 
+## Security
+
+Kozou は PostgreSQL の `COMMENT ON` / VIEW 定義 / 型情報を introspect し、
+`@kozou/mcp` 経由で AI agent に **そのまま** context として渡す。
+これにより重要な前提: **schema author (DB schema 編集権限保有者) は trusted** という
+trust boundary を採用する。
+
+Multi-tenant SaaS で tenant が DB COMMENT を編集できる設計は **v0.1 では非推奨**
+(prompt injection リスク)。詳細・mitigation 計画は [docs/security.md](docs/security.md) 参照。
+
 ## Requirements
 
 When Kozou v0.1 lands, the runtime requirements will be:

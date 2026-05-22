@@ -146,4 +146,21 @@ describe('MCP tools (nimart fixture, Kozou v0.1 spec §13.2)', () => {
       /Concept not found/,
     );
   });
+
+  // docs/security.md threat model 固定 test:
+  // DB COMMENT 由来 string は MCP output に verbatim で含まれる (trust boundary)。
+  // schema author を信頼境界の内側とする v0.1 前提を regression catch する。
+  it('threat model: nimart の @ai tag 内容が aiDescription / aiNotes に verbatim 含まれる', async () => {
+    const ctx = await cache.get();
+
+    // table: inventory_items の COMMENT 内 @ai 行が aiDescription に渡る
+    const inv = describeTable({ qualifiedName: `${db.schema}.inventory_items` }, ctx);
+    expect(inv.aiDescription).toMatch(
+      /vw_inventory_for_sale を優先利用すること/,
+    );
+
+    // concept: vw_inventory_for_sale の @ai 行が aiNotes 配列に verbatim
+    const concept = getConceptContext({ name: 'vw_inventory_for_sale' }, ctx);
+    expect(concept.aiNotes.some((n) => /VIEW を起点に使う/.test(n))).toBe(true);
+  });
 });
