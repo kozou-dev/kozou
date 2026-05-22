@@ -1,10 +1,6 @@
-// @kozou/core (v0.0.0 skeleton + dev_spec §4 types 確定)
-// dev_spec §0 の規約により本パッケージの型定義をコード側の正本とする。
-// v0.1 の buildSchemaContext / parseCommentTags / loadUIHints は Step 3-5 で
-// 追加実装する。
-export const PACKAGE_VERSION = '0.0.0';
+// @kozou/core: Schema Context, type definitions, UI Hints zod schema, DataAdapter interface.
+// dev_spec §0 規約により本パッケージの型定義をコード側の正本とする。
 
-// Type re-exports — dev_spec §4 の型を公開 API として提供する。
 export type {
   RawIntrospection,
   RawTable,
@@ -46,3 +42,15 @@ export type {
   SearchRelationParams,
   RelationOption,
 } from './types/adapter.js';
+
+export { parseCommentTags, type ParsedComment } from './parseCommentTags.js';
+export { inferWidget, type InferWidgetInput } from './widget.js';
+export { inferDisplayField, type InferDisplayFieldInput } from './displayField.js';
+export { extractCheckEnums } from './checkEnum.js';
+export {
+  buildSchemaContext,
+  KozouBuildError,
+  type BuildOptions,
+  type BuildIssue,
+} from './buildSchemaContext.js';
+export { loadUIHints, KozouUIHintsError } from './loadUIHints.js';

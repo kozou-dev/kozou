@@ -12,9 +12,16 @@
   ],
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "build": "tsc"
+    "build": "tsc",
+    "test": "vitest run --coverage"
   },
   "dependencies": {
+    "yaml": "^2.6.0",
     "zod": "^3.23.0"
+  },
+  "devDependencies": {
+    "@kozou/introspect": "workspace:*",
+    "@types/pg": "^8.11.0",
+    "pg": "^8.13.0"
   }
 }

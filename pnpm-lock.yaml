@@ -35,9 +35,22 @@ importers:
 
   packages/core:
     dependencies:
+      yaml:
+        specifier: ^2.6.0
+        version: 2.9.0
       zod:
         specifier: ^3.23.0
         version: 3.25.76
+    devDependencies:
+      '@kozou/introspect':
+        specifier: workspace:*
+        version: link:../introspect
+      '@types/pg':
+        specifier: ^8.11.0
+        version: 8.20.0
+      pg:
+        specifier: ^8.13.0
+        version: 8.21.0
 
   packages/introspect:
     dependencies:
