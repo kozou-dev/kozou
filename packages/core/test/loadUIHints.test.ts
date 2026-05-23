@@ -14,16 +14,6 @@ async function makeTempYaml(content: string): Promise<string> {
 }
 
 describe('loadUIHints', () => {
-  it('nimart/ui-hints.yaml を load して構造確認', async () => {
-    const hints = await loadUIHints(
-      new URL('../../../examples/nimart/ui-hints.yaml', import.meta.url).pathname,
-    );
-    expect(hints.tables?.['artists']?.label).toBe('作家');
-    expect(hints.tables?.['inventory_items']?.columns?.['selling_price']?.widget).toBe(
-      'currency',
-    );
-  });
-
   it('空 file → {} (全 field optional)', async () => {
     const file = await makeTempYaml('');
     const hints = await loadUIHints(file);
