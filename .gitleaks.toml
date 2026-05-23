@@ -1,25 +1,26 @@
 title = "kozou v0.1 gitleaks config"
 
-# GitHub default ruleset + custom allowlist (Step 4-A4-c で narrow 化)
+# Extends the GitHub default ruleset; the allowlist was narrowed in Step 4-A4-c.
 [extend]
 useDefault = true
 
-# Demo / test / example credentials が誤検知されないよう、specific な
-# literal pattern のみ allowlist。
+# Only specific demo / test literal patterns are allowlisted so any real
+# secret accidentally committed in the future still gets caught.
 #
-# 設計方針 (Codex W1 反映):
-# 過去版で paths を broad に exclude (docs/demo, scripts/demo, *.example 等)
-# する設計だったが、これらの path に将来実 secret が誤 commit された場合
-# catch できないリスクがあった。本版では regex で具体的な demo literal
-# のみ allowlist し、path-based exclude は廃止。
+# Design rationale (Codex W1):
+# Earlier revisions excluded broad paths (docs/demo, scripts/demo,
+# *.example, etc.). That setup hid real secrets that might end up under
+# those paths. The current allowlist matches narrow regexes over specific
+# demo literals only; path-based exclusions have been removed.
 [allowlist]
-description = "kozou demo / test 専用の literal を narrow regex で allowlist"
+description = "Narrow demo / test literals used by kozou"
 
 regexes = [
-  # demo container password literal: docker --rm で即廃棄、外部接続不可
+  # demo-container password literal: lives inside `docker run --rm`
+  # containers that never accept external traffic
   '''postgres:demo@localhost''',
-  # CI test / demo の固定 password 値 (POSTGRES_PASSWORD: demo / kozou)
+  # CI test / demo fixed password values (POSTGRES_PASSWORD: demo / kozou)
   '''POSTGRES_PASSWORD:?\s*(demo|kozou)\b''',
-  # test 用 env 変数名 (値ではない)
+  # Test env var name (not the value)
   '''KOZOU_TEST_DATABASE_URL''',
 ]

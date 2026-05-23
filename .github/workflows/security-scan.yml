@@ -1,17 +1,21 @@
 name: Security scan
 
-# 機密漏洩 / dependency 脆弱性の自動スキャン。Step 4-A4-b で追加、Step 4-A4-d/e/f
-# で action 形式の修正を反映。
+# Continuous secret-leak and dependency-vulnerability scanning. Added in
+# Step 4-A4-b; the action shapes were ironed out in Step 4-A4-d/e/f.
 #
-# 2 job 構成:
-# - secret-scan (gitleaks, MIT): gitleaks CLI を docker で直接実行
-#   (gitleaks-action v2 は organization 向け commercial license のため不採用)
-# - dependency-scan (OSV-Scanner, Apache 2.0): google/osv-scanner-action の
-#   reusable workflow form (root action.yml は brand info のみで runs: なし)
+# Two jobs:
+# - secret-scan (gitleaks, MIT): runs the gitleaks CLI directly in
+#   docker (gitleaks-action v2 became an organization-licensed
+#   commercial product)
+# - dependency-scan (OSV-Scanner, Apache 2.0): runs the OSV-Scanner CLI
+#   directly in docker (the google/osv-scanner-action root action.yml
+#   carries brand info only; the reusable-workflow form requires GHAS)
 #
-# CodeQL は v0.1.1 で別途追加予定 (GHAS code-scanning enable 設定が必要、
-# Step 4-A4 の CI で SARIF upload に失敗したため一旦削除)。
-# trufflehog (AGPL-3) は Kozou v0.1 license compliance §4 の禁則語に該当、不採用。
+# CodeQL is planned for v0.1.1 once GHAS code-scanning is enabled in
+# repo settings (SARIF upload was failing during Step 4-A4, so the job
+# is currently absent).
+# trufflehog (AGPL-3) is intentionally not adopted per Kozou v0.1
+# license compliance §4.
 
 on:
   push:
@@ -19,11 +23,12 @@ on:
   pull_request:
     branches: [main]
   schedule:
-    # 毎週日曜 00:00 UTC (日本時間 月曜 09:00) に full scan
+    # Weekly full scan, Sunday 00:00 UTC (Monday 09:00 JST)
     - cron: '0 0 * * 0'
   workflow_dispatch:
 
-# Supply chain hardening (Step 4-A3-c と同 pattern): 最小 permissions top-level
+# Supply chain hardening (Codex W2, Step 4-A3-c): declare the minimum
+# permissions at the top level.
 permissions:
   contents: read
 
@@ -37,14 +42,15 @@ jobs:
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
-          # gitleaks は git history も走査するため full clone が必要
+          # gitleaks scans git history too, so we need a full clone.
           fetch-depth: 0
 
       - name: gitleaks scan
-        # gitleaks-action v2 は organization 向けに commercial license 化された
-        # (free repo でも GITLEAKS_LICENSE secret 必要)。代わりに gitleaks CLI
-        # (MIT) を docker (zricethezav/gitleaks) で直接実行することで license
-        # fee 不要かつ kozou OSS と整合する形に統一。
+        # gitleaks-action v2 turned into an organization-licensed
+        # commercial product (free repos still need GITLEAKS_LICENSE).
+        # We instead run the gitleaks CLI (MIT) directly in docker
+        # (zricethezav/gitleaks) so we incur no license fees and stay
+        # aligned with the kozou OSS posture.
         run: |
           docker run --rm -v "$PWD:/repo" -w /repo \
             zricethezav/gitleaks:latest \
@@ -57,12 +63,13 @@ jobs:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - name: OSV-Scanner
-        # google/osv-scanner-action の reusable workflow form は SARIF を
-        # code-scanning に upload するため GHAS (Advanced Security) 必須。
-        # public repo の GHAS は default disable のことが多いため、osv-scanner
-        # CLI を docker で直接実行する形に統一 (gitleaks と同 pattern)。
-        # 結果は CI log に出力、high CVE 検出時は exit code != 0 で fail。
-        # GHAS + reusable workflow + CodeQL の完全 setup は v0.1.1 で対応予定。
+        # The reusable-workflow form of google/osv-scanner-action uploads
+        # SARIF to code-scanning, which requires GHAS (Advanced Security).
+        # Public repos often have GHAS disabled by default, so we run the
+        # osv-scanner CLI directly in docker (same pattern as gitleaks).
+        # Results land in the CI log; a high CVE finding fails the job
+        # via the non-zero exit code. The full GHAS + reusable-workflow
+        # + CodeQL setup is planned for v0.1.1.
         run: |
           docker run --rm -v "$PWD:/repo" -w /repo \
             ghcr.io/google/osv-scanner:latest \

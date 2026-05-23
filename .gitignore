@@ -39,27 +39,27 @@ Thumbs.db
 !.env.example
 
 # Security: local secrets / credentials (Step 4-A4)
-# .mcp.json は .mcp.json.example から `cp` で local 作成、git には含めない
+# .mcp.json is created locally from a template and never committed.
 .mcp.json
-# 証明書 / 秘密鍵
+# Certificates / private keys
 *.pem
 *.key
 *.p12
 *.pfx
 *.cer
 *.crt
-# SSH 鍵 (id_rsa / id_ed25519 / id_ecdsa など全 SSH 秘密鍵)
+# SSH keys (id_rsa / id_ed25519 / id_ecdsa, both public and private)
 id_rsa
 id_rsa.pub
 id_ed25519
 id_ed25519.pub
 id_ecdsa
 id_ecdsa.pub
-# クラウドプロバイダ credential ディレクトリ
+# Cloud-provider credential directories
 .aws/
 .azure/
 .gcp/
-# credential 系
+# Credential files
 credentials.json
 secrets/
 *.secret
@@ -70,7 +70,7 @@ secrets/
 AGENTS.local.md
 .claude/
 
-# AI instruction files
+# AI instruction files (symlinked to a private repository; kept out of this repo)
 AGENTS.md
 CLAUDE.md
 GEMINI.md

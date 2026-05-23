@@ -1,8 +1,9 @@
 name: CI
 
-# pnpm workspace の typecheck / lint / test を毎 push と PR で実行する。
-# Step 3 で実装が入るまでは typecheck + lint のみ。test は --if-present で
-# skeleton 段階の package を skip する。
+# Runs typecheck / lint / test on the pnpm workspace for every push and
+# every PR. Step 3 is when real implementation lands; before that, only
+# typecheck + lint run. Tests use --if-present so skeleton packages skip
+# gracefully.
 
 on:
   push:
@@ -11,14 +12,14 @@ on:
     branches: [main]
   workflow_dispatch:
 
-# Supply chain hardening (Codex W2 反映、Step 4-A3-c):
-# 最小 permissions を top-level で明示。各 job が必要な scope は job 側で
-# additive に上書きする (本 workflow は read のみで十分)。
+# Supply chain hardening (Codex W2, Step 4-A3-c): declare the minimum
+# permissions at the top level. Each job adds the additional scopes it
+# needs (this workflow only needs read access).
 permissions:
   contents: read
 
-# 2026-06-02 から GitHub Actions が Node.js 24 をデフォルトに強制する暫定対応。
-# license-check.yml と同じ env を workflow level に置く。
+# Stop-gap for the GitHub Actions Node.js 24 default rollout (2026-06-02).
+# license-check.yml uses the same env at the workflow level.
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
 
@@ -26,9 +27,9 @@ jobs:
   typecheck-lint-test:
     name: Typecheck / Lint / Test
     runs-on: ubuntu-latest
-    # Step 3-4: @kozou/introspect の test を dual mode で実行するため、
-    # postgres:16 を service container として常時起動する。
-    # ローカルでは testcontainers が代替する (KOZOU_TEST_DATABASE_URL 未設定時)。
+    # Step 3-4: @kozou/introspect tests run in dual mode, so we keep a
+    # postgres:16 service container around. Locally, testcontainers takes
+    # over when KOZOU_TEST_DATABASE_URL is not set.
     services:
       postgres:
         image: postgres:16
@@ -45,26 +46,26 @@ jobs:
     env:
       KOZOU_TEST_DATABASE_URL: postgres://postgres:kozou@localhost:5432/kozou_test
     steps:
-      # Codex W2: third-party actions は SHA pin (Dependabot で自動更新)。
+      # Codex W2: SHA-pin third-party actions (kept fresh by Dependabot).
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
-      - name: pnpm を install
+      - name: Install pnpm
         uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
 
-      - name: Node を setup (with pnpm cache)
+      - name: Setup Node (with pnpm cache)
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version-file: '.nvmrc'
           cache: 'pnpm'
 
-      - name: dependencies を install
+      - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: typecheck (pnpm -r)
+      - name: Typecheck (pnpm -r)
         run: pnpm -r typecheck
 
-      - name: lint (root eslint .)
+      - name: Lint (root eslint .)
         run: pnpm run lint
 
-      - name: test (--if-present, skeleton 段階では skip)
+      - name: Test (--if-present; skipped for skeleton packages)
         run: pnpm -r --if-present test

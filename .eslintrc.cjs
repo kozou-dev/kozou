@@ -20,9 +20,11 @@ module.exports = {
     '.pnpm-store/',
   ],
   overrides: [
-    // Kozou v0.1 spec §18.1.1 + Kozou v0.1 license compliance §3: PostgREST URL hardcode 防止
-    // svelte-ui の adapter / server 以外から PostgREST に直接アクセスすることを禁止。
-    // v1.0 で `@kozou/api` に切替するときの breaking change を防ぐ regression guard。
+    // Kozou v0.1 spec §18.1.1 + Kozou v0.1 license compliance §3:
+    // forbid direct PostgREST URL hardcoding. Everything outside
+    // svelte-ui's adapter / server is barred from talking to PostgREST
+    // directly so that swapping in `@kozou/api` for v1.0 is not a
+    // breaking change. This rule is a regression guard.
     {
       files: ['packages/svelte-ui/src/**/*.{ts,svelte}'],
       excludedFiles: [
@@ -35,17 +37,17 @@ module.exports = {
           {
             selector: "Literal[value=/postgrest/i]",
             message:
-              'PostgREST への直接参照は禁止。DataAdapter 経由で呼び出すこと (Kozou v0.1 spec §18.1, Kozou v0.1 license compliance §3)。',
+              'Direct references to PostgREST are forbidden; route the call through DataAdapter (Kozou v0.1 spec §18.1, Kozou v0.1 license compliance §3).',
           },
           {
             selector: "Literal[value=/^https?:\\/\\/postgrest/i]",
             message:
-              'PostgREST URL の直接 hardcode は禁止。KOZOU_ADAPTER_URL 等の env + DataAdapter 経由にする。',
+              'Hardcoding a PostgREST URL is forbidden; use env vars like KOZOU_ADAPTER_URL via DataAdapter.',
           },
           {
             selector: "Identifier[name=/^PGRST_/]",
             message:
-              'PostgREST 環境変数 (PGRST_*) を svelte-ui コードから直接参照することは禁止。DataAdapter / server hooks 経由にする。',
+              'svelte-ui code must not reference PostgREST env vars (PGRST_*) directly; use DataAdapter / server hooks.',
           },
         ],
       },

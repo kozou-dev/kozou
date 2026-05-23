@@ -1,8 +1,9 @@
 name: License integrity check
 
-# License 整合 (LICENSE / package.json / pyproject.toml / README.md がすべて
-# Apache 2.0 を指していること) と、build artifact への AGPL/GPL/PostgREST
-# 関連語の混入禁止 (Kozou v0.1 license compliance §4) を自動チェックする。
+# Verify the license metadata is consistent (LICENSE / package.json /
+# pyproject.toml / README.md all point at Apache 2.0) and that no build
+# artifact contains forbidden AGPL/GPL/PostgREST vocabulary (per Kozou
+# v0.1 license compliance §4).
 
 on:
   push:
@@ -11,95 +12,98 @@ on:
     branches: [main]
   workflow_dispatch:
 
-# Supply chain hardening (Codex W2 反映、Step 4-A3-c):
-# 最小 permissions を top-level で明示。
+# Supply chain hardening (Codex W2, Step 4-A3-c):
+# declare the minimum permissions at the top level.
 permissions:
   contents: read
 
-# 2026-06-02 から GitHub Actions が Node.js 24 をデフォルトに強制し、
-# Node.js 20 actions (actions/checkout@v4 等) は deprecated になる。
+# GitHub Actions makes Node.js 24 the default starting 2026-06-02 and
+# Node 20 actions (actions/checkout@v4 etc.) become deprecated:
 # https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/
-# それまでの暫定対応として、明示的に Node 24 で実行させる。
-# action 側が Node 24 対応版をリリースしたタイミングで本 env を削除する。
+# As a stop-gap we force Node 24 on the action runners.
+# Remove this env once each action ships a Node 24 release.
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
 
 jobs:
   metadata-integrity:
-    name: License metadata 整合チェック
+    name: License metadata integrity check
     runs-on: ubuntu-latest
     steps:
-      # Codex W2: third-party actions は SHA pin (Dependabot で自動更新)。
+      # Codex W2: SHA-pin third-party actions (kept fresh by Dependabot).
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
-      - name: LICENSE が Apache License 2.0 か
+      - name: LICENSE is Apache License 2.0
         run: |
           head -5 LICENSE | grep -q -i "Apache License" \
-            || { echo "ERROR: LICENSE は Apache License 2.0 ではありません"; exit 1; }
-          echo "✓ LICENSE は Apache License 2.0"
+            || { echo "ERROR: LICENSE is not Apache License 2.0"; exit 1; }
+          echo "OK: LICENSE is Apache License 2.0"
 
-      - name: root package.json の license フィールドが Apache-2.0 か
+      - name: root package.json license = Apache-2.0
         run: |
           grep -E '"license"[[:space:]]*:[[:space:]]*"Apache-2.0"' package.json \
-            || { echo "ERROR: root package.json の license が Apache-2.0 ではありません"; exit 1; }
-          echo "✓ root package.json license = Apache-2.0"
+            || { echo "ERROR: root package.json license is not Apache-2.0"; exit 1; }
+          echo "OK: root package.json license = Apache-2.0"
 
-      - name: packages/*/package.json の license フィールドが Apache-2.0 か
+      - name: packages/*/package.json license = Apache-2.0
         run: |
           shopt -s nullglob
           pkgs=(packages/*/package.json)
           if [ ${#pkgs[@]} -eq 0 ]; then
-            echo "✓ packages/* が空 (skeleton 段階)"
+            echo "OK: packages/* is empty (skeleton stage)"
           else
             for pkg in "${pkgs[@]}"; do
               if ! grep -q -E '"license"[[:space:]]*:[[:space:]]*"Apache-2.0"' "$pkg"; then
-                echo "ERROR: $pkg の license が Apache-2.0 ではありません"
+                echo "ERROR: $pkg license is not Apache-2.0"
                 exit 1
               fi
-              echo "✓ $pkg license = Apache-2.0"
+              echo "OK: $pkg license = Apache-2.0"
             done
           fi
 
-      - name: pyproject.toml の license / classifier が Apache か
+      - name: pyproject.toml license / classifier is Apache
         run: |
           grep -E 'license[[:space:]]*=[[:space:]]*\{[[:space:]]*text[[:space:]]*=[[:space:]]*"Apache-2.0"' pyproject.toml \
-            || { echo "ERROR: pyproject.toml の license が Apache-2.0 ではありません"; exit 1; }
+            || { echo "ERROR: pyproject.toml license is not Apache-2.0"; exit 1; }
           grep -E '"License :: OSI Approved :: Apache Software License"' pyproject.toml \
-            || { echo "ERROR: pyproject.toml の classifier が Apache Software License ではありません"; exit 1; }
-          echo "✓ pyproject.toml license + classifier = Apache"
+            || { echo "ERROR: pyproject.toml classifier is not Apache Software License"; exit 1; }
+          echo "OK: pyproject.toml license + classifier = Apache"
 
-      - name: README.md の License 節が Apache 2.0 か
+      - name: README.md License section says Apache 2.0
         run: |
           grep -E '^Apache 2\.0' README.md \
-            || { echo "ERROR: README.md の License 節が 'Apache 2.0' ではありません"; exit 1; }
-          echo "✓ README.md License = Apache 2.0"
+            || { echo "ERROR: README.md License section is not 'Apache 2.0'"; exit 1; }
+          echo "OK: README.md License = Apache 2.0"
 
-      - name: コードファイルに AGPL/GPL/PostgREST 関連語が混入していないか
-        # NOTE: 検査対象は TypeScript / JavaScript / Svelte / SQL のコードのみ。
-        # exclude されるもの:
-        # - markdown 文書 (policy / README / CONTRIBUTING / Kozou v0.1 spec を意図的に言及)
-        # - YAML / YML (config / spec、kozou.config.yaml で `type: postgrest` を
-        #   adapter type として指定するのは Kozou v0.1 spec §9.2 の正当な記述)
-        # - TOML (pyproject.toml は別 step で license check 済み)
-        # - GitHub Actions workflow ファイル (この workflow を含む)
-        # - .eslintrc.cjs (PostgREST 言及は Kozou v0.1 spec §18.1.1 由来の防御 rule)
-        # 混入リスクは配布 artifact (npm pack / python -m build) を grep する
-        # artifact-grep job 側で別途検証する。
+      - name: No AGPL/GPL/PostgREST vocabulary in code files
+        # NOTE: this check scans only TypeScript / JavaScript / Svelte /
+        # SQL code. Excluded by design:
+        # - markdown docs (policy / README / CONTRIBUTING / Kozou v0.1
+        #   spec intentionally mention these names)
+        # - YAML / YML (configs / spec - using `type: postgrest` as the
+        #   adapter type is the documented option per Kozou v0.1 spec §9.2)
+        # - TOML (pyproject.toml is verified separately above)
+        # - GitHub Actions workflow files (including this one)
+        # - .eslintrc.cjs (mentions PostgREST only inside the defensive
+        #   rule defined per Kozou v0.1 spec §18.1.1)
+        # The actual contamination risk lives in shippable artifacts
+        # (npm pack / python -m build); the artifact-grep job below
+        # covers those separately.
         run: |
           if git grep -i -n -E 'postgrest|pgrst|agpl|gnu affero|gpl-3|gnu general public' \
              -- '*.ts' '*.tsx' '*.js' '*.cjs' '*.mjs' '*.svelte' '*.sql' \
              ':(exclude).github/workflows/*.yml' \
              ':(exclude).eslintrc.cjs'; then
-            echo "ERROR: code files に AGPL/GPL/PostgREST 関連語が含まれています"
+            echo "ERROR: code files contain AGPL/GPL/PostgREST vocabulary"
             exit 1
           fi
-          echo "✓ code files (*.ts/*.tsx/*.js/*.cjs/*.mjs/*.svelte/*.sql) に AGPL/GPL/PostgREST 関連語なし"
+          echo "OK: code files (*.ts/*.tsx/*.js/*.cjs/*.mjs/*.svelte/*.sql) are clean"
 
   artifact-grep:
-    name: Build artifact 混入チェック
+    name: Build artifact integrity check
     runs-on: ubuntu-latest
     steps:
-      # Codex W2: third-party actions は SHA pin (Dependabot で自動更新)。
+      # Codex W2: SHA-pin third-party actions (kept fresh by Dependabot).
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
@@ -110,15 +114,17 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Python build tool を install
+      - name: Install the Python build tool
         run: pip install build
 
-      - name: npm pack で packages/kozou の tarball を生成し code/binary 中身を grep
-        # Step 2-4 で publish target を root から packages/kozou に retarget。
-        # README/LICENSE/NOTICE/package.json は意図的に PostgREST や license 名を
-        # 含む可能性があるため exclude。Kozou v0.1 license compliance §4 の本来の目的
-        # (PostgREST のソース/バイナリ/generated コードを配布物に混入させない)
-        # を満たすには code/binary files の grep で十分。
+      - name: npm pack packages/kozou and grep code/binary contents
+        # Step 2-4 moved the publish target from the root to
+        # packages/kozou. README/LICENSE/NOTICE/package.json metadata
+        # are intentionally allowed to mention PostgREST and license
+        # names, so we exclude them. The actual goal of Kozou v0.1
+        # license compliance §4 (keep PostgREST source / binary /
+        # generated code out of the published artifacts) is satisfied
+        # by grepping the code/binary files only.
         working-directory: packages/kozou
         run: |
           npm pack
@@ -132,19 +138,19 @@ jobs:
               ! -name 'package.json' ! -name 'pyproject.toml' \
               -print)
           if [ -z "$FILES" ]; then
-            echo "✓ npm tarball clean (検査対象 code/binary ファイルなし、metadata のみ)"
+            echo "OK: npm tarball clean (no code/binary files to scan, metadata only)"
           else
             echo "Checking files:"; echo "$FILES"
             if echo "$FILES" | xargs grep -i -H -E 'postgrest|pgrst|agpl|gnu affero|gpl-3|gnu general public'; then
-              echo "ERROR: npm tarball の code/binary files に禁則語が混入"
+              echo "ERROR: npm tarball code/binary files contain forbidden vocabulary"
               rm -rf _npm_inspect
               exit 1
             fi
-            echo "✓ npm tarball clean (code/binary files に PostgREST/AGPL/GPL なし)"
+            echo "OK: npm tarball clean (code/binary files contain no PostgREST/AGPL/GPL terms)"
           fi
           rm -rf _npm_inspect
 
-      - name: python -m build で sdist + wheel を生成し code/binary 中身を grep
+      - name: python -m build then grep code/binary contents of sdist + wheel
         run: |
           python -m build
 
@@ -159,20 +165,20 @@ jobs:
               ! -name 'PKG-INFO' ! -name 'package.json' ! -name 'pyproject.toml' \
               -print)
           if [ -z "$FILES" ]; then
-            echo "✓ PyPI sdist clean (検査対象 code/binary ファイルなし、metadata のみ)"
+            echo "OK: PyPI sdist clean (no code/binary files to scan, metadata only)"
           else
             echo "Checking files:"; echo "$FILES"
             if echo "$FILES" | xargs grep -i -H -E 'postgrest|pgrst|agpl|gnu affero|gpl-3|gnu general public'; then
-              echo "ERROR: PyPI sdist の code/binary files に禁則語が混入"
+              echo "ERROR: PyPI sdist code/binary files contain forbidden vocabulary"
               rm -rf _sdist_inspect
               exit 1
             fi
-            echo "✓ PyPI sdist clean (code/binary files に PostgREST/AGPL/GPL なし)"
+            echo "OK: PyPI sdist clean (code/binary files contain no PostgREST/AGPL/GPL terms)"
           fi
           rm -rf _sdist_inspect
 
-          # wheel (.whl) — ZipFile は glob を解釈しないので glob.glob で展開
-          # documentation/metadata は同様に exclude
+          # wheel (.whl) - ZipFile does not glob, so use glob.glob to
+          # enumerate. Documentation/metadata are excluded the same way.
           python <<'PY'
           import zipfile, re, glob, sys
           whl = glob.glob('dist/kozou-*.whl')[0]
@@ -190,7 +196,7 @@ jobs:
                   continue
               if base in exclude_basenames or base.startswith('LICENSE.') or base.startswith('NOTICE.'):
                   continue
-              # dist-info 内の licenses/* も exclude
+              # Exclude dist-info/licenses/* as well
               if 'dist-info/licenses/' in n:
                   continue
               data = z.read(n)
@@ -199,7 +205,7 @@ jobs:
           if hits:
               for n, snippet in hits:
                   print(f"HIT: {n}: {snippet!r}")
-              print("ERROR: PyPI wheel の code/binary files に禁則語が混入")
+              print("ERROR: PyPI wheel code/binary files contain forbidden vocabulary")
               sys.exit(1)
-          print("✓ PyPI wheel clean")
+          print("OK: PyPI wheel clean")
           PY

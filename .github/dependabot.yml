@@ -1,7 +1,8 @@
-# Dependabot 設定 (Codex W2 反映、Step 4-A3-c):
-# SHA pin した GitHub Actions を Dependabot で自動更新する。
-# major upgrade は PR としてレビュー、patch/minor は auto-merge を要 GitHub
-# 設定 (本 file では PR 生成までを保証、auto-merge は repo settings).
+# Dependabot config (Codex W2, Step 4-A3-c):
+# Keep SHA-pinned GitHub Actions and npm dependencies up to date.
+# Major upgrades land as PRs that need a manual review. Patch/minor can
+# auto-merge if the repository's auto-merge setting is enabled (this file
+# only guarantees the PRs; turning on auto-merge happens in repo settings).
 
 version: 2
 updates:
@@ -34,5 +35,5 @@ updates:
     commit-message:
       prefix: 'Update'
       include: scope
-    # workspace 全 package を target (root + packages/*)
+    # Cover every package in the workspace (root + packages/*).
     versioning-strategy: increase

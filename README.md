@@ -37,9 +37,9 @@ Contributors additionally need **pnpm 9 or later**. See [CONTRIBUTING.md](CONTRI
 
 **Kozou** carries three meanings in three syllables:
 
-- **子象** (*kozō*) — the young elephant; the calf walking beside PostgreSQL's mascot Slonik
-- **構造** (*kōzō*) — structure; the structural transformation a compiler performs
-- **小僧** (*kozō*) — the apprentice; the quiet figure who serves something larger than itself
+- *kozō* (calf) — the young elephant walking beside PostgreSQL's mascot Slonik
+- *kōzō* (structure) — the structural transformation a compiler performs
+- *kozō* (apprentice) — the quiet figure who serves something larger than itself
 
 ## License
 
