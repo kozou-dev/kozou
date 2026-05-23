@@ -1,8 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import pkg from 'pg';
-import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
-import { resolve, dirname } from 'node:path';
 import { setupDatabase, type DatabaseHandle } from './setup.js';
 import {
   SchemaCache,
@@ -14,13 +11,62 @@ import {
   getConceptContext,
 } from '../src/index.js';
 
-const here = dirname(fileURLToPath(import.meta.url));
-const nimartSql = readFileSync(
-  resolve(here, '../../../examples/nimart/migrations/0001_init.sql'),
-  'utf8',
+// Inline generic fixture. Kept self-contained so this integration test does
+// not depend on any external sample SQL (Caronima's Nimart fixture lives in
+// kozou-planning/private/ and is intentionally not part of the public repo).
+const FIXTURE_SQL = `
+CREATE TABLE authors (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  display_name text NOT NULL,
+  deleted_at timestamptz
 );
+COMMENT ON TABLE authors IS 'Authors of books.';
+COMMENT ON COLUMN authors.display_name IS 'Display name of the author.';
 
-describe('MCP tools (nimart fixture, Kozou v0.1 spec §13.2)', () => {
+CREATE TABLE books (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  author_id uuid NOT NULL REFERENCES authors(id),
+  title text NOT NULL,
+  deleted_at timestamptz
+);
+COMMENT ON TABLE books IS 'Books authored by an author.';
+COMMENT ON COLUMN books.author_id IS 'Reference to the author.';
+
+CREATE TABLE editions (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  book_id uuid NOT NULL REFERENCES books(id),
+  isbn text UNIQUE,
+  deleted_at timestamptz
+);
+COMMENT ON TABLE editions IS 'Editions of a book.';
+
+CREATE TABLE inventory_items (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  edition_id uuid NOT NULL REFERENCES editions(id),
+  status text NOT NULL CHECK (status IN ('for_sale', 'reserved', 'sold')),
+  selling_price numeric(12, 2),
+  visibility text NOT NULL DEFAULT 'public' CHECK (visibility IN ('public', 'private')),
+  deleted_at timestamptz
+);
+COMMENT ON TABLE inventory_items IS 'Inventory items available for sale.
+@ai: prefer vw_inventory_for_sale when querying active stock.';
+COMMENT ON COLUMN inventory_items.status IS 'Current state of the item.
+@widget: enum-select';
+COMMENT ON COLUMN inventory_items.selling_price IS 'Actual selling price.
+@widget: currency';
+
+CREATE VIEW vw_inventory_for_sale AS
+  SELECT i.id, i.edition_id, i.selling_price, e.book_id, b.title AS book_title, b.author_id, a.display_name AS author_name
+  FROM inventory_items i
+  JOIN editions e ON e.id = i.edition_id AND e.deleted_at IS NULL
+  JOIN books b ON b.id = e.book_id AND b.deleted_at IS NULL
+  JOIN authors a ON a.id = b.author_id AND a.deleted_at IS NULL
+  WHERE i.status = 'for_sale' AND i.deleted_at IS NULL AND i.visibility = 'public';
+COMMENT ON VIEW vw_inventory_for_sale IS 'Inventory items currently available for sale.
+@ai: start from this VIEW for stock-related queries; no need to re-JOIN.';
+`;
+
+describe('MCP tools (generic English fixture, Kozou v0.1 spec §13.2)', () => {
   let db: DatabaseHandle;
   let cache: SchemaCache;
 
@@ -31,7 +77,7 @@ describe('MCP tools (nimart fixture, Kozou v0.1 spec §13.2)', () => {
     try {
       await client.query(`CREATE SCHEMA "${db.schema}"`);
       await client.query(`SET search_path TO "${db.schema}"`);
-      await client.query(nimartSql);
+      await client.query(FIXTURE_SQL);
     } finally {
       await client.end();
     }
@@ -46,16 +92,13 @@ describe('MCP tools (nimart fixture, Kozou v0.1 spec §13.2)', () => {
     if (db) await db.cleanup();
   });
 
-  it('list_tables: nimart の 7 tables、rowCountEstimate は null', async () => {
+  it('list_tables: returns 4 tables, rowCountEstimate is null', async () => {
     const ctx = await cache.get();
     const r = listTables({ schema: db.schema }, ctx);
     expect(r.tables.map((t) => t.qualifiedName).sort()).toEqual([
-      `${db.schema}.artists`,
-      `${db.schema}.artworks`,
-      `${db.schema}.code_sets`,
-      `${db.schema}.code_values`,
+      `${db.schema}.authors`,
+      `${db.schema}.books`,
       `${db.schema}.editions`,
-      `${db.schema}.images`,
       `${db.schema}.inventory_items`,
     ]);
     for (const t of r.tables) {
@@ -63,13 +106,13 @@ describe('MCP tools (nimart fixture, Kozou v0.1 spec §13.2)', () => {
     }
   });
 
-  it('list_tables: schema が違うと空', async () => {
+  it('list_tables: empty when targeting a different schema', async () => {
     const ctx = await cache.get();
     const r = listTables({ schema: 'public' }, ctx);
     expect(r.tables).toEqual([]);
   });
 
-  it('describe_table: inventory_items の columns + checkConstraints + references', async () => {
+  it('describe_table: inventory_items columns + checkConstraints + references', async () => {
     const ctx = await cache.get();
     const r = describeTable({ qualifiedName: `${db.schema}.inventory_items` }, ctx);
     expect(r.primaryKey).toEqual(['id']);
@@ -86,29 +129,27 @@ describe('MCP tools (nimart fixture, Kozou v0.1 spec §13.2)', () => {
     expect(r.checkConstraints.some((c) => /for_sale/.test(c.expression))).toBe(true);
   });
 
-  it('describe_table: 存在しない table で throw', async () => {
+  it('describe_table: throws for unknown table', async () => {
     const ctx = await cache.get();
     expect(() =>
       describeTable({ qualifiedName: `${db.schema}.nonexistent` }, ctx),
     ).toThrow(/Table not found/);
   });
 
-  it('list_views: 3 views', async () => {
+  it('list_views: returns 1 view', async () => {
     const ctx = await cache.get();
     const r = listViews({ schema: db.schema }, ctx);
     expect(r.views.map((v) => v.qualifiedName).sort()).toEqual([
-      `${db.schema}.vw_artist_inventory_summary`,
-      `${db.schema}.vw_artworks_missing_images`,
       `${db.schema}.vw_inventory_for_sale`,
     ]);
   });
 
-  it('describe_view: vw_inventory_for_sale の underlyingTables + definition', async () => {
+  it('describe_view: vw_inventory_for_sale underlyingTables + definition', async () => {
     const ctx = await cache.get();
     const r = describeView({ qualifiedName: `${db.schema}.vw_inventory_for_sale` }, ctx);
     expect(r.underlyingTables.sort()).toEqual([
-      `${db.schema}.artists`,
-      `${db.schema}.artworks`,
+      `${db.schema}.authors`,
+      `${db.schema}.books`,
       `${db.schema}.editions`,
       `${db.schema}.inventory_items`,
     ]);
@@ -116,21 +157,21 @@ describe('MCP tools (nimart fixture, Kozou v0.1 spec §13.2)', () => {
     expect(r.definition).toMatch(/inventory_items/);
   });
 
-  it('describe_view: 存在しない view で throw', async () => {
+  it('describe_view: throws for unknown view', async () => {
     const ctx = await cache.get();
     expect(() =>
       describeView({ qualifiedName: `${db.schema}.nonexistent` }, ctx),
     ).toThrow(/View not found/);
   });
 
-  it('list_concepts: 3 concepts、kind は VIEW', async () => {
+  it('list_concepts: returns 1 concept with kind = VIEW', async () => {
     const ctx = await cache.get();
     const r = listConcepts({}, ctx);
-    expect(r.concepts).toHaveLength(3);
+    expect(r.concepts).toHaveLength(1);
     expect(r.concepts.every((c) => c.kind === 'VIEW')).toBe(true);
   });
 
-  it('get_concept_context: vw_inventory_for_sale の aiNotes / preferredQuerySource / relatedTables', async () => {
+  it('get_concept_context: vw_inventory_for_sale aiNotes / preferredQuerySource / relatedTables', async () => {
     const ctx = await cache.get();
     const r = getConceptContext({ name: 'vw_inventory_for_sale' }, ctx);
     expect(r.name).toBe('vw_inventory_for_sale');
@@ -140,27 +181,24 @@ describe('MCP tools (nimart fixture, Kozou v0.1 spec §13.2)', () => {
     expect(r.exampleQueries).toEqual([]);
   });
 
-  it('get_concept_context: 存在しない concept で throw', async () => {
+  it('get_concept_context: throws for unknown concept', async () => {
     const ctx = await cache.get();
     expect(() => getConceptContext({ name: 'nonexistent' }, ctx)).toThrow(
       /Concept not found/,
     );
   });
 
-  // docs/security.md threat model 固定 test:
-  // DB COMMENT 由来 string は MCP output に verbatim で含まれる (trust boundary)。
-  // schema author を信頼境界の内側とする v0.1 前提を regression catch する。
-  it('threat model: nimart の @ai tag 内容が aiDescription / aiNotes に verbatim 含まれる', async () => {
+  // docs/security.md threat-model fixed test: COMMENT-derived strings are
+  // included verbatim in MCP output (trust boundary). The schema author is
+  // treated as inside the v0.1 trust boundary; this test catches regressions
+  // if a future change starts sanitising the @ai tag output.
+  it('threat model: @ai tag content appears verbatim in aiDescription / aiNotes', async () => {
     const ctx = await cache.get();
 
-    // table: inventory_items の COMMENT 内 @ai 行が aiDescription に渡る
     const inv = describeTable({ qualifiedName: `${db.schema}.inventory_items` }, ctx);
-    expect(inv.aiDescription).toMatch(
-      /vw_inventory_for_sale を優先利用すること/,
-    );
+    expect(inv.aiDescription).toMatch(/prefer vw_inventory_for_sale/);
 
-    // concept: vw_inventory_for_sale の @ai 行が aiNotes 配列に verbatim
     const concept = getConceptContext({ name: 'vw_inventory_for_sale' }, ctx);
-    expect(concept.aiNotes.some((n) => /VIEW を起点に使う/.test(n))).toBe(true);
+    expect(concept.aiNotes.some((n) => /start from this VIEW/i.test(n))).toBe(true);
   });
 });

@@ -1,18 +1,27 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import pkg from 'pg';
-import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
-import { resolve, dirname } from 'node:path';
 import { setupDatabase, type DatabaseHandle } from './setup.js';
 import { SchemaCache } from '../src/index.js';
 
-const here = dirname(fileURLToPath(import.meta.url));
-const nimartSql = readFileSync(
-  resolve(here, '../../../examples/nimart/migrations/0001_init.sql'),
-  'utf8',
+// Minimal inline fixture for cache-behaviour tests. The Nimart sample that
+// previously backed this suite is private dogfooding material and now lives
+// in kozou-planning/private/.
+const FIXTURE_SQL = `
+CREATE TABLE authors (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  display_name text NOT NULL
 );
+COMMENT ON TABLE authors IS 'Authors of books.';
 
-describe('SchemaCache (nimart fixture)', () => {
+CREATE TABLE books (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  author_id uuid NOT NULL REFERENCES authors(id),
+  title text NOT NULL
+);
+COMMENT ON TABLE books IS 'Books authored by an author.';
+`;
+
+describe('SchemaCache (generic fixture)', () => {
   let db: DatabaseHandle;
 
   beforeAll(async () => {
@@ -22,7 +31,7 @@ describe('SchemaCache (nimart fixture)', () => {
     try {
       await client.query(`CREATE SCHEMA "${db.schema}"`);
       await client.query(`SET search_path TO "${db.schema}"`);
-      await client.query(nimartSql);
+      await client.query(FIXTURE_SQL);
     } finally {
       await client.end();
     }
@@ -32,7 +41,7 @@ describe('SchemaCache (nimart fixture)', () => {
     if (db) await db.cleanup();
   });
 
-  it('TTL 内は同 instance を返す', async () => {
+  it('returns the same instance within the TTL', async () => {
     const cache = new SchemaCache({
       connection: db.connectionString,
       schemas: [db.schema],
@@ -43,7 +52,7 @@ describe('SchemaCache (nimart fixture)', () => {
     expect(ctx1).toBe(ctx2);
   });
 
-  it('invalidate() で次回 get は新 instance', async () => {
+  it('invalidate() forces the next get to return a new instance', async () => {
     const cache = new SchemaCache({
       connection: db.connectionString,
       schemas: [db.schema],
@@ -56,7 +65,7 @@ describe('SchemaCache (nimart fixture)', () => {
     expect(ctx2.tables.length).toBe(ctx1.tables.length);
   });
 
-  it('TTL 0 で次回 get は即 expire', async () => {
+  it('TTL = 0 expires immediately on the next get', async () => {
     const cache = new SchemaCache({
       connection: db.connectionString,
       schemas: [db.schema],
@@ -67,7 +76,7 @@ describe('SchemaCache (nimart fixture)', () => {
     expect(ctx1).not.toBe(ctx2);
   });
 
-  it('並行 get() で inflight 共有', async () => {
+  it('concurrent get() calls share the in-flight promise', async () => {
     const cache = new SchemaCache({
       connection: db.connectionString,
       schemas: [db.schema],

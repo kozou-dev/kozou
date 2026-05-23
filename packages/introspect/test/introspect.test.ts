@@ -1,18 +1,64 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import pkg from 'pg';
-import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
-import { resolve, dirname } from 'node:path';
 import { setupDatabase, type DatabaseHandle } from './setup.js';
 import { introspect } from '../src/index.js';
 
-const here = dirname(fileURLToPath(import.meta.url));
-const nimartSql = readFileSync(
-  resolve(here, '../../../examples/nimart/migrations/0001_init.sql'),
-  'utf8',
+// Inline generic fixture. Kept self-contained so the integration test does
+// not depend on any external sample SQL (Caronima's Nimart fixture lives in
+// kozou-planning/private/ and is intentionally not part of the public repo).
+const FIXTURE_SQL = `
+CREATE TABLE authors (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  display_name text NOT NULL,
+  deleted_at timestamptz
 );
+COMMENT ON TABLE authors IS 'Authors of books.';
+COMMENT ON COLUMN authors.display_name IS 'Display name of the author.';
 
-describe('introspect (nimart fixture)', () => {
+CREATE TABLE books (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  author_id uuid NOT NULL REFERENCES authors(id),
+  title text NOT NULL,
+  deleted_at timestamptz
+);
+COMMENT ON TABLE books IS 'Books authored by an author.';
+COMMENT ON COLUMN books.author_id IS 'Reference to the author.';
+
+CREATE TABLE editions (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  book_id uuid NOT NULL REFERENCES books(id),
+  isbn text UNIQUE,
+  deleted_at timestamptz
+);
+COMMENT ON TABLE editions IS 'Editions of a book.';
+
+CREATE TABLE inventory_items (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  edition_id uuid NOT NULL REFERENCES editions(id),
+  status text NOT NULL CHECK (status IN ('for_sale', 'reserved', 'sold')),
+  selling_price numeric(12, 2),
+  visibility text NOT NULL DEFAULT 'public' CHECK (visibility IN ('public', 'private')),
+  deleted_at timestamptz
+);
+COMMENT ON TABLE inventory_items IS 'Inventory items available for sale.
+@ai: prefer vw_inventory_for_sale when querying active stock.';
+COMMENT ON COLUMN inventory_items.status IS 'Current state of the item.
+@widget: enum-select';
+COMMENT ON COLUMN inventory_items.selling_price IS 'Actual selling price.
+@widget: currency';
+
+CREATE VIEW vw_inventory_for_sale AS
+  SELECT i.id, i.edition_id, i.selling_price, e.book_id, b.title AS book_title, b.author_id, a.display_name AS author_name
+  FROM inventory_items i
+  JOIN editions e ON e.id = i.edition_id AND e.deleted_at IS NULL
+  JOIN books b ON b.id = e.book_id AND b.deleted_at IS NULL
+  JOIN authors a ON a.id = b.author_id AND a.deleted_at IS NULL
+  WHERE i.status = 'for_sale' AND i.deleted_at IS NULL AND i.visibility = 'public';
+COMMENT ON VIEW vw_inventory_for_sale IS 'Inventory items currently available for sale.
+@ai: start from this VIEW for stock-related queries; no need to re-JOIN.';
+`;
+
+describe('introspect (generic English fixture)', () => {
   let db: DatabaseHandle;
 
   beforeAll(async () => {
@@ -22,7 +68,7 @@ describe('introspect (nimart fixture)', () => {
     try {
       await client.query(`CREATE SCHEMA "${db.schema}"`);
       await client.query(`SET search_path TO "${db.schema}"`);
-      await client.query(nimartSql);
+      await client.query(FIXTURE_SQL);
     } finally {
       await client.end();
     }
@@ -35,33 +81,26 @@ describe('introspect (nimart fixture)', () => {
   const introspectSuite = () =>
     introspect({ connection: db.connectionString, schemas: [db.schema] });
 
-  it('returns 7 base tables', async () => {
+  it('returns 4 base tables', async () => {
     const r = await introspectSuite();
     expect(r.tables.map((t) => t.name).sort()).toEqual([
-      'artists',
-      'artworks',
-      'code_sets',
-      'code_values',
+      'authors',
+      'books',
       'editions',
-      'images',
       'inventory_items',
     ]);
   });
 
-  it('returns 3 views', async () => {
+  it('returns 1 view', async () => {
     const r = await introspectSuite();
-    expect(r.views.map((v) => v.name).sort()).toEqual([
-      'vw_artist_inventory_summary',
-      'vw_artworks_missing_images',
-      'vw_inventory_for_sale',
-    ]);
+    expect(r.views.map((v) => v.name).sort()).toEqual(['vw_inventory_for_sale']);
   });
 
   it('extracts COMMENT for table and column (with @widget tag intact)', async () => {
     const r = await introspectSuite();
     const inv = r.tables.find((t) => t.name === 'inventory_items');
     expect(inv).toBeDefined();
-    expect(inv!.comment).toMatch(/在庫個体/);
+    expect(inv!.comment).toMatch(/Inventory items available for sale/);
     const status = inv!.columns.find((c) => c.name === 'status');
     expect(status).toBeDefined();
     expect(status!.comment).toMatch(/@widget: enum-select/);
@@ -82,27 +121,28 @@ describe('introspect (nimart fixture)', () => {
     const r = await introspectSuite();
     const inv = r.tables.find((t) => t.name === 'inventory_items');
     expect(inv).toBeDefined();
-    // PG は CHECK (x IN (...)) を pg_get_constraintdef で `x = ANY (ARRAY[...])`
-    // に正規化するため、値リテラルでマッチさせる (regex は IN/ANY 両形に堅牢)
+    // PostgreSQL normalises `CHECK (x IN (...))` to `x = ANY (ARRAY[...])`
+    // via pg_get_constraintdef. We match by value literals so this assertion
+    // is robust to either form (IN / ANY).
     const has = inv!.checks.some(
       (c) => /for_sale/.test(c.expression) && /reserved/.test(c.expression) && /sold/.test(c.expression),
     );
     expect(has).toBe(true);
   });
 
-  it('extracts VIEW underlying tables (vw_inventory_for_sale → 4 tables)', async () => {
+  it('extracts VIEW underlying tables (vw_inventory_for_sale -> 4 tables)', async () => {
     const r = await introspectSuite();
     const v = r.views.find((vw) => vw.name === 'vw_inventory_for_sale');
     expect(v).toBeDefined();
     expect(v!.underlyingTables.map((t) => t.name).sort()).toEqual([
-      'artists',
-      'artworks',
+      'authors',
+      'books',
       'editions',
       'inventory_items',
     ]);
   });
 
-  it('returns empty enums (nimart uses CHECK + code_values, not PG ENUM)', async () => {
+  it('returns empty enums (fixture uses CHECK, not PG ENUM)', async () => {
     const r = await introspectSuite();
     expect(r.enums).toEqual([]);
   });
