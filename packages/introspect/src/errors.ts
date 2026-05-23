@@ -1,11 +1,11 @@
 import type { Client } from 'pg';
 
 export type KozouIntrospectErrorOptions = {
-  /** 失敗した SQL 本文。接続失敗時は omit */
+  /** The failed SQL body. Omitted on connection failure. */
   query?: string;
   /** PostgreSQL error code (e.g. "42501") */
   pgErrorCode?: string;
-  /** 元の error object (Error.cause 標準 field 経由で渡される) */
+  /** The original error object (forwarded via the standard Error.cause field). */
   cause?: unknown;
 };
 

@@ -1,11 +1,12 @@
-// Kozou v0.1 spec §4.3 の UIHints 型定義 + zod schema。
+// UIHints type definitions + zod schema per Kozou v0.1 spec §4.3.
 //
-// Kozou v0.1 spec §16.1 で「UI Hints YAML の最終文法は実装中に確定」と意図的に open
-// にされている open item。v0.1 では本書 §4.3 の TypeScript shape を最小限の
-// 正本とし、loadUIHints での YAML パース後に zod で validation する。
+// Kozou v0.1 spec §16.1 leaves the final YAML grammar intentionally open
+// ("finalised during implementation"). In v0.1 we treat the TypeScript
+// shape in spec §4.3 as the minimal source of truth and validate the
+// parsed YAML with zod from loadUIHints.
 //
-// 拡張余地: v0.2 で関係や validation rule 等を追加する場合は本 schema を
-// 拡張し、Kozou v0.1 spec §4.3 を同 PR で更新する (§0 規約)。
+// Extension surface: when v0.2 adds relations or validation rules, extend
+// this schema and update Kozou v0.1 spec §4.3 in the same PR (§0 rule).
 
 import { z } from 'zod';
 
@@ -35,7 +36,7 @@ const columnHintsSchema = z.object({
   label: z.string().min(1).optional(),
   widget: widgetTypeSchema.optional(),
   readonly: z.boolean().optional(),
-  /** relation 表示用 (relation-select 時のみ意味を持つ) */
+  /** Used for relation rendering; only meaningful when widget = relation-select */
   relation: relationHintsSchema.optional(),
 });
 
@@ -50,7 +51,7 @@ const viewHintsSchema = z.object({
   columns: z.record(z.string(), columnHintsSchema).optional(),
 });
 
-/** UIHints YAML の最上位 zod schema。loadUIHints で使用。 */
+/** Top-level zod schema for UIHints YAML. Used by loadUIHints. */
 export const uiHintsSchema = z.object({
   tables: z.record(z.string(), tableHintsSchema).optional(),
   views: z.record(z.string(), viewHintsSchema).optional(),

@@ -16,7 +16,7 @@ function parseEnvNumber(value: string | undefined, fallback: number): number {
 async function main(): Promise<void> {
   const connectionString = process.env.KOZOU_DATABASE_URL;
   if (!connectionString) {
-    console.error('[@kozou/mcp] KOZOU_DATABASE_URL 環境変数が必須です');
+    console.error('[@kozou/mcp] KOZOU_DATABASE_URL environment variable is required');
     process.exit(1);
   }
   const cache = new SchemaCache({

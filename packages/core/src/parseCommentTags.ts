@@ -55,7 +55,7 @@ export function parseCommentTags(comment: string | null): ParsedComment {
         result.widget = value;
       } else {
         console.warn(
-          `[@kozou/core] parseCommentTags: 無効な @widget 値 "${value}" (skip)`,
+          `[@kozou/core] parseCommentTags: invalid @widget value "${value}" (skip)`,
         );
         result.widget = null;
       }
@@ -68,7 +68,7 @@ export function parseCommentTags(comment: string | null): ParsedComment {
     }
     if (!KNOWN_TAGS.has(tag)) {
       console.warn(
-        `[@kozou/core] parseCommentTags: 未定義 tag "@${tag}" (forward compat: body に残置)`,
+        `[@kozou/core] parseCommentTags: unknown tag "@${tag}" (forward compat: kept in body)`,
       );
       bodyLines.push(line);
     }

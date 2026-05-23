@@ -18,7 +18,7 @@ import { inferDisplayField } from './displayField.js';
 export type BuildOptions = {
   raw: RawIntrospection;
   uiHints?: UIHints;
-  /** validation で警告のみにするか、throw するか (default: false = warn のみ) */
+  /** Whether to warn-only on validation issues, or throw. Default: false (warn only). */
   strict?: boolean;
 };
 
@@ -155,7 +155,7 @@ function buildTableContext(input: {
       if (!declaredColumnNames.has(hintCol)) {
         issues.push({
           path: `tables.${table.name}.columns.${hintCol}`,
-          message: `UIHints が指す列 "${hintCol}" は ${table.name} に存在しません`,
+          message: `UIHints column "${hintCol}" does not exist on ${table.name}`,
         });
       }
     }
@@ -167,7 +167,7 @@ function buildTableContext(input: {
     if (!knownTables.has(refKey)) {
       issues.push({
         path: `tables.${table.name}.relations.${rel.field}`,
-        message: `FK 参照先テーブル "${refKey}" が raw.tables に存在しません`,
+        message: `FK target table "${refKey}" does not exist in raw.tables`,
       });
     }
   }
@@ -176,7 +176,7 @@ function buildTableContext(input: {
   if (displayField !== null && !declaredColumnNames.has(displayField)) {
     issues.push({
       path: `tables.${table.name}.displayField`,
-      message: `UIHints の displayField "${displayField}" は ${table.name} に存在しません`,
+      message: `UIHints displayField "${displayField}" does not exist on ${table.name}`,
     });
     displayField = null;
   }
@@ -219,7 +219,7 @@ function buildViewContext(input: {
       if (!declaredColumnNames.has(hintCol)) {
         issues.push({
           path: `views.${view.name}.columns.${hintCol}`,
-          message: `UIHints が指す列 "${hintCol}" は VIEW ${view.name} に存在しません`,
+          message: `UIHints column "${hintCol}" does not exist on view ${view.name}`,
         });
       }
     }
@@ -297,7 +297,7 @@ export async function buildSchemaContext(opts: BuildOptions): Promise<SchemaCont
       if (!raw.tables.some((t) => t.name === tableName)) {
         issues.push({
           path: `tables.${tableName}`,
-          message: `UIHints が指すテーブル "${tableName}" は raw.tables に存在しません`,
+          message: `UIHints table "${tableName}" does not exist in raw.tables`,
         });
       }
     }
@@ -307,7 +307,7 @@ export async function buildSchemaContext(opts: BuildOptions): Promise<SchemaCont
       if (!raw.views.some((v) => v.name === viewName)) {
         issues.push({
           path: `views.${viewName}`,
-          message: `UIHints が指す VIEW "${viewName}" は raw.views に存在しません`,
+          message: `UIHints view "${viewName}" does not exist in raw.views`,
         });
       }
     }
@@ -342,7 +342,7 @@ export async function buildSchemaContext(opts: BuildOptions): Promise<SchemaCont
   if (issues.length > 0) {
     if (strict) {
       throw new KozouBuildError(
-        `buildSchemaContext: ${issues.length} 件の validation issue (strict=true)`,
+        `buildSchemaContext: ${issues.length} validation issue(s) (strict=true)`,
         issues,
       );
     }

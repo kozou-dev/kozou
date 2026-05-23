@@ -43,7 +43,7 @@ export async function introspect(opts: IntrospectOptions): Promise<RawIntrospect
 
   if (opts.include?.length || opts.exclude?.length) {
     console.warn(
-      '[@kozou/introspect] opts.include / opts.exclude は v0.1 では未実装です (warn のみ)',
+      '[@kozou/introspect] opts.include / opts.exclude are not implemented in v0.1 (warning only)',
     );
   }
 
@@ -80,7 +80,7 @@ export async function introspect(opts: IntrospectOptions): Promise<RawIntrospect
     const existing = await fetchExistingSchemas(client, schemas);
     for (const s of schemas) {
       if (!existing.includes(s)) {
-        console.warn(`[@kozou/introspect] schema "${s}" は存在しません (skip)`);
+        console.warn(`[@kozou/introspect] schema "${s}" does not exist (skip)`);
       }
     }
     const validSchemas = schemas.filter((s) => existing.includes(s));

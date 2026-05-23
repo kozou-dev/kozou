@@ -1,5 +1,6 @@
 // @kozou/mcp public API.
-// Kozou v0.1 spec §7 の MCP server を提供。stdio mode (CLI 経由) は src/cli.ts。
+// Provides the MCP server defined in Kozou v0.1 spec §7. Stdio mode
+// (via the CLI) lives in src/cli.ts.
 
 export { createMcpServer } from './server.js';
 export { SchemaCache, type SchemaCacheOptions } from './schemaCache.js';

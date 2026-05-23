@@ -1,33 +1,34 @@
-// Kozou v0.1 spec §4.4 の DataAdapter interface。
+// DataAdapter interface as defined in Kozou v0.1 spec §4.4.
 //
-// v0.1 では @kozou/core 配下に最初の concrete adapter を実装する想定。差し
-// 替え可能な境界を作っておくことで v0.2 の `@kozou/api` 導入を non-breaking
-// にする (Kozou v0.1 spec §4.4 末尾)。具体的な adapter 実装名は Kozou v0.1 spec §4.4 を参照。
+// In v0.1 the first concrete adapter ships under @kozou/core. Defining a
+// pluggable boundary up front lets v0.2's `@kozou/api` slot in as a
+// non-breaking change (see end of Kozou v0.1 spec §4.4). For the concrete
+// adapter implementation names, refer to Kozou v0.1 spec §4.4.
 
 export interface DataAdapter {
-  /** 一覧取得 (ページネーション、検索、ソート) */
+  /** List records (pagination, search, sort) */
   list(resource: string, params: ListParams): Promise<ListResult>;
 
-  /** 単一レコード取得 */
+  /** Fetch a single record */
   get(resource: string, id: string | number): Promise<Record<string, unknown>>;
 
-  /** 新規作成 */
+  /** Create a record */
   create(
     resource: string,
     data: Record<string, unknown>,
   ): Promise<Record<string, unknown>>;
 
-  /** 更新 */
+  /** Update a record */
   update(
     resource: string,
     id: string | number,
     data: Record<string, unknown>,
   ): Promise<Record<string, unknown>>;
 
-  /** 削除 */
+  /** Delete a record */
   delete(resource: string, id: string | number): Promise<void>;
 
-  /** relation-select 用の軽量検索 (label / search field のみ取得) */
+  /** Lightweight search used by relation-select (returns label / search fields only) */
   searchRelation(
     resource: string,
     params: SearchRelationParams,
@@ -35,9 +36,9 @@ export interface DataAdapter {
 }
 
 export type ListParams = {
-  /** 全文検索クエリ (v0.1 では `ilike` ベース) */
+  /** Free-text search query (v0.1 is `ilike`-based) */
   search?: string;
-  /** カラム別フィルタ。値はそのまま渡す */
+  /** Per-column filters; values are forwarded verbatim */
   filters?: Record<string, unknown>;
   sort?: SortSpec[];
   /** 1-based page index */

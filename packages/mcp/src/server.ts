@@ -14,52 +14,52 @@ import type { SchemaCache } from './schemaCache.js';
 const TOOL_DEFINITIONS = [
   {
     name: 'list_tables',
-    description: 'テーブル名 + 説明の一覧を返す',
+    description: 'List tables with their labels and descriptions',
     inputSchema: {
       type: 'object',
       properties: {
-        schema: { type: 'string', description: '対象 schema (default: public)' },
-        includeSystem: { type: 'boolean', description: 'システム schema を含めるか (v0.1 では無視)' },
+        schema: { type: 'string', description: 'Target schema (default: public)' },
+        includeSystem: { type: 'boolean', description: 'Include system schemas (ignored in v0.1)' },
       },
     },
   },
   {
     name: 'describe_table',
-    description: '指定テーブルの完全な schema + COMMENT を返す',
+    description: 'Return the full schema + COMMENT for the given table',
     inputSchema: {
       type: 'object',
-      properties: { qualifiedName: { type: 'string', description: '例: public.inventory_items' } },
+      properties: { qualifiedName: { type: 'string', description: 'e.g. public.inventory_items' } },
       required: ['qualifiedName'],
     },
   },
   {
     name: 'list_views',
-    description: 'VIEW 名 + 用途の一覧を返す',
+    description: 'List views with their labels and purposes',
     inputSchema: {
       type: 'object',
-      properties: { schema: { type: 'string', description: '対象 schema (default: public)' } },
+      properties: { schema: { type: 'string', description: 'Target schema (default: public)' } },
     },
   },
   {
     name: 'describe_view',
-    description: '指定 VIEW の列 + 用途 + 依存テーブル + definition を返す',
+    description: 'Return columns + purpose + underlying tables + definition for the given view',
     inputSchema: {
       type: 'object',
-      properties: { qualifiedName: { type: 'string', description: '例: public.vw_inventory_for_sale' } },
+      properties: { qualifiedName: { type: 'string', description: 'e.g. public.vw_inventory_for_sale' } },
       required: ['qualifiedName'],
     },
   },
   {
     name: 'list_concepts',
-    description: '業務概念 (VIEW) 一覧を返す',
+    description: 'List domain concepts (each backed by a VIEW)',
     inputSchema: { type: 'object', properties: {} },
   },
   {
     name: 'get_concept_context',
-    description: '指定概念の関連テーブル + 推奨 query path を返す',
+    description: 'Return related tables + recommended query path for the given concept',
     inputSchema: {
       type: 'object',
-      properties: { name: { type: 'string', description: 'VIEW 名と同じ' } },
+      properties: { name: { type: 'string', description: 'Matches the VIEW name' } },
       required: ['name'],
     },
   },

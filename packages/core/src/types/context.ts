@@ -1,10 +1,12 @@
-// Kozou v0.1 spec §4.2 の SchemaContext 型定義。@kozou/core.buildSchemaContext の
-// output 契約であり、@kozou/mcp と @kozou/svelte-ui の入力契約。
-// Kozou v0.1 spec §0 の規約によりコード側を正本とする。
+// SchemaContext type definitions per Kozou v0.1 spec §4.2.
+//
+// This is the output contract of @kozou/core.buildSchemaContext and the
+// input contract for @kozou/mcp and @kozou/svelte-ui. Per Kozou v0.1 spec
+// §0, the code is the source of truth.
 
 import type { RawTable, RawView } from './raw.js';
 
-/** core.buildSchemaContext の output。MCP / UI の入力。 */
+/** Output of core.buildSchemaContext; input to MCP / UI. */
 export type SchemaContext = {
   meta: {
     serverVersion: string;
@@ -14,7 +16,7 @@ export type SchemaContext = {
   tables: TableContext[];
   views: ViewContext[];
   enums: EnumContext[];
-  /** VIEW から導出される業務概念 (v0.1 では VIEW = 業務概念とみなす) */
+  /** Domain concepts derived from views (in v0.1, every view is a concept) */
   concepts: ConceptContext[];
 };
 
@@ -23,18 +25,18 @@ export type TableContext = {
   name: string;
   /** "schema.name" */
   qualifiedName: string;
-  /** UI Hints > COMMENT 1 行目 > name の順 */
+  /** Order: UI Hints > first line of COMMENT > name */
   label: string;
-  /** COMMENT 全文 (plain text、@ai/@widget/@policy tag を除いた本文) */
+  /** Full COMMENT body (plain, with @ai/@widget/@policy tags stripped) */
   description: string | null;
-  /** COMMENT 内 @ai: 行を抽出したもの */
+  /** Lines from the COMMENT that start with `@ai:` */
   aiDescription: string | null;
   primaryKey: string[];
-  /** UI Hints 由来、なければ heuristic (Kozou v0.1 spec §6.5) */
+  /** From UI Hints; otherwise a heuristic (Kozou v0.1 spec §6.5) */
   displayField: string | null;
   columns: ColumnContext[];
   relations: RelationContext[];
-  /** 後段で必要な原情報 */
+  /** Raw record kept for downstream consumers */
   rawTable: RawTable;
 };
 
@@ -48,15 +50,15 @@ export type ColumnContext = {
   label: string;
   description: string | null;
   aiDescription: string | null;
-  /** UI Hints > @widget: tag > heuristic (Kozou v0.1 spec §6.4) */
+  /** Order: UI Hints > @widget: tag > heuristic (Kozou v0.1 spec §6.4) */
   widget: WidgetType;
-  /** CHECK 制約から抽出された列挙値、または ENUM */
+  /** Values extracted from CHECK constraints, or PostgreSQL ENUM members */
   enumValues: string[] | null;
-  /** UI Hints 由来 */
+  /** Sourced from UI Hints */
   readonly: boolean;
 };
 
-/** Kozou v0.1 spec §6.4 widget 推論の domain。 */
+/** Widget domain for Kozou v0.1 spec §6.4. */
 export type WidgetType =
   | 'text'
   | 'textarea'
@@ -72,16 +74,16 @@ export type WidgetType =
   | 'currency';
 
 export type RelationContext = {
-  /** このテーブル側の column (v0.1 は 1 個に限定) */
+  /** Column on this side of the relation (v0.1 limits this to 1) */
   field: string;
   references: {
     schema: string;
     table: string;
     column: string;
   };
-  /** v0.1 はこの 2 種のみ */
+  /** v0.1 supports only these two */
   cardinality: 'many-to-one' | 'one-to-one';
-  /** FK の COMMENT 由来 */
+  /** From the FK's COMMENT */
   meaning: string | null;
 };
 
@@ -92,11 +94,11 @@ export type ViewContext = {
   label: string;
   description: string | null;
   aiDescription: string | null;
-  /** COMMENT の最初の段落 */
+  /** First paragraph of the COMMENT */
   purpose: string | null;
   columns: ColumnContext[];
   underlyingTables: { schema: string; name: string }[];
-  /** 後段で必要な原情報 (MCP describe_view.definition 等) */
+  /** Raw record kept for downstream consumers (e.g. MCP describe_view.definition) */
   rawView: RawView;
 };
 
@@ -107,16 +109,16 @@ export type EnumContext = {
   description: string | null;
 };
 
-/** v0.1: ConceptContext は ViewContext の薄いラッパー。Kozou v0.1 spec §4.2 末尾。 */
+/** v0.1: ConceptContext is a thin wrapper around ViewContext. See end of Kozou v0.1 spec §4.2. */
 export type ConceptContext = {
-  /** ViewContext.name と一致 */
+  /** Matches ViewContext.name */
   name: string;
   label: string;
   description: string | null;
-  /** "VIEW" 固定 (v0.1)。将来 "FUNCTION" 等を追加する余地を残す */
+  /** Hard-coded "VIEW" in v0.1, with room to grow (e.g. "FUNCTION") */
   kind: 'VIEW';
-  /** 推奨 query path: VIEW を joinable する先 */
+  /** Suggested query path: targets the VIEW can be joined to */
   joinSuggestions: { table: string; on: string }[];
-  /** COMMENT の @ai: tag */
+  /** @ai: lines from the COMMENT */
   aiNotes: string[];
 };

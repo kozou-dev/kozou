@@ -19,10 +19,10 @@ export class KozouUIHintsError extends Error {
   }
 }
 
-// Codex N2 反映: default error message には basename のみを含める。
-// 絶対 path は KozouUIHintsError.filePath field で保持し、caller が必要に応じて
-// debug log に出すかを判断する (CLI / MCP の error 経路でユーザー env path が
-// 第三者に漏洩することを抑止)。
+// Codex N2: by default the error message only includes the file basename.
+// The absolute path is kept on KozouUIHintsError.filePath; callers can decide
+// whether to surface it in debug logs. This prevents user-environment paths
+// from leaking through CLI / MCP error responses.
 export async function loadUIHints(filePath: string): Promise<UIHints> {
   const content = await readFile(filePath, 'utf8');
   const fileLabel = basename(filePath);
@@ -35,7 +35,7 @@ export async function loadUIHints(filePath: string): Promise<UIHints> {
       line: e.linePos?.[0]?.line,
     }));
     throw new KozouUIHintsError(
-      `YAML 構文エラー (${fileLabel}): ${doc.errors.length} 件`,
+      `YAML parse error (${fileLabel}): ${doc.errors.length} issue(s)`,
       filePath,
       issues,
     );
@@ -55,7 +55,7 @@ export async function loadUIHints(filePath: string): Promise<UIHints> {
         message: issue.message,
       }));
       throw new KozouUIHintsError(
-        `UIHints 検証エラー (${fileLabel}): ${issues.length} 件`,
+        `UIHints validation error (${fileLabel}): ${issues.length} issue(s)`,
         filePath,
         issues,
       );

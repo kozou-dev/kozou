@@ -29,14 +29,14 @@ export function extractCheckEnums(checks: RawCheck[]): Map<string, string[]> {
     const values = extractQuotedValues(valueList);
     if (values.length === 0) {
       console.warn(
-        `[@kozou/core] extractCheckEnums: check "${check.name}" の値抽出に失敗 (expression: ${expr})`,
+        `[@kozou/core] extractCheckEnums: failed to extract values from check "${check.name}" (expression: ${expr})`,
       );
       continue;
     }
 
     if (result.has(column)) {
       console.warn(
-        `[@kozou/core] extractCheckEnums: 列 "${column}" に複数の enum CHECK 制約あり (最後勝ち)`,
+        `[@kozou/core] extractCheckEnums: column "${column}" has multiple enum CHECK constraints (last one wins)`,
       );
     }
     result.set(column, values);

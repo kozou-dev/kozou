@@ -6,7 +6,7 @@ const DATETIME_UDT = new Set(['timestamp', 'timestamptz', 'time', 'timetz']);
 const JSON_UDT = new Set(['json', 'jsonb']);
 
 const URL_HINT_RE = /(?:^|_)url\b|image/i;
-const TEXTAREA_HINT_RE = /html|markdown|本文/i;
+const TEXTAREA_HINT_RE = /html|markdown|body|content/i;
 
 export type InferWidgetInput = {
   column: RawColumn;
