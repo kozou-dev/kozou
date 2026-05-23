@@ -47,9 +47,9 @@ describe('buildSchemaContext', () => {
     vi.restoreAllMocks();
   });
 
-  it('基本構造 (tables/views/enums/concepts カウント)', async () => {
+  it('basic shape (tables/views/enums/concepts counts)', async () => {
     const raw = makeRaw({
-      tables: [makeTable('artists'), makeTable('artworks')],
+      tables: [makeTable('authors'), makeTable('books')],
       views: [
         {
           schema: 'public',
@@ -63,7 +63,7 @@ describe('buildSchemaContext', () => {
       enums: [{ schema: 'public', name: 'status_enum', values: ['a', 'b'] }],
     });
     const ctx = await buildSchemaContext({ raw });
-    expect(ctx.tables.map((t) => t.name)).toEqual(['artists', 'artworks']);
+    expect(ctx.tables.map((t) => t.name)).toEqual(['authors', 'books']);
     expect(ctx.views.map((v) => v.name)).toEqual(['vw_for_sale']);
     expect(ctx.enums.map((e) => e.name)).toEqual(['status_enum']);
     expect(ctx.concepts).toHaveLength(1);
@@ -72,19 +72,19 @@ describe('buildSchemaContext', () => {
     expect(ctx.meta.sourceSchemas).toEqual(['public']);
   });
 
-  it('widget 推論 priority: UIHints > @widget > heuristic', async () => {
+  it('widget inference priority: UIHints > @widget > heuristic', async () => {
     const col1 = makeCol('status', 'text', { comment: '@widget: enum-select' });
     const col2 = makeCol('display_name', 'text');
     const raw = makeRaw({
       tables: [
-        makeTable('artists', {
+        makeTable('authors', {
           columns: [col1, col2],
           primaryKey: ['id'],
         }),
       ],
     });
     const uiHints: UIHints = {
-      tables: { artists: { columns: { display_name: { widget: 'currency' } } } },
+      tables: { authors: { columns: { display_name: { widget: 'currency' } } } },
     };
     const ctx = await buildSchemaContext({ raw, uiHints });
     const cols = ctx.tables[0]!.columns;
@@ -92,10 +92,10 @@ describe('buildSchemaContext', () => {
     expect(cols.find((c) => c.name === 'display_name')!.widget).toBe('currency');
   });
 
-  it('displayField 推論 (UIHints > heuristic)', async () => {
+  it('displayField inference (UIHints > heuristic)', async () => {
     const raw = makeRaw({
       tables: [
-        makeTable('artists', {
+        makeTable('authors', {
           columns: [makeCol('id', 'uuid'), makeCol('display_name', 'text')],
           primaryKey: ['id'],
         }),
@@ -106,44 +106,44 @@ describe('buildSchemaContext', () => {
 
     const withHints = await buildSchemaContext({
       raw,
-      uiHints: { tables: { artists: { displayField: 'id' } } },
+      uiHints: { tables: { authors: { displayField: 'id' } } },
     });
     expect(withHints.tables[0]!.displayField).toBe('id');
   });
 
-  it('FK → RelationContext (cardinality many-to-one)', async () => {
+  it('FK -> RelationContext (cardinality many-to-one)', async () => {
     const fk: RawForeignKey = {
-      name: 'artworks_artist_id_fkey',
-      columns: ['artist_id'],
+      name: 'books_author_id_fkey',
+      columns: ['author_id'],
       referencedSchema: 'public',
-      referencedTable: 'artists',
+      referencedTable: 'authors',
       referencedColumns: ['id'],
       onDelete: 'NO ACTION',
       onUpdate: 'NO ACTION',
-      comment: '作家への参照',
+      comment: 'Reference to the author',
     };
     const raw = makeRaw({
       tables: [
-        makeTable('artists', { columns: [makeCol('id', 'uuid')], primaryKey: ['id'] }),
-        makeTable('artworks', {
-          columns: [makeCol('artist_id', 'uuid')],
+        makeTable('authors', { columns: [makeCol('id', 'uuid')], primaryKey: ['id'] }),
+        makeTable('books', {
+          columns: [makeCol('author_id', 'uuid')],
           primaryKey: ['id'],
           foreignKeys: [fk],
         }),
       ],
     });
     const ctx = await buildSchemaContext({ raw });
-    const artworks = ctx.tables.find((t) => t.name === 'artworks')!;
-    expect(artworks.relations).toHaveLength(1);
-    expect(artworks.relations[0]).toMatchObject({
-      field: 'artist_id',
-      references: { schema: 'public', table: 'artists', column: 'id' },
+    const books = ctx.tables.find((t) => t.name === 'books')!;
+    expect(books.relations).toHaveLength(1);
+    expect(books.relations[0]).toMatchObject({
+      field: 'author_id',
+      references: { schema: 'public', table: 'authors', column: 'id' },
       cardinality: 'many-to-one',
-      meaning: '作家への参照',
+      meaning: 'Reference to the author',
     });
   });
 
-  it('FK + UNIQUE index → cardinality one-to-one', async () => {
+  it('FK + UNIQUE index -> cardinality one-to-one', async () => {
     const fk: RawForeignKey = {
       name: 'fk1',
       columns: ['user_id'],
@@ -170,7 +170,7 @@ describe('buildSchemaContext', () => {
     expect(profiles.relations[0]!.cardinality).toBe('one-to-one');
   });
 
-  it('CHECK → enumValues + widget enum-select', async () => {
+  it('CHECK -> enumValues + widget enum-select', async () => {
     const check: RawCheck = {
       name: 'status_check',
       expression: "status = ANY (ARRAY['for_sale'::text, 'reserved'::text])",
@@ -189,7 +189,7 @@ describe('buildSchemaContext', () => {
     expect(status.widget).toBe('enum-select');
   });
 
-  it('strict=false: missing FK target → warn のみ', async () => {
+  it('strict=false: missing FK target -> warn only', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const fk: RawForeignKey = {
       name: 'ghost_fk',
@@ -209,7 +209,7 @@ describe('buildSchemaContext', () => {
     expect(warn).toHaveBeenCalledWith(expect.stringMatching(/nonexistent/));
   });
 
-  it('strict=true: missing FK target → KozouBuildError throw', async () => {
+  it('strict=true: missing FK target -> KozouBuildError throw', async () => {
     const fk: RawForeignKey = {
       name: 'ghost_fk',
       columns: ['ghost_id'],
@@ -228,7 +228,7 @@ describe('buildSchemaContext', () => {
     );
   });
 
-  it('UIHints が指す存在しない table → issue', async () => {
+  it('UIHints referencing a missing table -> issue', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const raw = makeRaw({ tables: [makeTable('a')] });
     await buildSchemaContext({
@@ -238,7 +238,7 @@ describe('buildSchemaContext', () => {
     expect(warn).toHaveBeenCalledWith(expect.stringMatching(/ghost_table/));
   });
 
-  it('UIHints が指す存在しない column → issue', async () => {
+  it('UIHints referencing a missing column -> issue', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const raw = makeRaw({
       tables: [makeTable('a', { columns: [makeCol('id', 'uuid')] })],
@@ -250,7 +250,7 @@ describe('buildSchemaContext', () => {
     expect(warn).toHaveBeenCalledWith(expect.stringMatching(/ghost_col/));
   });
 
-  it('UIHints の displayField が存在しない → issue + heuristic fallback', async () => {
+  it('UIHints displayField that does not exist -> issue + heuristic fallback', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const raw = makeRaw({
       tables: [
@@ -268,11 +268,11 @@ describe('buildSchemaContext', () => {
     expect(ctx.tables[0]!.displayField).toBe('name');
   });
 
-  it('VIEW concepts は VIEW 1:1 で生成、aiNotes は @ai tag', async () => {
+  it('VIEW concepts generated 1:1 with views, aiNotes from @ai tags', async () => {
     const view: RawView = {
       schema: 'public',
       name: 'vw_sample',
-      comment: '販売一覧。\n@ai: 起点 VIEW として使う\n@ai: 集計に推奨',
+      comment: 'Sales listing.\n@ai: start from this VIEW\n@ai: recommended for aggregations',
       columns: [makeCol('id', 'uuid')],
       underlyingTables: [{ schema: 'public', name: 'orders' }],
       definition: 'SELECT 1',
@@ -280,17 +280,20 @@ describe('buildSchemaContext', () => {
     const raw = makeRaw({ views: [view] });
     const ctx = await buildSchemaContext({ raw });
     expect(ctx.concepts).toHaveLength(1);
-    expect(ctx.concepts[0]!.aiNotes).toEqual(['起点 VIEW として使う', '集計に推奨']);
+    expect(ctx.concepts[0]!.aiNotes).toEqual([
+      'start from this VIEW',
+      'recommended for aggregations',
+    ]);
     expect(ctx.concepts[0]!.joinSuggestions).toEqual([
       { table: 'public.orders', on: 'vw_sample.<fk_column> = orders.<pk_column>' },
     ]);
   });
 
-  it('VIEW.label / description / purpose の抽出', async () => {
+  it('VIEW.label / description / purpose extraction', async () => {
     const view: RawView = {
       schema: 'public',
       name: 'vw_sample',
-      comment: '販売一覧。\n第二段落。',
+      comment: 'Sales listing.\nSecond paragraph.',
       columns: [],
       underlyingTables: [],
       definition: 'SELECT 1',
@@ -298,15 +301,15 @@ describe('buildSchemaContext', () => {
     const raw = makeRaw({ views: [view] });
     const ctx = await buildSchemaContext({
       raw,
-      uiHints: { views: { vw_sample: { label: '販売 VIEW' } } },
+      uiHints: { views: { vw_sample: { label: 'Sales view' } } },
     });
     const v = ctx.views[0]!;
-    expect(v.label).toBe('販売 VIEW');
-    expect(v.description).toContain('販売一覧。');
-    expect(v.purpose).toContain('販売一覧。');
+    expect(v.label).toBe('Sales view');
+    expect(v.description).toContain('Sales listing.');
+    expect(v.purpose).toContain('Sales listing.');
   });
 
-  it('UIHints の view label のみで上書き', async () => {
+  it('UIHints view label overrides', async () => {
     const view: RawView = {
       schema: 'public',
       name: 'vw_x',

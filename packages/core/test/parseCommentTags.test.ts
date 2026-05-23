@@ -6,107 +6,107 @@ describe('parseCommentTags', () => {
     vi.restoreAllMocks();
   });
 
-  it('null comment → 全 field 初期値', () => {
+  it('null comment -> default fields', () => {
     const r = parseCommentTags(null);
     expect(r).toEqual({ body: '', ai: [], widget: null, policy: [] });
   });
 
-  it('空文字 → 全 field 初期値', () => {
+  it('empty string -> default fields', () => {
     const r = parseCommentTags('');
     expect(r).toEqual({ body: '', ai: [], widget: null, policy: [] });
   });
 
-  it('tag なし pure text → body に同じ内容、tag fields は空', () => {
-    const r = parseCommentTags('在庫個体。販売価格を管理する。');
-    expect(r.body).toBe('在庫個体。販売価格を管理する。');
+  it('plain text with no tags -> body retains the text, tag fields empty', () => {
+    const r = parseCommentTags('Inventory item. Manages selling price.');
+    expect(r.body).toBe('Inventory item. Manages selling price.');
     expect(r.ai).toEqual([]);
     expect(r.widget).toBeNull();
     expect(r.policy).toEqual([]);
   });
 
-  it('@ai 単一行 → ai に push、body にも残す', () => {
-    const r = parseCommentTags('在庫個体。\n@ai: vw_inventory_for_sale を優先');
-    expect(r.ai).toEqual(['vw_inventory_for_sale を優先']);
-    expect(r.body).toContain('在庫個体。');
-    expect(r.body).toContain('@ai: vw_inventory_for_sale を優先');
+  it('single @ai line -> pushed to ai, kept in body', () => {
+    const r = parseCommentTags('Inventory item.\n@ai: prefer vw_inventory_for_sale');
+    expect(r.ai).toEqual(['prefer vw_inventory_for_sale']);
+    expect(r.body).toContain('Inventory item.');
+    expect(r.body).toContain('@ai: prefer vw_inventory_for_sale');
   });
 
-  it('@ai 複数行 → 各行が ai に', () => {
+  it('multiple @ai lines -> each captured', () => {
     const r = parseCommentTags('@ai: instruction one\n@ai: instruction two');
     expect(r.ai).toEqual(['instruction one', 'instruction two']);
   });
 
-  it('@widget 単一 → widget 設定、body から除去', () => {
-    const r = parseCommentTags('在庫状態。\n@widget: enum-select');
+  it('single @widget -> widget set, line removed from body', () => {
+    const r = parseCommentTags('Inventory status.\n@widget: enum-select');
     expect(r.widget).toBe('enum-select');
     expect(r.body).not.toContain('@widget');
-    expect(r.body).toContain('在庫状態。');
+    expect(r.body).toContain('Inventory status.');
   });
 
-  it('@widget 複数 → 最後勝ち', () => {
+  it('multiple @widget -> last one wins', () => {
     const r = parseCommentTags('@widget: text\n@widget: currency');
     expect(r.widget).toBe('currency');
   });
 
-  it('@widget 無効値 → warn + null', () => {
+  it('invalid @widget value -> warn + null', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const r = parseCommentTags('@widget: not-a-widget');
     expect(r.widget).toBeNull();
     expect(warn).toHaveBeenCalledOnce();
-    expect(warn.mock.calls[0]![0]).toMatch(/無効な @widget/);
+    expect(warn.mock.calls[0]![0]).toMatch(/invalid @widget/);
   });
 
-  it('@policy 単一行 → policy に push、body に残す', () => {
-    const r = parseCommentTags('価格情報。\n@policy: 内部のみ参照');
-    expect(r.policy).toEqual(['内部のみ参照']);
-    expect(r.body).toContain('@policy: 内部のみ参照');
+  it('single @policy line -> pushed to policy, kept in body', () => {
+    const r = parseCommentTags('Pricing info.\n@policy: internal use only');
+    expect(r.policy).toEqual(['internal use only']);
+    expect(r.body).toContain('@policy: internal use only');
   });
 
-  it('@policy 複数行 → 各行が policy に', () => {
+  it('multiple @policy lines -> each captured', () => {
     const r = parseCommentTags('@policy: rule one\n@policy: rule two');
     expect(r.policy).toEqual(['rule one', 'rule two']);
   });
 
-  it('@example (未定義 tag) → warn + body 残置', () => {
+  it('@example (unknown tag) -> warn + kept in body', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    const r = parseCommentTags('一覧。\n@example: SELECT * FROM t;');
+    const r = parseCommentTags('Listing.\n@example: SELECT * FROM t;');
     expect(r.body).toContain('@example: SELECT * FROM t;');
     expect(warn).toHaveBeenCalledOnce();
-    expect(warn.mock.calls[0]![0]).toMatch(/未定義 tag/);
+    expect(warn.mock.calls[0]![0]).toMatch(/unknown tag/);
   });
 
-  it('全 tag 混在', () => {
+  it('all tags mixed', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const r = parseCommentTags(
-      '販売価格。\n' +
-        '@ai: catalog_price とは別\n' +
+      'Selling price.\n' +
+        '@ai: differs from catalog_price\n' +
         '@widget: currency\n' +
-        '@policy: 税抜\n' +
+        '@policy: pre-tax\n' +
         '@example: SELECT selling_price FROM inventory_items',
     );
-    expect(r.ai).toEqual(['catalog_price とは別']);
+    expect(r.ai).toEqual(['differs from catalog_price']);
     expect(r.widget).toBe('currency');
-    expect(r.policy).toEqual(['税抜']);
-    expect(r.body).toContain('販売価格。');
-    expect(r.body).toContain('@ai: catalog_price とは別');
+    expect(r.policy).toEqual(['pre-tax']);
+    expect(r.body).toContain('Selling price.');
+    expect(r.body).toContain('@ai: differs from catalog_price');
     expect(r.body).not.toContain('@widget');
-    expect(r.body).toContain('@policy: 税抜');
+    expect(r.body).toContain('@policy: pre-tax');
     expect(r.body).toContain('@example: SELECT');
     expect(warn).toHaveBeenCalledOnce();
   });
 
-  it('tag 前の空白を許容', () => {
+  it('leading whitespace before a tag is allowed', () => {
     const r = parseCommentTags('   @widget: text');
     expect(r.widget).toBe('text');
   });
 
-  it('@widget の value は trim される', () => {
+  it('@widget value is trimmed', () => {
     const r = parseCommentTags('@widget:   number   ');
     expect(r.widget).toBe('number');
   });
 
-  it('末尾空白は body から trim', () => {
-    const r = parseCommentTags('テキスト\n\n  \n');
-    expect(r.body).toBe('テキスト');
+  it('trailing whitespace is trimmed from body', () => {
+    const r = parseCommentTags('text\n\n  \n');
+    expect(r.body).toBe('text');
   });
 });

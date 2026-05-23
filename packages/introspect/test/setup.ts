@@ -3,7 +3,7 @@ import { PostgreSqlContainer } from '@testcontainers/postgresql';
 
 export type DatabaseHandle = {
   connectionString: string;
-  /** test suite 用に生成された一意 schema 名。fixture はこの schema 配下に作る */
+  /** Unique schema name generated for the test suite; fixtures are created under this schema */
   schema: string;
   cleanup: () => Promise<void>;
 };

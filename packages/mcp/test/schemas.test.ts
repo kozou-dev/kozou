@@ -170,7 +170,7 @@ describe('list_concepts schemas', () => {
   it('input: empty object pass', () => {
     expect(() => listConceptsInputSchema.parse({})).not.toThrow();
   });
-  it('input: 余分な field 拒否 (strict)', () => {
+  it('input: rejects extra fields (strict)', () => {
     expect(() => listConceptsInputSchema.parse({ foo: 'bar' })).toThrow();
   });
   it('output: valid pass', () => {
@@ -187,7 +187,7 @@ describe('list_concepts schemas', () => {
       }),
     ).not.toThrow();
   });
-  it('output: kind が VIEW 以外 throw', () => {
+  it('output: throws when kind is not VIEW', () => {
     expect(() =>
       listConceptsOutputSchema.parse({
         concepts: [{ name: 'x', label: 'X', description: null, kind: 'FUNCTION' }],

@@ -14,33 +14,33 @@ async function makeTempYaml(content: string): Promise<string> {
 }
 
 describe('loadUIHints', () => {
-  it('空 file → {} (全 field optional)', async () => {
+  it('empty file -> {} (all fields optional)', async () => {
     const file = await makeTempYaml('');
     const hints = await loadUIHints(file);
     expect(hints).toEqual({});
   });
 
-  it('null doc (--- のみ) → {}', async () => {
+  it('null doc (--- only) -> {}', async () => {
     const file = await makeTempYaml('---\n');
     const hints = await loadUIHints(file);
     expect(hints).toEqual({});
   });
 
-  it('正常な小さい YAML', async () => {
+  it('parses a small valid YAML', async () => {
     const file = await makeTempYaml(`
 tables:
   foo:
-    label: フー
+    label: Foo
     columns:
       bar:
         widget: number
 `);
     const hints = await loadUIHints(file);
-    expect(hints.tables?.['foo']?.label).toBe('フー');
+    expect(hints.tables?.['foo']?.label).toBe('Foo');
     expect(hints.tables?.['foo']?.columns?.['bar']?.widget).toBe('number');
   });
 
-  it('zod 検証エラー (無効 widget) → KozouUIHintsError', async () => {
+  it('zod validation error (invalid widget) -> KozouUIHintsError', async () => {
     const file = await makeTempYaml(`
 tables:
   foo:
@@ -58,7 +58,7 @@ tables:
     }
   });
 
-  it('YAML 構文エラー → KozouUIHintsError (line 番号付き)', async () => {
+  it('YAML syntax error -> KozouUIHintsError (with line number)', async () => {
     const file = await makeTempYaml('tables:\n  foo:\n    label: [unclosed\n');
     await expect(loadUIHints(file)).rejects.toBeInstanceOf(KozouUIHintsError);
     try {
@@ -71,11 +71,11 @@ tables:
     }
   });
 
-  it('存在しない file → FS error', async () => {
+  it('missing file -> FS error', async () => {
     await expect(loadUIHints('/nonexistent/path/ui-hints.yaml')).rejects.toThrow();
   });
 
-  it('label に空文字 (zod min(1) 違反) → KozouUIHintsError', async () => {
+  it('empty label string (zod min(1) violation) -> KozouUIHintsError', async () => {
     const file = await makeTempYaml(`
 tables:
   foo:

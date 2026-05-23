@@ -15,7 +15,7 @@ function col(name: string, udtName: string, dataType = udtName): RawColumn {
 }
 
 describe('inferWidget (Kozou v0.1 spec §6.4)', () => {
-  it('FK → relation-select (最優先)', () => {
+  it('FK -> relation-select (highest priority)', () => {
     expect(
       inferWidget({
         column: col('artist_id', 'uuid'),
@@ -26,7 +26,7 @@ describe('inferWidget (Kozou v0.1 spec §6.4)', () => {
     ).toBe('relation-select');
   });
 
-  it('enumValues あり → enum-select', () => {
+  it('enumValues present -> enum-select', () => {
     expect(
       inferWidget({
         column: col('status', 'text'),
@@ -37,7 +37,7 @@ describe('inferWidget (Kozou v0.1 spec §6.4)', () => {
     ).toBe('enum-select');
   });
 
-  it('uuid → uuid', () => {
+  it('uuid -> uuid', () => {
     expect(
       inferWidget({
         column: col('id', 'uuid'),
@@ -48,7 +48,7 @@ describe('inferWidget (Kozou v0.1 spec §6.4)', () => {
     ).toBe('uuid');
   });
 
-  it('bool → boolean', () => {
+  it('bool -> boolean', () => {
     expect(
       inferWidget({
         column: col('is_active', 'bool'),
@@ -60,7 +60,7 @@ describe('inferWidget (Kozou v0.1 spec §6.4)', () => {
   });
 
   it.each(['int2', 'int4', 'int8', 'numeric', 'float4', 'float8'])(
-    'numeric udt %s → number',
+    'numeric udt %s -> number',
     (udt) => {
       expect(
         inferWidget({
@@ -73,7 +73,7 @@ describe('inferWidget (Kozou v0.1 spec §6.4)', () => {
     },
   );
 
-  it('date → date', () => {
+  it('date -> date', () => {
     expect(
       inferWidget({
         column: col('released_at', 'date'),
@@ -85,7 +85,7 @@ describe('inferWidget (Kozou v0.1 spec §6.4)', () => {
   });
 
   it.each(['timestamp', 'timestamptz', 'time', 'timetz'])(
-    'datetime udt %s → datetime',
+    'datetime udt %s -> datetime',
     (udt) => {
       expect(
         inferWidget({
@@ -98,7 +98,7 @@ describe('inferWidget (Kozou v0.1 spec §6.4)', () => {
     },
   );
 
-  it.each(['json', 'jsonb'])('json udt %s → json', (udt) => {
+  it.each(['json', 'jsonb'])('json udt %s -> json', (udt) => {
     expect(
       inferWidget({
         column: col('metadata', udt),
@@ -109,7 +109,7 @@ describe('inferWidget (Kozou v0.1 spec §6.4)', () => {
     ).toBe('json');
   });
 
-  it('text + name に url → image-url', () => {
+  it('text + name contains url -> image-url', () => {
     expect(
       inferWidget({
         column: col('homepage_url', 'text'),
@@ -120,7 +120,7 @@ describe('inferWidget (Kozou v0.1 spec §6.4)', () => {
     ).toBe('image-url');
   });
 
-  it('text + name に image → image-url', () => {
+  it('text + name contains image -> image-url', () => {
     expect(
       inferWidget({
         column: col('image', 'text'),
@@ -131,40 +131,40 @@ describe('inferWidget (Kozou v0.1 spec §6.4)', () => {
     ).toBe('image-url');
   });
 
-  it('text + commentBody に markdown → textarea', () => {
+  it('text + commentBody mentions markdown -> textarea', () => {
     expect(
       inferWidget({
         column: col('bio', 'text'),
         isForeignKey: false,
         enumValues: null,
-        commentBody: '作家の経歴 (markdown 可)',
+        commentBody: 'author bio (markdown allowed)',
       }),
     ).toBe('textarea');
   });
 
-  it('text + commentBody に 本文 → textarea', () => {
+  it('text + commentBody mentions "body" -> textarea', () => {
     expect(
       inferWidget({
         column: col('description', 'text'),
         isForeignKey: false,
         enumValues: null,
-        commentBody: '長い本文を保持',
+        commentBody: 'stores the body text of an article',
       }),
     ).toBe('textarea');
   });
 
-  it('その他 text → text', () => {
+  it('plain text column -> text', () => {
     expect(
       inferWidget({
         column: col('display_name', 'text'),
         isForeignKey: false,
         enumValues: null,
-        commentBody: '表示名',
+        commentBody: 'display name',
       }),
     ).toBe('text');
   });
 
-  it('FK は enumValues より優先', () => {
+  it('FK beats enumValues', () => {
     expect(
       inferWidget({
         column: col('artist_id', 'uuid'),
@@ -175,7 +175,7 @@ describe('inferWidget (Kozou v0.1 spec §6.4)', () => {
     ).toBe('relation-select');
   });
 
-  it('enumValues は udt 推論より優先', () => {
+  it('enumValues beats udt inference', () => {
     expect(
       inferWidget({
         column: col('status', 'text'),
@@ -186,7 +186,7 @@ describe('inferWidget (Kozou v0.1 spec §6.4)', () => {
     ).toBe('enum-select');
   });
 
-  it('空配列 enumValues は無視', () => {
+  it('empty enumValues is ignored', () => {
     expect(
       inferWidget({
         column: col('display_name', 'text'),
