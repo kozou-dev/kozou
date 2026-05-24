@@ -25,7 +25,8 @@
     "@kozou/introspect": "workspace:*",
     "@kozou/mcp": "workspace:*",
     "commander": "^14.0.0",
-    "yaml": "^2.9.0"
+    "yaml": "^2.9.0",
+    "zod": "^3.23.0"
   },
   "devDependencies": {
     "tsx": "^4.19.0"
