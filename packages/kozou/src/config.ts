@@ -3,7 +3,7 @@
 // Reads the YAML config file, expands ${VAR} / ${VAR:-default} placeholders
 // against the process environment, fills in defaults, and validates the
 // result with zod. Every field has a default so kozou can run with only the
-// DATABASE_URL environment variable set, per dev_spec §9.2.
+// DATABASE_URL environment variable set, per the Kozou v0.1 design spec §9.2.
 
 import { readFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';

@@ -145,20 +145,23 @@ jobs:
         # generated code out of the published artifacts) is satisfied
         # by grepping the code/binary files only.
         #
-        # The Step 5 CLI scaffold ships env.example /
-        # kozou.config.yaml templates that mention `postgrest` as the
-        # default adapter URL host - that is a configuration value,
-        # not PostgREST code/binary, so we also exclude *.example.
+        # The Step 5 CLI scaffold ships env.example as a configuration
+        # template that mentions `postgrest` as the default adapter
+        # URL host - that is a configuration value, not PostgREST
+        # code/binary, so we also exclude that one file. We
+        # deliberately do NOT exclude every *.example because a
+        # future code-like example (e.g. example.ts) must still be
+        # scanned.
         working-directory: packages/kozou
         run: |
           npm pack
           TGZ=$(ls kozou-*.tgz)
-          echo "Inspecting $TGZ (excluding *.md / LICENSE / NOTICE / package.json metadata / *.example)"
+          echo "Inspecting $TGZ (excluding *.md / LICENSE / NOTICE / package.json metadata / env.example)"
           mkdir -p _npm_inspect && tar -xzf "$TGZ" -C _npm_inspect
           FILES=$(find _npm_inspect -type f \
               ! -name '*.md' ! -name '*.rst' ! -name '*.txt' \
               ! -name '*.yaml' ! -name '*.yml' ! -name '*.toml' \
-              ! -name '*.example' \
+              ! -name 'env.example' \
               ! -name 'LICENSE' ! -name 'LICENSE.*' ! -name 'NOTICE' ! -name 'NOTICE.*' \
               ! -name 'package.json' ! -name 'pyproject.toml' \
               -print)

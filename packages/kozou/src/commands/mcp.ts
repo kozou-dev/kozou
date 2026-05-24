@@ -2,10 +2,10 @@
 //
 // --stdio: spins up the @kozou/mcp server with a stdio transport, reading
 //   connection details from kozou.config.yaml / environment.
-// --http: deferred to v0.1.1 per dev_spec §16.1.1 B. Prints a hand-off note
-//   to stderr and exits cleanly.
+// --http: deferred to v0.1.1 per the Kozou v0.1 design spec §16.1.1 B.
+//   Prints a hand-off note to stderr and exits cleanly.
 //
-// See dev_spec §9.1 and §7.
+// See Kozou v0.1 design spec §9.1 and §7.
 
 import { SchemaCache, startStdioServer } from '@kozou/mcp';
 import { loadConfig } from '../config.js';

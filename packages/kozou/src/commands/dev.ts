@@ -1,7 +1,7 @@
 // `kozou dev` command implementation.
 //
 // In v0.1 this is a deliberate stub: the Admin UI (`@kozou/svelte-ui`) is
-// scheduled for v0.1.1 per dev_spec §16.1.1 B, so there is nothing for the
+// scheduled for v0.1.1 per the Kozou v0.1 design spec §16.1.1 B, so there is nothing for the
 // dev server to host yet. Until the UI lands, we print a hand-off message
 // pointing adopters at `kozou mcp --stdio` for AI agent access.
 
