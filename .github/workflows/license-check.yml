@@ -75,6 +75,18 @@ jobs:
             || { echo "ERROR: README.md License section is not 'Apache 2.0'"; exit 1; }
           echo "OK: README.md License = Apache 2.0"
 
+      - name: No non-English text in tracked files
+        # Step 4-D: enforce the English-only policy declared in
+        # AGENTS.md at CI time. The intent is to prevent any non-Latin
+        # script (Japanese, Korean, Cyrillic, Arabic, Hebrew,
+        # Devanagari, Thai, ...) from sneaking into a globally-
+        # oriented OSS repo, not to single out a specific language.
+        # Latin diacritics (é, ü, ñ, ...) and Greek (used in math
+        # notation) are intentionally allowed. The script uses
+        # `perl -CSDA` so it stays portable on macOS (BSD grep has no
+        # -P). See scripts/check-english-only.sh for the full check.
+        run: bash scripts/check-english-only.sh
+
       - name: No AGPL/GPL/PostgREST vocabulary in code files
         # NOTE: this check scans only TypeScript / JavaScript / Svelte /
         # SQL code. Excluded by design:
