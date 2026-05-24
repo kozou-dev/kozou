@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { writeFile, mkdir, mkdtemp } from 'node:fs/promises';
+import { writeFile, mkdtemp } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomBytes } from 'node:crypto';

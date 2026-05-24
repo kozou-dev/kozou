@@ -18,6 +18,10 @@ const DEV_HANDOFF_MESSAGE =
   '    kozou mcp --stdio   Run the MCP server for AI agent access.\n' +
   '    kozou inspect       Dump the Schema Context as JSON or YAML.\n';
 
+// The leading underscore on `_opts` flags this as a deliberately ignored
+// parameter (eslint argsIgnorePattern: ^_). The full DevOptions shape is
+// kept in the signature so it matches the v0.1.1 implementation that
+// will actually consume the config.
 export async function devCommand(_opts: DevOptions = {}): Promise<void> {
   process.stderr.write(DEV_HANDOFF_MESSAGE);
 }

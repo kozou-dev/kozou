@@ -11,6 +11,16 @@ module.exports = {
     node: true,
     es2022: true,
   },
+  rules: {
+    // Allow leading-underscore parameters / variables to be unused. This
+    // is the conventional way to mark a deliberately-ignored argument
+    // that we still want to keep in the signature (e.g. command stubs
+    // that match the production signature).
+    '@typescript-eslint/no-unused-vars': [
+      'error',
+      { argsIgnorePattern: '^_', varsIgnorePattern: '^_' },
+    ],
+  },
   ignorePatterns: [
     'dist/',
     'build/',
