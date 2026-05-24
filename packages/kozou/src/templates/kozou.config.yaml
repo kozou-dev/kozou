@@ -1,0 +1,29 @@
+# kozou.config.yaml
+#
+# Every field has a sensible default; only set what you need to override.
+# All ${VAR} and ${VAR:-fallback} placeholders are expanded against the
+# process environment at startup.
+
+database:
+  url: ${DATABASE_URL}
+  schemas: [public]
+
+server:
+  ui:
+    port: 3333
+    host: 0.0.0.0
+  mcp:
+    http:
+      port: 3334
+      host: 0.0.0.0
+    stdio: false
+
+adapter:
+  type: postgrest
+  url: ${KOZOU_ADAPTER_URL:-http://postgrest:3000}
+
+uiHints:
+  path: ./ui-hints.yaml
+
+cache:
+  ttlMs: 60000

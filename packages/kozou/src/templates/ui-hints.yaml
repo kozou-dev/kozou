@@ -1,0 +1,26 @@
+# ui-hints.yaml (optional)
+#
+# COMMENT ON and CREATE VIEW already give kozou enough information to
+# render a usable Admin UI out of the box. Use this file only to fine-tune
+# presentation: override a table label, force a specific widget for a
+# column, or surface relation search fields.
+#
+# See Kozou v0.1 design spec §4.3 for the full schema.
+
+tables: {}
+
+# Example overrides (uncomment and adapt):
+#
+# tables:
+#   users:
+#     label: People
+#     displayField: full_name
+#     columns:
+#       bio:
+#         widget: textarea
+#       avatar_url:
+#         widget: image-url
+#
+# views:
+#   vw_active_users:
+#     label: Active users

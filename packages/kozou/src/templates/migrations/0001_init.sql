@@ -1,0 +1,25 @@
+-- 0001_init.sql
+--
+-- Add your CREATE TABLE / CREATE VIEW / COMMENT ON statements here.
+-- kozou reads from this database at runtime; the COMMENT ON text is what
+-- shapes the Admin UI and the MCP context handed to AI agents.
+--
+-- See https://kozou.org for documentation on the COMMENT conventions
+-- (@ai / @widget / @policy / @example tags), VIEW-as-domain-concept,
+-- and the recommended layout for migrations.
+
+-- Example (delete and replace with your own schema):
+--
+-- CREATE TABLE users (
+--   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+--   email text NOT NULL UNIQUE,
+--   full_name text,
+--   created_at timestamptz NOT NULL DEFAULT now(),
+--   deleted_at timestamptz
+-- );
+--
+-- COMMENT ON TABLE users IS
+--   'Application users.
+--    @ai: rows with deleted_at IS NOT NULL must be excluded from queries.';
+--
+-- COMMENT ON COLUMN users.email IS 'Login email (unique).';

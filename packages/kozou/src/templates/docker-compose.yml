@@ -1,0 +1,55 @@
+# Docker Compose stack for a kozou project.
+#
+# Brings up:
+#   - postgres   PostgreSQL 16 (the source of truth)
+#   - postgrest  REST adapter consumed by the Kozou DataAdapter
+#                (MIT-licensed external dependency, not bundled)
+#   - kozou      Admin UI + MCP HTTP server (placeholder image until the
+#                first kozou release publishes a Docker image)
+#
+# Customize the credentials in .env before running `docker compose up`.
+
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-kozou}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-kozou}
+      POSTGRES_DB: ${POSTGRES_DB:-kozou}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - ./migrations:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-kozou}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  postgrest:
+    image: postgrest/postgrest:latest
+    environment:
+      PGRST_DB_URI: postgres://${POSTGRES_USER:-kozou}:${POSTGRES_PASSWORD:-kozou}@postgres:5432/${POSTGRES_DB:-kozou}
+      PGRST_DB_SCHEMA: public
+      PGRST_DB_ANON_ROLE: ${POSTGRES_USER:-kozou}
+    ports:
+      - "3000:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  kozou:
+    # TODO(release): replace with the published kozou image once v0.1.0
+    # ships to GHCR / Docker Hub.
+    image: ghcr.io/kozou-dev/kozou:latest
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-kozou}:${POSTGRES_PASSWORD:-kozou}@postgres:5432/${POSTGRES_DB:-kozou}
+      KOZOU_ADAPTER_URL: http://postgrest:3000
+    depends_on:
+      postgres:
+        condition: service_healthy
+      postgrest:
+        condition: service_started
+    ports:
+      - "3333:3333"   # Admin UI
+      - "3334:3334"   # MCP HTTP
