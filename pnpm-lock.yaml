@@ -68,7 +68,27 @@ importers:
         specifier: ^8.11.0
         version: 8.20.0
 
-  packages/kozou: {}
+  packages/kozou:
+    dependencies:
+      '@kozou/core':
+        specifier: workspace:*
+        version: link:../core
+      '@kozou/introspect':
+        specifier: workspace:*
+        version: link:../introspect
+      '@kozou/mcp':
+        specifier: workspace:*
+        version: link:../mcp
+      commander:
+        specifier: ^14.0.0
+        version: 14.0.3
+      yaml:
+        specifier: ^2.9.0
+        version: 2.9.0
+    devDependencies:
+      tsx:
+        specifier: ^4.19.0
+        version: 4.22.3
 
   packages/mcp:
     dependencies:
@@ -875,6 +895,10 @@ packages:
 
   color-name@1.1.4:
     resolution: {integrity: sha512-dOy+3AuW3a2wNbZHIuMZpTcgjGuLU/uBL/ubcZF9OXbDo8ff4O8yVp5Bf0efS8uEoYo5q4Fx7dY9OgQGXgAsQA==}
+
+  commander@14.0.3:
+    resolution: {integrity: sha512-H+y0Jo/T1RZ9qPP4Eh1pkcQcLRglraJaSLoyOtHxu6AapkjWVCy2Sit1QQ4x3Dng8qDlSsZEet7g5Pq06MvTgw==}
+    engines: {node: '>=20'}
 
   compress-commons@6.0.2:
     resolution: {integrity: sha512-6FqVXeETqWPoGcfzrXb37E50NP0LXT8kAMu5ooZayhWWdgEY4lBEEcbQNXtkuKQsGduxiIcI4gOTsxTmuq/bSg==}
@@ -2903,6 +2927,8 @@ snapshots:
       color-name: 1.1.4
 
   color-name@1.1.4: {}
+
+  commander@14.0.3: {}
 
   compress-commons@6.0.2:
     dependencies:

@@ -2,15 +2,32 @@
   "name": "kozou",
   "version": "0.0.0",
   "private": true,
-  "description": "Kozou CLI / unified entry point (skeleton; v0.1 implementation pending). See Kozou v0.1 design spec.",
+  "description": "Kozou CLI: scaffolding, schema introspection, and MCP server entry points. See Kozou v0.1 design spec §9.",
   "license": "Apache-2.0",
   "type": "module",
   "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "bin": {
+    "kozou": "./src/cli.ts",
+    "create-kozou": "./src/create-kozou.ts"
+  },
   "files": [
-    "dist"
+    "dist",
+    "src/templates"
   ],
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "build": "tsc"
+    "build": "tsc",
+    "test": "vitest run --coverage"
+  },
+  "dependencies": {
+    "@kozou/core": "workspace:*",
+    "@kozou/introspect": "workspace:*",
+    "@kozou/mcp": "workspace:*",
+    "commander": "^14.0.0",
+    "yaml": "^2.9.0"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.0"
   }
 }
