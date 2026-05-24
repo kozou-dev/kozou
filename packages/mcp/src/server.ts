@@ -28,7 +28,7 @@ const TOOL_DEFINITIONS = [
     description: 'Return the full schema + COMMENT for the given table',
     inputSchema: {
       type: 'object',
-      properties: { qualifiedName: { type: 'string', description: 'e.g. public.inventory_items' } },
+      properties: { qualifiedName: { type: 'string', description: 'e.g. public.users' } },
       required: ['qualifiedName'],
     },
   },
@@ -45,7 +45,7 @@ const TOOL_DEFINITIONS = [
     description: 'Return columns + purpose + underlying tables + definition for the given view',
     inputSchema: {
       type: 'object',
-      properties: { qualifiedName: { type: 'string', description: 'e.g. public.vw_inventory_for_sale' } },
+      properties: { qualifiedName: { type: 'string', description: 'e.g. public.vw_active_users' } },
       required: ['qualifiedName'],
     },
   },

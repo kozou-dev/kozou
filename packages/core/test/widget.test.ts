@@ -18,7 +18,7 @@ describe('inferWidget (Kozou v0.1 spec §6.4)', () => {
   it('FK -> relation-select (highest priority)', () => {
     expect(
       inferWidget({
-        column: col('artist_id', 'uuid'),
+        column: col('author_id', 'uuid'),
         isForeignKey: true,
         enumValues: ['a', 'b'],
         commentBody: '',
@@ -167,7 +167,7 @@ describe('inferWidget (Kozou v0.1 spec §6.4)', () => {
   it('FK beats enumValues', () => {
     expect(
       inferWidget({
-        column: col('artist_id', 'uuid'),
+        column: col('author_id', 'uuid'),
         isForeignKey: true,
         enumValues: ['a'],
         commentBody: '',

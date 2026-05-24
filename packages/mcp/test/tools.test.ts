@@ -11,9 +11,8 @@ import {
   getConceptContext,
 } from '../src/index.js';
 
-// Inline generic fixture. Kept self-contained so this integration test does
-// not depend on any external sample SQL (Caronima's Nimart fixture lives in
-// kozou-planning/private/ and is intentionally not part of the public repo).
+// Inline self-contained SQL fixture for this integration test. Keeps the
+// suite independent of any external sample SQL.
 const FIXTURE_SQL = `
 CREATE TABLE authors (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),

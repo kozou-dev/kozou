@@ -3,9 +3,8 @@ import pkg from 'pg';
 import { setupDatabase, type DatabaseHandle } from './setup.js';
 import { SchemaCache } from '../src/index.js';
 
-// Minimal inline fixture for cache-behaviour tests. The Nimart sample that
-// previously backed this suite is private dogfooding material and now lives
-// in kozou-planning/private/.
+// Minimal inline fixture for cache-behaviour tests; only two tables are
+// needed to exercise TTL / invalidate / inflight semantics.
 const FIXTURE_SQL = `
 CREATE TABLE authors (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
