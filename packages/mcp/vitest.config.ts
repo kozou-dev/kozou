@@ -13,12 +13,13 @@ export default defineConfig({
         statements: 90,
       },
       reporter: ['text', 'lcov'],
-      // cli.ts and server.ts are an integration layer driven through the
-      // MCP SDK transport; unit-testing the handlers directly relies on
-      // SDK-private APIs. tools/* and schemas/* hit 100% coverage to
-      // compensate, satisfying the 100% requirement of Kozou v0.1 spec §13.1
-      // for tool I/O schemas + tool functions.
-      exclude: ['src/cli.ts', 'src/server.ts'],
+      // cli.ts, server.ts, and startStdioServer.ts are an integration
+      // layer driven through the MCP SDK transport; unit-testing the
+      // handlers directly relies on SDK-private APIs. tools/* and
+      // schemas/* hit 100% coverage to compensate, satisfying the 100%
+      // requirement of Kozou v0.1 spec §13.1 for tool I/O schemas +
+      // tool functions.
+      exclude: ['src/cli.ts', 'src/server.ts', 'src/startStdioServer.ts'],
     },
     testTimeout: 30_000,
     hookTimeout: 120_000,

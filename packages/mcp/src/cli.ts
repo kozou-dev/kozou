@@ -1,7 +1,6 @@
 #!/usr/bin/env node
-import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
-import { createMcpServer } from './server.js';
 import { SchemaCache } from './schemaCache.js';
+import { startStdioServer } from './startStdioServer.js';
 
 function parseEnvNumber(value: string | undefined, fallback: number): number {
   if (value === undefined) return fallback;
@@ -23,13 +22,7 @@ async function main(): Promise<void> {
     connection: connectionString,
     ttlMs: parseEnvNumber(process.env.KOZOU_CACHE_TTL_MS, 60_000),
   });
-  const server = createMcpServer(cache);
-  process.on('SIGHUP', () => {
-    cache.invalidate();
-    console.error('[@kozou/mcp] SIGHUP received, cache invalidated');
-  });
-  const transport = new StdioServerTransport();
-  await server.connect(transport);
+  await startStdioServer(cache);
 }
 
 main().catch((err) => {
