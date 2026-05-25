@@ -34,7 +34,7 @@ Introspects the configured PostgreSQL database and emits a Schema
 Context to stdout (or `--output <path>`):
 
 ```bash
-KOZOU_DATABASE_URL=postgres://kozou:kozou@localhost:5432/kozou \
+DATABASE_URL=postgres://kozou:kozou@localhost:5432/kozou \
   kozou inspect --format yaml > schema.yaml
 ```
 
@@ -44,17 +44,23 @@ Starts an MCP server over stdio so Claude Code / other AI agents
 can call the introspect / describe-table tools:
 
 ```bash
-KOZOU_DATABASE_URL=postgres://kozou:kozou@localhost:5432/kozou \
+DATABASE_URL=postgres://kozou:kozou@localhost:5432/kozou \
   npx kozou mcp --stdio
 ```
 
-HTTP transport (`--http`) is reserved for v0.1.1.
+The `${DATABASE_URL}` placeholder inside the bundled
+`kozou.config.yaml` template is what consumes that env var; the
+CLI does not honor `KOZOU_DATABASE_URL` directly (an alias is on
+the v0.1.1 roadmap). HTTP transport (`--http`) is also reserved
+for v0.1.1.
 
 ### `kozou dev`
 
-Reserved for v0.1.1. In v0.1 the command prints a hand-off message
-pointing at `docker compose up` for now; in v0.1.1 it will spawn
-the bundled `@kozou/svelte-ui` Admin UI + an MCP HTTP server.
+Reserved for v0.1.1. In v0.1.0 the command prints a hand-off
+message listing the subcommands available today
+(`kozou mcp --stdio`, `kozou inspect`) and exits. In v0.1.1 it
+will spawn the bundled `@kozou/svelte-ui` Admin UI + an MCP HTTP
+server.
 
 ### `create-kozou <dir>`
 

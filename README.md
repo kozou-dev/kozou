@@ -48,11 +48,11 @@ Designs where tenants in a multi-tenant SaaS can edit DB COMMENT text are **disc
 
 ## Requirements
 
-When Kozou v0.1 lands, the runtime requirements will be:
+Runtime requirements for v0.1.0:
 
 - **PostgreSQL 16 or later** — the canonical source of truth
-- **Docker 24 or later** — recommended for the bundled `docker compose up` stack (PostgreSQL + PostgREST + Kozou); PostgREST is run as a side-by-side container and is **not** bundled inside the Kozou image
-- **Node.js 20 or later** — only when running Kozou directly from npm rather than the prebuilt Docker image
+- **Docker 24 or later** (optional) — recommended for the v0.1.0 `docker compose up` stack, which currently brings up PostgreSQL + PostgREST. The Kozou CLI ships separately as `ghcr.io/kozou-dev/kozou:v0.1.0`; the scaffold's `kozou` compose service is intentionally commented out until `kozou dev` host integration lands in v0.1.1. PostgREST stays a side-by-side container and is **not** bundled inside the Kozou image.
+- **Node.js 20 or later** — for running the npm-published packages directly (`npx kozou …`)
 
 Contributors additionally need **pnpm 9 or later**. See [CONTRIBUTING.md](CONTRIBUTING.md) for the development environment setup.
 
