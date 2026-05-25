@@ -138,6 +138,9 @@ importers:
       '@lucide/svelte':
         specifier: ^1.16.0
         version: 1.16.0(svelte@5.55.9)
+      '@tanstack/table-core':
+        specifier: ^8.21.3
+        version: 8.21.3
       bits-ui:
         specifier: ^2.18.1
         version: 2.18.1(@internationalized/date@3.12.1)(@sveltejs/kit@2.61.1(@sveltejs/vite-plugin-svelte@7.1.2(svelte@5.55.9)(vite@8.0.14(@types/node@25.9.1)(esbuild@0.28.0)(jiti@2.7.0)(tsx@4.22.3)(yaml@2.9.0)))(svelte@5.55.9)(typescript@5.9.3)(vite@8.0.14(@types/node@25.9.1)(esbuild@0.28.0)(jiti@2.7.0)(tsx@4.22.3)(yaml@2.9.0)))(svelte@5.55.9)
@@ -984,6 +987,10 @@ packages:
     resolution: {integrity: sha512-t6J3OrB5Fc0ExuhohouH0fWUGMYL6PTLhW+E7zIk/pdbnJARZDCwjBznFnkh5ynRnIRSI4YjtTH0t6USjJISrw==}
     peerDependencies:
       vite: ^5.2.0 || ^6 || ^7 || ^8
+
+  '@tanstack/table-core@8.21.3':
+    resolution: {integrity: sha512-ldZXEhOBb8Is7xLs01fR3YEc3DERiz5silj8tnGkFZytt1abEvl/GhUmCE0PMLaMPTa3Jk4HbKmRlHmu+gCftg==}
+    engines: {node: '>=12'}
 
   '@testcontainers/postgresql@12.0.0':
     resolution: {integrity: sha512-mqGQHwmY+xLKFvFd3XQYaa0vDJRaJAOUfFWYbgjd4wb6hOlrK7xhszaXB7KuGCGTIJf5jvtoEB8/56oVB5s55w==}
@@ -3746,6 +3753,8 @@ snapshots:
       '@tailwindcss/oxide': 4.3.0
       tailwindcss: 4.3.0
       vite: 8.0.14(@types/node@25.9.1)(esbuild@0.28.0)(jiti@2.7.0)(tsx@4.22.3)(yaml@2.9.0)
+
+  '@tanstack/table-core@8.21.3': {}
 
   '@testcontainers/postgresql@12.0.0':
     dependencies:

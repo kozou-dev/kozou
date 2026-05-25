@@ -18,6 +18,7 @@
     "@kozou/core": "workspace:*",
     "@kozou/introspect": "workspace:*",
     "@lucide/svelte": "^1.16.0",
+    "@tanstack/table-core": "^8.21.3",
     "bits-ui": "^2.18.1",
     "clsx": "^2.1.1",
     "tailwind-merge": "^3.6.0",

@@ -47,6 +47,13 @@ module.exports = {
         // generated reactive code (let bindings reassigned by event
         // handlers); the base no-unused-vars rule misfires there.
         '@typescript-eslint/no-unused-vars': 'off',
+        // svelte-eslint-parser treats the <script> block as a nested
+        // function scope, so plain `function` declarations inside it
+        // trip no-inner-declarations even though they are module-
+        // scope inside the compiled component. Conventional Svelte
+        // <script> code uses both `function foo() {}` and arrow
+        // forms; allow both.
+        'no-inner-declarations': 'off',
       },
     },
     // Kozou v0.1 spec §18.1.1 + Kozou v0.1 license compliance §3:
