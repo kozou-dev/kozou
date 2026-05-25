@@ -1,11 +1,10 @@
 // @kozou/svelte-ui — Admin UI library exports.
 //
 // See Kozou v0.1 design spec §8 for the SvelteKit Admin UI
-// specification. The Step 7 release PR will flip the `private`
-// flag on packages/svelte-ui/package.json and these re-exports
-// will become the package's public API on npm.
+// specification. These re-exports are the package's public API on
+// npm starting with v0.1.0.
 
-export const PACKAGE_VERSION = '0.0.0';
+export const PACKAGE_VERSION = '0.1.0';
 
 export type {
   AdapterErrorCode,
