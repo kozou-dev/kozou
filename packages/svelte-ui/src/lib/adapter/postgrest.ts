@@ -26,6 +26,7 @@ import type { FetchLike } from './types.js';
 const DEFAULT_PAGE_SIZE = 50;
 const DEFAULT_SCHEMA = 'public';
 const DEFAULT_PRIMARY_KEY = 'id';
+const DEFAULT_RELATION_LIMIT = 20;
 
 const OR_FILTER_KEY = '__or';
 
@@ -138,30 +139,89 @@ export class PostgrestDataAdapter implements DataAdapter {
     return (await readJson(response, url)) as Record<string, unknown>;
   }
 
-  create(
-    _resource: string,
-    _data: Record<string, unknown>,
+  async create(
+    resource: string,
+    data: Record<string, unknown>,
   ): Promise<Record<string, unknown>> {
-    return Promise.reject(notImplemented('create'));
+    const { schema, table } = splitResource(resource, this.defaultSchema);
+    const url = `${this.baseUrl}/${encodeURIComponent(table)}`;
+    const headers = this.mutationHeaders(schema);
+    const response = await this.send('POST', url, headers, JSON.stringify(data));
+    await assertOk(response, url);
+    return (await readJson(response, url)) as Record<string, unknown>;
   }
 
-  update(
-    _resource: string,
-    _id: string | number,
-    _data: Record<string, unknown>,
+  async update(
+    resource: string,
+    id: string | number,
+    data: Record<string, unknown>,
   ): Promise<Record<string, unknown>> {
-    return Promise.reject(notImplemented('update'));
+    const { schema, table } = splitResource(resource, this.defaultSchema);
+    const primaryKey = this.resolvePrimaryKey(resource);
+    const query = new URLSearchParams();
+    query.set(primaryKey, `eq.${id}`);
+    const url = `${this.baseUrl}/${encodeURIComponent(table)}?${query.toString()}`;
+    const headers = this.mutationHeaders(schema);
+    const response = await this.send('PATCH', url, headers, JSON.stringify(data));
+    await assertOk(response, url);
+    return (await readJson(response, url)) as Record<string, unknown>;
   }
 
-  delete(_resource: string, _id: string | number): Promise<void> {
-    return Promise.reject(notImplemented('delete'));
+  async delete(resource: string, id: string | number): Promise<void> {
+    const { schema, table } = splitResource(resource, this.defaultSchema);
+    const primaryKey = this.resolvePrimaryKey(resource);
+    const query = new URLSearchParams();
+    query.set(primaryKey, `eq.${id}`);
+    const url = `${this.baseUrl}/${encodeURIComponent(table)}?${query.toString()}`;
+    const headers: Record<string, string> = { ...this.staticHeaders };
+    addProfileHeader(headers, schema, this.defaultSchema, 'write');
+    const response = await this.send('DELETE', url, headers, undefined);
+    await assertOk(response, url);
   }
 
-  searchRelation(
-    _resource: string,
-    _params: SearchRelationParams,
+  async searchRelation(
+    resource: string,
+    params: SearchRelationParams,
   ): Promise<RelationOption[]> {
-    return Promise.reject(notImplemented('searchRelation'));
+    const { schema, table } = splitResource(resource, this.defaultSchema);
+    const primaryKey = this.resolvePrimaryKey(resource);
+    const limit = params.limit ?? DEFAULT_RELATION_LIMIT;
+
+    const query = new URLSearchParams();
+    query.set('select', `${primaryKey},${params.labelField}`);
+    if (params.query.length > 0 && params.searchFields.length > 0) {
+      const orExpr = params.searchFields
+        .map((field) => `${field}.ilike.*${params.query}*`)
+        .join(',');
+      query.set('or', `(${orExpr})`);
+    }
+    query.set('limit', String(limit));
+
+    const url = `${this.baseUrl}/${encodeURIComponent(table)}?${query.toString()}`;
+    const headers: Record<string, string> = {
+      ...this.staticHeaders,
+      Accept: 'application/json',
+    };
+    addProfileHeader(headers, schema, this.defaultSchema, 'read');
+
+    const response = await this.send('GET', url, headers, undefined);
+    await assertOk(response, url);
+    const rows = (await readJson(response, url)) as Record<string, unknown>[];
+    return rows.map((row) => ({
+      id: row[primaryKey] as string | number,
+      label: String(row[params.labelField] ?? ''),
+    }));
+  }
+
+  private mutationHeaders(schema: string): Record<string, string> {
+    const headers: Record<string, string> = {
+      ...this.staticHeaders,
+      Accept: 'application/vnd.pgrst.object+json',
+      'Content-Type': 'application/json',
+      Prefer: 'return=representation',
+    };
+    addProfileHeader(headers, schema, this.defaultSchema, 'write');
+    return headers;
   }
 
   private async send(
@@ -296,16 +356,6 @@ async function assertOk(response: Response, url: string): Promise<void> {
 function adapterConfigError(message: string): PostgrestAdapterError {
   return new PostgrestAdapterError({
     message,
-    status: 0,
-    url: '',
-    responseBody: null,
-    code: 'config',
-  });
-}
-
-function notImplemented(method: string): PostgrestAdapterError {
-  return new PostgrestAdapterError({
-    message: `PostgrestDataAdapter: ${method}() not implemented (Sub-step 6-E).`,
     status: 0,
     url: '',
     responseBody: null,
