@@ -140,43 +140,70 @@ jobs:
           fi
           echo "OK: code files (*.ts/*.tsx/*.js/*.cjs/*.mjs/*.svelte/*.sql) are clean"
 
-  artifact-grep:
-    name: Build artifact integrity check
+  npm-artifact-grep:
+    name: npm artifact integrity (${{ matrix.pkg }})
     runs-on: ubuntu-latest
+    # Step 7-D matrix-ized this job per Kozou v0.1 design spec
+    # §16.1.1 A (Step 6-M addendum). Each matrix leg packs a single
+    # workspace package, unpacks the tarball, and verifies the
+    # code/binary files contain no forbidden vocabulary.
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - pkg: kozou
+            filter: kozou
+            tgz_glob: 'kozou-[0-9]*.tgz'
+            forbidden_regex: 'postgrest|pgrst|agpl|gnu affero|gpl-3|gnu general public'
+          - pkg: svelte-ui
+            filter: '@kozou/svelte-ui'
+            tgz_glob: 'kozou-svelte-ui-*.tgz'
+            # The svelte-ui adapter-node bundle inlines the
+            # `PostgrestDataAdapter` class name into the hashed
+            # server chunk (see Kozou v0.1 design spec §4.4 / §8.5
+            # for the adapter contract). The class identifier is
+            # not PostgREST source / binary / generated code
+            # (license compliance §4 only forbids the latter), and
+            # the bundled chunk's hashed filename makes a stable
+            # exclude list impractical. Drop `postgrest|pgrst` from
+            # the alternation; AGPL / GPL / "GNU Affero" / "GNU
+            # General Public" stay enforced - those would always
+            # indicate a real license problem.
+            forbidden_regex: 'agpl|gnu affero|gpl-3|gnu general public'
+    env:
+      # `svelte-check` / Svelte 5 + the @kozou/svelte-ui workspace
+      # push past the runner's default ~2 GB Node heap during the
+      # vite build. Matches the bump in ci.yml (Step 6-Z-2).
+      NODE_OPTIONS: '--max-old-space-size=4096'
     steps:
       # Codex W2: SHA-pin third-party actions (kept fresh by Dependabot).
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
-      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
-        with:
-          node-version: '20'
-
-      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
-        with:
-          python-version: '3.11'
-
-      - name: Install the Python build tool
-        run: pip install build
-
       - name: Install pnpm
         uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          # Pin to .nvmrc (Node 24) so the svelte-ui matrix leg has
+          # the same runtime as ci.yml; the kozou leg is content
+          # with anything >= 20, but matching versions avoids a
+          # second cache surface.
+          node-version-file: '.nvmrc'
+          cache: 'pnpm'
 
       - name: Install workspace dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Build packages/kozou (so dist/ is what gets packed)
-        # Step 7-A flipped kozou to publish through `./dist/`. The
-        # `npm pack` step below now needs the built JS + the copied
-        # templates on disk before tarballing, otherwise it would
-        # publish an empty `dist/` and the artifact-grep below would
-        # have nothing to scan. Build only kozou here; svelte-ui and
-        # its build step land in Step 7-D when this job goes matrix.
-        run: pnpm --filter kozou run build
+      - name: Build ${{ matrix.pkg }} (so the published artifact is what gets packed)
+        # Step 7-A / 7-C flipped both packages to publish through
+        # built output (`dist/` for kozou, `build/` for svelte-ui).
+        # Without this step the tarball would ship an empty publish
+        # directory and the grep below would scan no code at all.
+        run: pnpm --filter ${{ matrix.filter }} run build
 
-      - name: npm pack packages/kozou and grep code/binary contents
-        # Step 2-4 moved the publish target from the root to
-        # packages/kozou. README/LICENSE/NOTICE/package.json metadata
-        # are intentionally allowed to mention PostgREST and license
+      - name: npm pack ${{ matrix.pkg }} + grep code/binary contents
+        # README / LICENSE / NOTICE / package.json metadata are
+        # intentionally allowed to mention PostgREST and license
         # names, so we exclude them. The actual goal of Kozou v0.1
         # license compliance §4 (keep PostgREST source / binary /
         # generated code out of the published artifacts) is satisfied
@@ -185,19 +212,16 @@ jobs:
         # The Step 5 CLI scaffold ships env.example as a configuration
         # template that mentions `postgrest` as the default adapter
         # URL host - that is a configuration value, not PostgREST
-        # code/binary, so we also exclude that one file. We
+        # code/binary, so we exclude that one file by basename. We
         # deliberately do NOT exclude every *.example because a
         # future code-like example (e.g. example.ts) must still be
-        # scanned.
-        #
-        # Step 7-A also moved env.example into `dist/templates/` via
-        # the build step above, so this same exclusion still applies
-        # by basename inside the unpacked tarball.
-        working-directory: packages/kozou
+        # scanned. Step 7-A moved env.example into `dist/templates/`,
+        # which keeps the same basename so the exclusion still works.
+        working-directory: packages/${{ matrix.pkg }}
         run: |
           npm pack
-          TGZ=$(ls kozou-*.tgz)
-          echo "Inspecting $TGZ (excluding *.md / LICENSE / NOTICE / package.json metadata / env.example)"
+          TGZ=$(ls ${{ matrix.tgz_glob }})
+          echo "Inspecting $TGZ (regex: ${{ matrix.forbidden_regex }})"
           mkdir -p _npm_inspect && tar -xzf "$TGZ" -C _npm_inspect
           FILES=$(find _npm_inspect -type f \
               ! -name '*.md' ! -name '*.rst' ! -name '*.txt' \
@@ -207,17 +231,51 @@ jobs:
               ! -name 'package.json' ! -name 'pyproject.toml' \
               -print)
           if [ -z "$FILES" ]; then
-            echo "OK: npm tarball clean (no code/binary files to scan, metadata only)"
+            echo "OK: ${{ matrix.pkg }} tarball clean (no code/binary files to scan, metadata only)"
           else
             echo "Checking files:"; echo "$FILES"
-            if echo "$FILES" | xargs grep -i -H -E 'postgrest|pgrst|agpl|gnu affero|gpl-3|gnu general public'; then
-              echo "ERROR: npm tarball code/binary files contain forbidden vocabulary"
+            if echo "$FILES" | xargs grep -i -H -E '${{ matrix.forbidden_regex }}'; then
+              echo "ERROR: ${{ matrix.pkg }} tarball code/binary files contain forbidden vocabulary"
               rm -rf _npm_inspect
               exit 1
             fi
-            echo "OK: npm tarball clean (code/binary files contain no PostgREST/AGPL/GPL terms)"
+            echo "OK: ${{ matrix.pkg }} tarball clean (code/binary files contain no forbidden terms)"
           fi
           rm -rf _npm_inspect
+
+      - name: pnpm licenses list - no forbidden AGPL/GPL/SSPL/BUSL
+        # Walk the transitive dependency tree pnpm resolved for the
+        # filtered package and fail the build if any direct or
+        # transitive dep is under AGPL, GPL-2/3, SSPL, or BUSL.
+        # Match the SPDX simple-expression prefix so composite
+        # expressions like `(MIT OR GPL-2.0)` - which let the
+        # consumer pick the permissive side - do not produce a
+        # false positive. Stricter SPDX parsing is deferred to
+        # v0.1.1 if a real false-negative ever shows up.
+        run: |
+          if pnpm licenses list --recursive --filter ${{ matrix.filter }} --json \
+              | jq -r 'keys[]?' \
+              | grep -E '^(AGPL|GPL-[23]|SSPL|BUSL)'; then
+            echo "ERROR: ${{ matrix.pkg }} transitive deps include a forbidden copyleft license"
+            exit 1
+          fi
+          echo "OK: ${{ matrix.pkg }} transitive license set has no AGPL/GPL/SSPL/BUSL"
+
+  pypi-artifact-grep:
+    name: PyPI artifact integrity check (kozou wheel + sdist)
+    # Step 7-D split this job out of the matrix above so the matrix
+    # can stay focused on npm. `python -m build` only applies to the
+    # top-level `kozou` PyPI publish.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: '3.11'
+
+      - name: Install the Python build tool
+        run: pip install build
 
       - name: python -m build then grep code/binary contents of sdist + wheel
         run: |
