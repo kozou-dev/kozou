@@ -103,6 +103,16 @@ jobs:
         #   spec §9.2; it identifies the adapter, not the implementation)
         # - packages/kozou/test/config.test.ts (asserts the spec's
         #   discriminator literal)
+        # - packages/svelte-ui/src/lib/adapter/postgrest.ts (the
+        #   PostgrestDataAdapter implementation mandated by Kozou v0.1
+        #   spec §4.4 / §8.5; calls into the PostgREST HTTP surface
+        #   but ships none of the PostgREST source/binary itself)
+        # - packages/svelte-ui/src/lib/adapter/index.ts (re-exports
+        #   the PostgrestDataAdapter / PostgrestAdapterError symbols
+        #   above; identifier strings only, no PostgREST code)
+        # - packages/svelte-ui/test/adapter/postgrest.*.test.ts (asserts
+        #   the URLs/headers the adapter sends; documented coverage
+        #   only)
         # The actual contamination risk lives in shippable artifacts
         # (npm pack / python -m build); the artifact-grep job below
         # covers those separately.
@@ -112,7 +122,10 @@ jobs:
              ':(exclude).github/workflows/*.yml' \
              ':(exclude).eslintrc.cjs' \
              ':(exclude)packages/kozou/src/config.ts' \
-             ':(exclude)packages/kozou/test/config.test.ts'; then
+             ':(exclude)packages/kozou/test/config.test.ts' \
+             ':(exclude)packages/svelte-ui/src/lib/adapter/index.ts' \
+             ':(exclude)packages/svelte-ui/src/lib/adapter/postgrest.ts' \
+             ':(exclude)packages/svelte-ui/test/adapter/postgrest.*.test.ts'; then
             echo "ERROR: code files contain AGPL/GPL/PostgREST vocabulary"
             exit 1
           fi
