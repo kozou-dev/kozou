@@ -1,15 +1,32 @@
 {
   "name": "@kozou/svelte-ui",
-  "version": "0.0.0",
-  "private": true,
+  "version": "0.1.0",
   "description": "Kozou reference Admin UI. SvelteKit + Svelte 5 admin UI that consumes SchemaContext via @kozou/core and talks to a backend via the DataAdapter interface. See Kozou v0.1 design spec §8.",
   "license": "Apache-2.0",
   "type": "module",
+  "main": "./build/handler.js",
+  "exports": {
+    ".": {
+      "import": "./build/index.js"
+    },
+    "./handler": {
+      "import": "./build/handler.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "build"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
   "scripts": {
     "dev": "vite dev",
     "build": "vite build",
     "preview": "vite preview",
     "prepare": "svelte-kit sync || echo ''",
+    "prepublishOnly": "pnpm run build",
     "typecheck": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
     "test": "vitest run"
   },
