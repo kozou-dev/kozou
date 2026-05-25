@@ -110,6 +110,13 @@ jobs:
         # - packages/svelte-ui/src/lib/adapter/index.ts (re-exports
         #   the PostgrestDataAdapter / PostgrestAdapterError symbols
         #   above; identifier strings only, no PostgREST code)
+        # - packages/svelte-ui/src/lib/index.ts (top-level package
+        #   re-export of the same adapter symbols ahead of the Step 7
+        #   publish flip; identifier strings only)
+        # - packages/svelte-ui/src/lib/server/adapter.ts (server-side
+        #   DataAdapter singleton that constructs PostgrestDataAdapter
+        #   from KOZOU_ADAPTER_URL; identifier strings + import path
+        #   only, all PostgREST behaviour lives in postgrest.ts)
         # - packages/svelte-ui/test/adapter/postgrest.*.test.ts (asserts
         #   the URLs/headers the adapter sends; documented coverage
         #   only)
@@ -125,6 +132,8 @@ jobs:
              ':(exclude)packages/kozou/test/config.test.ts' \
              ':(exclude)packages/svelte-ui/src/lib/adapter/index.ts' \
              ':(exclude)packages/svelte-ui/src/lib/adapter/postgrest.ts' \
+             ':(exclude)packages/svelte-ui/src/lib/index.ts' \
+             ':(exclude)packages/svelte-ui/src/lib/server/adapter.ts' \
              ':(exclude)packages/svelte-ui/test/adapter/postgrest.*.test.ts'; then
             echo "ERROR: code files contain AGPL/GPL/PostgREST vocabulary"
             exit 1
