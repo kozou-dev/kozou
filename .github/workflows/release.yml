@@ -76,6 +76,12 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Build workspace packages (so workspace:* deps resolve)
+        # Step 7-A flipped the four publish-target packages to dist/,
+        # so `tsc --noEmit` must see real `dist/index.d.ts` files for
+        # every `workspace:*` resolution. Same pattern as ci.yml.
+        run: pnpm -r run build
+
       - name: Typecheck
         run: pnpm -r typecheck
 

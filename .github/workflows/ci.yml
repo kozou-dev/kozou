@@ -66,6 +66,15 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Build workspace packages (so workspace:* deps resolve)
+        # Step 7-A flipped @kozou/core / @kozou/introspect / @kozou/mcp
+        # / kozou to publish through `./dist/`, which means downstream
+        # workspace consumers (and `tsc --noEmit`) now resolve those
+        # packages via `package.json#types` -> `dist/index.d.ts`.
+        # Running typecheck against a fresh checkout without `dist/`
+        # produces "Cannot find module '@kozou/core'" - build first.
+        run: pnpm -r run build
+
       - name: Typecheck (pnpm -r)
         run: pnpm -r typecheck
 

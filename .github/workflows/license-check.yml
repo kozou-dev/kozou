@@ -215,12 +215,16 @@ jobs:
       - name: Install workspace dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Build ${{ matrix.pkg }} (so the published artifact is what gets packed)
-        # Step 7-A / 7-C flipped both packages to publish through
-        # built output (`dist/` for kozou, `build/` for svelte-ui).
-        # Without this step the tarball would ship an empty publish
-        # directory and the grep below would scan no code at all.
-        run: pnpm --filter ${{ matrix.filter }} run build
+      - name: Build all workspace packages (so workspace:* deps resolve)
+        # Step 7-A / 7-C flipped every publish target to consume its
+        # workspace dependencies through built output (`dist/` for
+        # kozou + core + introspect + mcp, `build/` for svelte-ui).
+        # Building just ${{ matrix.pkg }} would leave its
+        # `workspace:*` references unresolved, so build the full tree
+        # in topological order before pack. svelte-ui's vite build
+        # only inflates this job; it never reaches the tarball
+        # except in the svelte-ui matrix leg.
+        run: pnpm -r run build
 
       - name: npm pack --dry-run file-list assertion
         # Step 7-G: assert every entry in `expected_files` ships and
