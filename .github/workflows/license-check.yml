@@ -155,6 +155,20 @@ jobs:
             filter: kozou
             tgz_glob: 'kozou-[0-9]*.tgz'
             forbidden_regex: 'postgrest|pgrst|agpl|gnu affero|gpl-3|gnu general public'
+            # Step 7-G: every entry here must appear in
+            # `npm pack --dry-run`. Catches a publish-config
+            # regression (e.g. someone trims `files` or breaks
+            # the build script) before the artifact ships.
+            expected_files: |
+              dist/cli.js
+              dist/create-kozou.js
+              dist/index.js
+              dist/index.d.ts
+              dist/templates/docker-compose.yml
+              dist/templates/env.example
+              dist/templates/kozou.config.yaml
+              dist/templates/ui-hints.yaml
+              dist/templates/migrations/0001_init.sql
           - pkg: svelte-ui
             filter: '@kozou/svelte-ui'
             tgz_glob: 'kozou-svelte-ui-*.tgz'
@@ -170,6 +184,13 @@ jobs:
             # General Public" stay enforced - those would always
             # indicate a real license problem.
             forbidden_regex: 'agpl|gnu affero|gpl-3|gnu general public'
+            # adapter-node always emits handler.js + index.js at
+            # the root of `build/`. The hashed `server/` and
+            # `client/` chunks are not pinned by basename, so they
+            # are not asserted here.
+            expected_files: |
+              build/handler.js
+              build/index.js
     env:
       # `svelte-check` / Svelte 5 + the @kozou/svelte-ui workspace
       # push past the runner's default ~2 GB Node heap during the
@@ -200,6 +221,45 @@ jobs:
         # Without this step the tarball would ship an empty publish
         # directory and the grep below would scan no code at all.
         run: pnpm --filter ${{ matrix.filter }} run build
+
+      - name: npm pack --dry-run file-list assertion
+        # Step 7-G: assert every entry in `expected_files` ships and
+        # that no `src/**` leaks into the tarball. Runs before the
+        # actual `npm pack` below so a publish-config regression
+        # surfaces ahead of any download/scan overhead. This closes
+        # Codex 1st-pass E.16.
+        working-directory: packages/${{ matrix.pkg }}
+        run: |
+          npm pack --dry-run 2>&1 | tee pack-dryrun.txt
+
+          MISSING=
+          while IFS= read -r f; do
+            [ -z "$f" ] && continue
+            if ! grep -qE "[[:space:]]${f}\$" pack-dryrun.txt; then
+              echo "MISSING: $f"
+              MISSING="$MISSING $f"
+            else
+              echo "OK: $f present"
+            fi
+          done <<EOF
+          ${{ matrix.expected_files }}
+          EOF
+
+          if [ -n "$MISSING" ]; then
+            echo "ERROR: ${{ matrix.pkg }} tarball is missing required files:$MISSING"
+            exit 1
+          fi
+
+          # `npm pack --dry-run` prefixes the summary line with the
+          # tarball filename, which can contain "src" inside
+          # `svelte-ui` etc. Anchor the search on the
+          # `npm notice <size> <path>` shape so only listed entries
+          # match.
+          if grep -E '^npm notice +[0-9.]+[kMG]?B +src/' pack-dryrun.txt; then
+            echo "ERROR: ${{ matrix.pkg }} tarball lists src/** entries (publish should be dist/build only)"
+            exit 1
+          fi
+          echo "OK: ${{ matrix.pkg }} tarball ships no src/** entries"
 
       - name: npm pack ${{ matrix.pkg }} + grep code/binary contents
         # README / LICENSE / NOTICE / package.json metadata are
