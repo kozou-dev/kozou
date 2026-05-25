@@ -155,6 +155,17 @@ jobs:
             filter: kozou
             tgz_glob: 'kozou-[0-9]*.tgz'
             forbidden_regex: 'postgrest|pgrst|agpl|gnu affero|gpl-3|gnu general public'
+            # The compiled `dist/config.js` + `dist/config.d.ts`
+            # carry the `adapter.type: 'postgrest'` discriminator
+            # literal defined by Kozou v0.1 design spec §9.2 - the
+            # exact string the code-grep job above already exempts
+            # from `packages/kozou/src/config.ts`. The literal is a
+            # configuration value identifying the adapter, not
+            # PostgREST source / binary / generated code (license
+            # compliance §4). Path-anchor the exclusion so a future
+            # `config.js` somewhere else in the tarball would still
+            # be scanned.
+            extra_excludes: "! -path '*/dist/config.js' ! -path '*/dist/config.d.ts'"
             # Step 7-G: every entry here must appear in
             # `npm pack --dry-run`. Catches a publish-config
             # regression (e.g. someone trims `files` or breaks
@@ -184,6 +195,11 @@ jobs:
             # General Public" stay enforced - those would always
             # indicate a real license problem.
             forbidden_regex: 'agpl|gnu affero|gpl-3|gnu general public'
+            # svelte-ui has no analogous in-publish discriminator
+            # file; the bundled `PostgrestDataAdapter` identifier
+            # was already taken care of by dropping
+            # `postgrest|pgrst` from `forbidden_regex`.
+            extra_excludes: ""
             # adapter-node always emits handler.js + index.js at
             # the root of `build/`. The hashed `server/` and
             # `client/` chunks are not pinned by basename, so they
@@ -293,6 +309,7 @@ jobs:
               ! -name 'env.example' \
               ! -name 'LICENSE' ! -name 'LICENSE.*' ! -name 'NOTICE' ! -name 'NOTICE.*' \
               ! -name 'package.json' ! -name 'pyproject.toml' \
+              ${{ matrix.extra_excludes }} \
               -print)
           if [ -z "$FILES" ]; then
             echo "OK: ${{ matrix.pkg }} tarball clean (no code/binary files to scan, metadata only)"
