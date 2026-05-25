@@ -45,6 +45,11 @@ jobs:
           --health-retries 10
     env:
       KOZOU_TEST_DATABASE_URL: postgres://postgres:kozou@localhost:5432/kozou_test
+      # svelte-check + Svelte 5 + the @kozou/svelte-ui workspace push
+      # past the ubuntu-latest runner's default Node heap (~2 GB).
+      # Bump to 4 GB; the runner has 16 GB total RAM so this is well
+      # within budget.
+      NODE_OPTIONS: '--max-old-space-size=4096'
     steps:
       # Codex W2: SHA-pin third-party actions (kept fresh by Dependabot).
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
