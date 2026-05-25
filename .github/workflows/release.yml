@@ -96,8 +96,10 @@ jobs:
       contents: read
       # OIDC token is used for both npm provenance attestation and
       # for npmjs.com's trusted publisher exchange. Set up the
-      # trusted publisher per-package in npmjs.com beforehand
-      # (Kozou v0.1 design spec §16.1.1 A "Step 7 完了後フロー").
+      # trusted publisher per-package in npmjs.com beforehand - the
+      # post-Step-7 setup checklist in the plan covers the exact
+      # one-time registration steps (Kozou v0.1 design spec
+      # §16.1.1 A).
       id-token: write
     strategy:
       fail-fast: false
