@@ -31,6 +31,24 @@ module.exports = {
     '.svelte-kit/',
   ],
   overrides: [
+    // Svelte single-file components: parse with svelte-eslint-parser
+    // and delegate <script lang="ts"> blocks to @typescript-eslint
+    // /parser. Without this override, eslint's default TS parser
+    // tries to parse the <template> markup directly and errors out
+    // on the first '<'.
+    {
+      files: ['*.svelte'],
+      parser: 'svelte-eslint-parser',
+      parserOptions: {
+        parser: '@typescript-eslint/parser',
+      },
+      rules: {
+        // The Svelte template emits its own assignments through the
+        // generated reactive code (let bindings reassigned by event
+        // handlers); the base no-unused-vars rule misfires there.
+        '@typescript-eslint/no-unused-vars': 'off',
+      },
+    },
     // Kozou v0.1 spec §18.1.1 + Kozou v0.1 license compliance §3:
     // forbid direct PostgREST URL hardcoding. Everything outside
     // svelte-ui's adapter / server is barred from talking to PostgREST
