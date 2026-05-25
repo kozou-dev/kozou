@@ -28,6 +28,7 @@ module.exports = {
     '_*/',
     '*.tgz',
     '.pnpm-store/',
+    '.svelte-kit/',
   ],
   overrides: [
     // Kozou v0.1 spec §18.1.1 + Kozou v0.1 license compliance §3:
