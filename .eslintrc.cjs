@@ -42,6 +42,12 @@ module.exports = {
       parserOptions: {
         parser: '@typescript-eslint/parser',
       },
+      env: {
+        // Svelte components run in the browser; surface DOM globals
+        // (HTMLInputElement, HTMLTextAreaElement, Event, ...) to the
+        // <script> block so event-handler type casts are recognised.
+        browser: true,
+      },
       rules: {
         // The Svelte template emits its own assignments through the
         // generated reactive code (let bindings reassigned by event
