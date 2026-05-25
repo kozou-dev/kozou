@@ -6,7 +6,32 @@ Kozou reads a PostgreSQL schema once and produces every form a modern team and i
 
 ## Status
 
-Pre-release (v0.0.x). Core architecture and public API are being designed. Source code and documentation will land in this package as development proceeds.
+v0.1.0 (initial public release). The CLI, schema introspection, MCP server, and reference Admin UI are all available on npm; the runtime image lives on GHCR. Subsequent v0.1.x releases land via the workflow in `.github/workflows/release.yml`.
+
+## Quickstart
+
+```bash
+# Scaffold a project (docker-compose + kozou.config.yaml + ui-hints.yaml)
+npx create-kozou my-project
+cd my-project
+
+# Bring up PostgreSQL + PostgREST + the kozou Admin UI
+cp .env.example .env
+docker compose up
+```
+
+Or pull the runtime image directly:
+
+```bash
+docker pull ghcr.io/kozou-dev/kozou:v0.1.0
+docker run --rm ghcr.io/kozou-dev/kozou:v0.1.0 inspect --help
+```
+
+For library use (custom hosts, embedded MCP), install the workspace packages from npm:
+
+```bash
+npm install kozou @kozou/core @kozou/introspect @kozou/mcp @kozou/svelte-ui
+```
 
 ## Security
 
@@ -26,12 +51,10 @@ Contributors additionally need **pnpm 9 or later**. See [CONTRIBUTING.md](CONTRI
 
 ## Roadmap
 
-- v0.1: schema reader (DDL + comments + constraints)
-- v0.2: TypeScript type emitter
-- v0.3: MCP context emitter
-- v0.4: admin UI scaffolder
-- v0.5: GraphQL endpoint emitter
-- v0.6: documentation emitter
+- v0.1 (shipped): schema introspection, MCP server (stdio), reference Admin UI, `create-kozou` scaffold, PostgREST adapter
+- v0.1.1: MCP HTTP transport, `kozou dev` host integration, Playwright E2E for the Admin UI, CodeQL reactivation
+- v0.2: `@kozou/api` (in-house REST), COMMENT tag policy hardening, TypeScript type generation, React UI exploration
+- v1.0: drop the PostgREST dependency, ship JWT + RLS integration, multi-hop relation embedding, business-document emitters (Markdown / HTML)
 
 ## Name
 

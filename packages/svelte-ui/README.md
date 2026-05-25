@@ -5,8 +5,10 @@ a `SchemaContext` from [`@kozou/core`](../core) and talks to a
 backend through the `DataAdapter` interface defined there. The
 default adapter speaks PostgREST.
 
-> **v0.1 status:** shipped as `private: true`. The Step 7 release
-> PR will flip the publish gate and add the package to npm.
+> **v0.1.0 status:** published to npm as `@kozou/svelte-ui`. The
+> package ships only the adapter-node `build/` artifact - host
+> integration via `kozou dev` lands in v0.1.1 (design spec
+> §16.1.1 B).
 
 ## Stack
 
