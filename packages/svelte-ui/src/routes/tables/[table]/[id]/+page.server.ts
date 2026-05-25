@@ -3,8 +3,8 @@
 // exposes a `?/delete` form action that calls DataAdapter.delete
 // + redirects back to the table listing.
 //
-// FK label resolution (Plan §6-K "FK label 解決") is deferred to
-// v0.1.1: the detail page renders the raw FK column value for
+// FK label resolution is deferred to v0.1.1: the detail page
+// renders the raw FK column value for
 // now. Resolving each FK to its target row's displayField label
 // would require N extra adapter.get / .searchRelation calls per
 // detail render; v0.1.1 will batch them via /admin/refresh +
