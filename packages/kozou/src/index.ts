@@ -3,7 +3,7 @@
 // create-kozou.ts; this module re-exports the underlying primitives so
 // integrators can build their own glue if they need to.
 
-export const PACKAGE_VERSION = '0.0.0';
+export const PACKAGE_VERSION = '0.1.0';
 
 export { loadConfig, KozouConfigError } from './config.js';
 export type { KozouConfig, KozouConfigIssue, LoadConfigOptions } from './config.js';

@@ -1,23 +1,33 @@
 {
   "name": "kozou",
-  "version": "0.0.0",
-  "private": true,
+  "version": "0.1.0",
   "description": "Kozou CLI: scaffolding, schema introspection, and MCP server entry points. See Kozou v0.1 design spec §9.",
   "license": "Apache-2.0",
   "type": "module",
-  "main": "./src/index.ts",
-  "types": "./src/index.ts",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    },
+    "./package.json": "./package.json"
+  },
   "bin": {
-    "kozou": "./src/cli.ts",
-    "create-kozou": "./src/create-kozou.ts"
+    "kozou": "./dist/cli.js",
+    "create-kozou": "./dist/create-kozou.js"
   },
   "files": [
-    "dist",
-    "src/templates"
+    "dist"
   ],
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "build": "tsc",
+    "build": "tsc && node scripts/copy-templates.mjs",
+    "prepublishOnly": "pnpm run build",
     "test": "vitest run --coverage"
   },
   "dependencies": {

@@ -54,9 +54,6 @@ importers:
         specifier: ^3.23.0
         version: 3.25.76
     devDependencies:
-      '@kozou/introspect':
-        specifier: workspace:*
-        version: link:../introspect
       '@types/pg':
         specifier: ^8.11.0
         version: 8.20.0

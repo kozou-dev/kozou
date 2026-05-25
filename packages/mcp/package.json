@@ -1,21 +1,32 @@
 {
   "name": "@kozou/mcp",
-  "version": "0.0.0",
-  "private": true,
+  "version": "0.1.0",
   "description": "Kozou MCP server for AI agents (stdio; HTTP coming in v0.1.1)",
   "license": "Apache-2.0",
   "type": "module",
-  "main": "./src/index.ts",
-  "types": "./src/index.ts",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    },
+    "./package.json": "./package.json"
+  },
   "bin": {
-    "kozou-mcp": "./src/cli.ts"
+    "kozou-mcp": "./dist/cli.js"
   },
   "files": [
     "dist"
   ],
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
   "scripts": {
     "typecheck": "tsc --noEmit",
     "build": "tsc",
+    "prepublishOnly": "pnpm run build",
     "test": "vitest run --coverage"
   },
   "dependencies": {
