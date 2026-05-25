@@ -11,3 +11,8 @@
 export type { FetchLike } from './types.js';
 export type { AdapterErrorCode, AdapterErrorInit } from './errors.js';
 export { AdapterError } from './errors.js';
+export type {
+  PostgrestAdapterOptions,
+  PostgrestPrimaryKeyResolver,
+} from './postgrest.js';
+export { PostgrestAdapterError, PostgrestDataAdapter } from './postgrest.js';
