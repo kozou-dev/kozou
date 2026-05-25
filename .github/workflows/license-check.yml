@@ -158,6 +158,21 @@ jobs:
       - name: Install the Python build tool
         run: pip install build
 
+      - name: Install pnpm
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+
+      - name: Install workspace dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build packages/kozou (so dist/ is what gets packed)
+        # Step 7-A flipped kozou to publish through `./dist/`. The
+        # `npm pack` step below now needs the built JS + the copied
+        # templates on disk before tarballing, otherwise it would
+        # publish an empty `dist/` and the artifact-grep below would
+        # have nothing to scan. Build only kozou here; svelte-ui and
+        # its build step land in Step 7-D when this job goes matrix.
+        run: pnpm --filter kozou run build
+
       - name: npm pack packages/kozou and grep code/binary contents
         # Step 2-4 moved the publish target from the root to
         # packages/kozou. README/LICENSE/NOTICE/package.json metadata
@@ -174,6 +189,10 @@ jobs:
         # deliberately do NOT exclude every *.example because a
         # future code-like example (e.g. example.ts) must still be
         # scanned.
+        #
+        # Step 7-A also moved env.example into `dist/templates/` via
+        # the build step above, so this same exclusion still applies
+        # by basename inside the unpacked tarball.
         working-directory: packages/kozou
         run: |
           npm pack
