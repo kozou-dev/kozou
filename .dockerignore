@@ -1,0 +1,22 @@
+# Keep the build context small. node_modules / dist / build are
+# rebuilt inside the builder stage; everything else here is host
+# tooling / docs / coverage that the image does not need.
+
+**/node_modules
+**/dist
+**/build
+**/.svelte-kit
+**/coverage
+
+.git
+.github
+.venv
+__pycache__
+
+*.tgz
+*.egg-info
+.DS_Store
+
+# Local test scaffolds the user might create with `create-kozou`
+# inside the repo while iterating.
+tmp-*
