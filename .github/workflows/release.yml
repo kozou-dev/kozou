@@ -142,12 +142,21 @@ jobs:
       - name: pnpm publish (provenance via OIDC)
         working-directory: packages/${{ matrix.dir }}
         run: |
-          if [ "${{ inputs.dry_run }}" = "true" ]; then
-            echo "Dry-run mode: pnpm publish --dry-run for ${{ matrix.pkg }}"
-            pnpm publish --access public --provenance --no-git-checks --dry-run
-          else
+          # Real publish is gated on `github.event_name == 'push'`
+          # i.e. a `vX.Y.Z` tag push. `workflow_dispatch` always
+          # falls into the dry-run branch regardless of the
+          # `dry_run` input, because a `dry_run=false` dispatch
+          # would otherwise burn the npm version without the
+          # matching `publish-docker` / `github-release` jobs
+          # (those are also gated on `event_name == 'push'`).
+          # The `dry_run` input still exists as documentation +
+          # symmetry, but does not change behaviour here.
+          if [ "$GITHUB_EVENT_NAME" = "push" ]; then
             echo "Publishing ${{ matrix.pkg }} to npm"
             pnpm publish --access public --provenance --no-git-checks
+          else
+            echo "Dry-run mode (event=$GITHUB_EVENT_NAME, dry_run=${{ inputs.dry_run }}): pnpm publish --dry-run for ${{ matrix.pkg }}"
+            pnpm publish --access public --provenance --no-git-checks --dry-run
           fi
 
   publish-docker:
@@ -236,10 +245,19 @@ jobs:
         run: pnpm -r run build
 
       - name: Pack tarballs (matches what publish-npm sent up)
+        # IMPORTANT: use `pnpm pack`, not `npm pack`. pnpm rewrites
+        # every `workspace:*` reference inside the tarball's
+        # `package.json` to the resolved semver of the dependency
+        # at publish time, which is the same transformation
+        # `pnpm publish` applies on the registry side. `npm pack`
+        # leaves `workspace:*` literal, which would make the
+        # signed GitHub Release tarballs differ from the npm
+        # registry tarballs AND make them uninstallable for any
+        # downstream consumer. (Codex 7th-pass P1.)
         run: |
           mkdir -p artifacts
           for d in core introspect mcp kozou svelte-ui; do
-            (cd "packages/$d" && npm pack --pack-destination ../../artifacts)
+            (cd "packages/$d" && pnpm pack --pack-destination ../../artifacts)
           done
           ls -la artifacts/
 

@@ -12,7 +12,11 @@ npm install -g kozou
 
 # Or use npx without installing
 npx kozou inspect --help
-npx create-kozou my-project
+
+# `create-kozou` is a secondary bin shipped by the `kozou` package
+# (not a standalone npm package), so npx needs `-p kozou` to find
+# it on a machine that has not installed kozou globally yet.
+npx -p kozou create-kozou my-project
 ```
 
 The package publishes through `./dist/`. `bin` exposes two entries:
@@ -58,15 +62,17 @@ Scaffolds a project directory at `<dir>` from the templates
 bundled in `dist/templates/`:
 
 ```bash
-npx create-kozou my-project
+npx -p kozou create-kozou my-project
 cd my-project
 cp .env.example .env
 docker compose up
 ```
 
-The generated `docker-compose.yml` wires up PostgreSQL +
-PostgREST + the kozou Admin UI image
-(`ghcr.io/kozou-dev/kozou:v0.1.0`).
+The generated `docker-compose.yml` brings up PostgreSQL + PostgREST.
+The `kozou` service block (which would host the Admin UI + MCP HTTP
+server) is commented out in v0.1.0; it gets reactivated in v0.1.1
+once `kozou dev` ships as a real implementation rather than a
+hand-off placeholder.
 
 ## Configuration
 
@@ -75,17 +81,22 @@ command:
 
 ```yaml
 database:
-  url: ${KOZOU_DATABASE_URL}
+  url: ${DATABASE_URL}
+  schemas: [public]
+
 adapter:
   type: postgrest
-  url: ${KOZOU_ADAPTER_URL}
-schemas:
-  - public
-ui_hints:
+  url: ${KOZOU_ADAPTER_URL:-http://postgrest:3000}
+
+uiHints:
   path: ./ui-hints.yaml
 ```
 
-`${VAR}` and `${VAR:-default}` are expanded from the environment.
+The full schema also accepts `server.ui.{port,host}`,
+`server.mcp.http.{port,host}`, `server.mcp.stdio`, and
+`cache.ttlMs` overrides; defaults match the template that
+`create-kozou` writes. `${VAR}` and `${VAR:-default}` are
+expanded from the process environment at load time.
 
 ## License
 

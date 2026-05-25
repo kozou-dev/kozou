@@ -11,20 +11,27 @@ v0.1.0 (initial public release). The CLI, schema introspection, MCP server, and 
 ## Quickstart
 
 ```bash
-# Scaffold a project (docker-compose + kozou.config.yaml + ui-hints.yaml)
-npx create-kozou my-project
+# Scaffold a project (docker-compose + kozou.config.yaml + ui-hints.yaml).
+# `create-kozou` ships as a secondary bin of the `kozou` package, so npx
+# needs `-p kozou` to find it on a clean machine.
+npx -p kozou create-kozou my-project
 cd my-project
 
-# Bring up PostgreSQL + PostgREST + the kozou Admin UI
+# Bring up PostgreSQL + PostgREST. The Admin UI host integration
+# (`kozou dev` spawning the bundled SvelteKit + MCP HTTP server)
+# lands in v0.1.1, so the scaffold's docker-compose currently only
+# brings the database + REST layer online and the `kozou` service
+# block is commented out.
 cp .env.example .env
 docker compose up
 ```
 
-Or pull the runtime image directly:
+Or pull the CLI runtime image directly:
 
 ```bash
 docker pull ghcr.io/kozou-dev/kozou:v0.1.0
 docker run --rm ghcr.io/kozou-dev/kozou:v0.1.0 inspect --help
+docker run --rm ghcr.io/kozou-dev/kozou:v0.1.0 mcp --help
 ```
 
 For library use (custom hosts, embedded MCP), install the workspace packages from npm:
