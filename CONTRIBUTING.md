@@ -2,7 +2,7 @@
 
 Thank you for your interest in contributing to Kozou — a PostgreSQL compiler that emits an Admin UI, REST API, and MCP context from your DDL and COMMENT.
 
-This project is in an early stage (`v0.0.x`, package name reservation). Implementation work has not yet started in this repository. Once it begins (v0.1), the contribution flow described below becomes active.
+This project is in its initial public release (`v0.1.0`). The CLI, schema introspection, MCP server, and reference Admin UI are all available on npm, and the runtime image is on GHCR. The contribution flow described below is active.
 
 ## License
 
@@ -21,11 +21,11 @@ Please use [GitHub Issues](https://github.com/kozou-dev/kozou/issues) for:
 - **Bug reports** — include reproduction steps, expected vs. actual behavior, and environment details (OS, Node / Python version)
 - **Feature requests** — describe the problem you are solving, not only the proposed solution
 
-Search existing issues before opening a new one.
+Search existing issues before opening a new one. **Security-sensitive issues should go through the private channels in [Security policy](#security-policy) below, not the public tracker.**
 
 ## Security policy
 
-If you discover a security issue in Kozou — for example a vulnerability that lets a malicious schema author or `COMMENT` text exfiltrate data through `@kozou/mcp`, or any other class of issue with security implications — please *do not* open a public issue. Instead, report it privately via [GitHub Security Advisories](https://github.com/kozou-dev/kozou/security/advisories/new) or by mailing hello@kozou.org. We aim to acknowledge reports within 3 business days. See [SECURITY.md](SECURITY.md) for the full policy.
+If you discover a security issue in Kozou — for example a bug that lets `@kozou/mcp` bypass its read-only transaction guarantee, return data beyond what the configured PostgreSQL role can read, or otherwise behave outside its documented trust boundary — please *do not* open a public issue. Instead, report it privately via [GitHub Security Advisories](https://github.com/kozou-dev/kozou/security/advisories/new) or by mailing hello@kozou.org. We aim to acknowledge reports within 3 business days. See [SECURITY.md](SECURITY.md) for the full policy, including what is and is not in scope.
 
 ## Development Environment
 
