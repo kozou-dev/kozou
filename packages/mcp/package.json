@@ -3,6 +3,15 @@
   "version": "0.1.0",
   "description": "Kozou MCP server for AI agents (stdio; HTTP coming in v0.1.1)",
   "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kozou-dev/kozou.git",
+    "directory": "packages/mcp"
+  },
+  "homepage": "https://kozou.org",
+  "bugs": {
+    "url": "https://github.com/kozou-dev/kozou/issues"
+  },
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
