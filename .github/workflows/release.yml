@@ -157,37 +157,6 @@ jobs:
       - name: Build (all workspace packages so workspace:* refs resolve)
         run: pnpm -r run build
 
-      - name: Debug OIDC token claims (Step 7-Z-9 - keep until fix confirmed)
-        env:
-          OIDC_REQUEST_TOKEN: ${{ env.ACTIONS_ID_TOKEN_REQUEST_TOKEN }}
-          OIDC_REQUEST_URL: ${{ env.ACTIONS_ID_TOKEN_REQUEST_URL }}
-        run: |
-          echo "=== ~/.npmrc ==="
-          cat ~/.npmrc || true
-          echo "=== userconfig at NPM_CONFIG_USERCONFIG ==="
-          if [ -n "$NPM_CONFIG_USERCONFIG" ]; then
-            echo "NPM_CONFIG_USERCONFIG=$NPM_CONFIG_USERCONFIG"
-            cat "$NPM_CONFIG_USERCONFIG" || true
-          else
-            echo "NPM_CONFIG_USERCONFIG not set"
-          fi
-          echo "=== OIDC token claims (audience=npm:registry.npmjs.org) ==="
-          if [ -n "$ACTIONS_ID_TOKEN_REQUEST_TOKEN" ] && [ -n "$ACTIONS_ID_TOKEN_REQUEST_URL" ]; then
-            TOKEN=$(curl -sS \
-                -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
-                "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=npm:registry.npmjs.org" \
-                | jq -r .value)
-            if [ -n "$TOKEN" ] && [ "$TOKEN" != "null" ]; then
-              # Decode JWT payload (base64url -> base64 -> json)
-              PAYLOAD=$(echo "$TOKEN" | cut -d. -f2 | tr '_-' '/+' | awk '{ pad = (4 - length % 4) % 4; for (i = 0; i < pad; i++) printf "="; print }' | base64 -d 2>/dev/null || true)
-              echo "$PAYLOAD" | jq '{iss, aud, sub, repository, repository_owner, repository_owner_id, workflow_ref, event_name, ref}'
-            else
-              echo "(token request returned empty)"
-            fi
-          else
-            echo "(ACTIONS_ID_TOKEN_REQUEST_* env not present - id-token: write missing?)"
-          fi
-
       - name: pnpm pack + npm publish (provenance via OIDC)
         working-directory: packages/${{ matrix.dir }}
         run: |
@@ -201,25 +170,22 @@ jobs:
           # The `dry_run` input still exists as documentation +
           # symmetry, but does not change behaviour here.
           #
-          # IMPORTANT: the real publish uses `pnpm pack` + `npm
-          # publish <tgz>` instead of `pnpm publish` directly.
-          # pnpm v6.0.8 (Dependabot PR #9) bundles pnpm 11.1.1,
-          # which signs the Sigstore provenance attestation
-          # correctly but does NOT exchange the second OIDC token
-          # (audience=`npm:registry.npmjs.org`) needed for the
-          # trusted-publisher PUT to the registry. The PUT then
-          # comes back as `404 Not Found`. npm CLI v11.5+ wraps
-          # both audiences correctly, so we delegate the registry
-          # write to it. `pnpm pack` is kept because it rewrites
-          # every `workspace:*` reference inside the tarball's
-          # `package.json` into a real semver, which `npm pack`
-          # does not.
+          # `pnpm pack` + `npm publish <tgz>` is the documented
+          # path for OIDC trusted publishing on pnpm workspaces:
+          #   - `pnpm pack` rewrites every `workspace:*` reference
+          #     in the tarball's `package.json` to a real semver
+          #     (`npm pack` would leave it literal),
+          #   - `npm publish` (npm CLI 11.5+, see .nvmrc=24) wraps
+          #     both required OIDC audiences -
+          #     `sigstore` (provenance attestation) +
+          #     `npm:registry.npmjs.org` (registry write auth).
+          # See Step 7-Z-8 ~ 7-Z-11 for the root-cause trail.
           if [ "$GITHUB_EVENT_NAME" = "push" ]; then
             echo "Publishing ${{ matrix.pkg }} to npm via npm CLI (pnpm pack handles the workspace:* rewrite)"
             pnpm pack
             TGZ=$(ls *.tgz | head -1)
             echo "Packed tarball: $TGZ"
-            npm publish "$TGZ" --access public --provenance --loglevel=verbose
+            npm publish "$TGZ" --access public --provenance
           else
             echo "Dry-run mode (event=$GITHUB_EVENT_NAME, dry_run=${{ inputs.dry_run }}): pnpm publish --dry-run for ${{ matrix.pkg }}"
             pnpm publish --access public --provenance --no-git-checks --dry-run
