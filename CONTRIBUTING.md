@@ -23,6 +23,10 @@ Please use [GitHub Issues](https://github.com/kozou-dev/kozou/issues) for:
 
 Search existing issues before opening a new one.
 
+## Security policy
+
+If you discover a security issue in Kozou — for example a vulnerability that lets a malicious schema author or `COMMENT` text exfiltrate data through `@kozou/mcp`, or any other class of issue with security implications — please *do not* open a public issue. Instead, report it privately via [GitHub Security Advisories](https://github.com/kozou-dev/kozou/security/advisories/new) or by mailing hello@kozou.org. We aim to acknowledge reports within 3 business days. See [SECURITY.md](SECURITY.md) for the full policy.
+
 ## Development Environment
 
 Required:
@@ -59,6 +63,10 @@ Existing commits in this repository follow a short prefix convention:
 - `Fix: ...` for bug fixes
 
 Keep the first line under 70 characters. Include reasoning ("why") in the body when the change is non-trivial.
+
+## Code of Conduct
+
+This project adopts the [Contributor Covenant Code of Conduct](CODE_OF_CONDUCT.md). By participating, you are expected to uphold this code.
 
 ## Communication
 
