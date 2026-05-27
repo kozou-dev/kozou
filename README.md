@@ -44,7 +44,7 @@ npm install kozou @kozou/core @kozou/introspect @kozou/mcp @kozou/svelte-ui
 
 Kozou introspects `COMMENT ON` text, view definitions, and type information from PostgreSQL, then hands them **verbatim** to AI agents through `@kozou/mcp`. This relies on an important assumption: **schema authors (the principals with permission to edit DB schema) are trusted**. We call this the trust boundary.
 
-Designs where tenants in a multi-tenant SaaS can edit DB COMMENT text are **discouraged in v0.1** (prompt-injection risk). See [docs/security.md](docs/security.md) for details and mitigation plans.
+Designs where tenants in a multi-tenant SaaS can edit DB COMMENT text are **discouraged in v0.1** (prompt-injection risk). See [docs/security.md](docs/security.md) for the threat model and mitigation plans, and [SECURITY.md](SECURITY.md) if you need to report a vulnerability privately.
 
 ## Requirements
 

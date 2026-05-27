@@ -40,9 +40,9 @@ code existed; they are not supported.
 
 In scope:
 
-- The published npm packages (`kozou`, `@kozou/core`,
-  `@kozou/introspect`, `@kozou/mcp`, `@kozou/svelte-ui`,
-  `create-kozou`)
+- The published npm packages (`kozou` — including its `create-kozou`
+  bin — `@kozou/core`, `@kozou/introspect`, `@kozou/mcp`,
+  `@kozou/svelte-ui`)
 - The published container image (`ghcr.io/kozou-dev/kozou`)
 - The source code in this repository
 
@@ -58,7 +58,7 @@ Out of scope:
 
 ## Disclosure Policy
 
-- We will confirm receipt of your report within 3 business days.
+- We aim to confirm receipt of your report within 3 business days.
 - We will keep you informed as we investigate and develop a fix.
 - We will coordinate the public disclosure timeline with you so that
   users have a patched version available before details are made
