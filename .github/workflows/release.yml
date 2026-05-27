@@ -141,7 +141,7 @@ jobs:
       - name: Build (all workspace packages so workspace:* refs resolve)
         run: pnpm -r run build
 
-      - name: pnpm publish (provenance via OIDC)
+      - name: pnpm pack + npm publish (provenance via OIDC)
         working-directory: packages/${{ matrix.dir }}
         run: |
           # Real publish is gated on `github.event_name == 'push'`
@@ -153,9 +153,26 @@ jobs:
           # (those are also gated on `event_name == 'push'`).
           # The `dry_run` input still exists as documentation +
           # symmetry, but does not change behaviour here.
+          #
+          # IMPORTANT: the real publish uses `pnpm pack` + `npm
+          # publish <tgz>` instead of `pnpm publish` directly.
+          # pnpm v6.0.8 (Dependabot PR #9) bundles pnpm 11.1.1,
+          # which signs the Sigstore provenance attestation
+          # correctly but does NOT exchange the second OIDC token
+          # (audience=`npm:registry.npmjs.org`) needed for the
+          # trusted-publisher PUT to the registry. The PUT then
+          # comes back as `404 Not Found`. npm CLI v11.5+ wraps
+          # both audiences correctly, so we delegate the registry
+          # write to it. `pnpm pack` is kept because it rewrites
+          # every `workspace:*` reference inside the tarball's
+          # `package.json` into a real semver, which `npm pack`
+          # does not.
           if [ "$GITHUB_EVENT_NAME" = "push" ]; then
-            echo "Publishing ${{ matrix.pkg }} to npm"
-            pnpm publish --access public --provenance --no-git-checks
+            echo "Publishing ${{ matrix.pkg }} to npm via npm CLI (pnpm pack handles the workspace:* rewrite)"
+            pnpm pack
+            TGZ=$(ls *.tgz | head -1)
+            echo "Packed tarball: $TGZ"
+            npm publish "$TGZ" --access public --provenance
           else
             echo "Dry-run mode (event=$GITHUB_EVENT_NAME, dry_run=${{ inputs.dry_run }}): pnpm publish --dry-run for ${{ matrix.pkg }}"
             pnpm publish --access public --provenance --no-git-checks --dry-run
