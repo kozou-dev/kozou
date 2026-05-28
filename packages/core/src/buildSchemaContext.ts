@@ -282,6 +282,9 @@ function buildConcept(view: RawView): ConceptContext {
     kind: 'VIEW',
     joinSuggestions,
     aiNotes: parsed.ai,
+    // `@example:` blocks on the VIEW's COMMENT - surfaced through MCP
+    // `get_concept_context.exampleQueries` (Kozou v0.1 spec §7.3.6).
+    exampleQueries: parsed.examples,
   };
 }
 

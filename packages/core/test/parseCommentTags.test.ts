@@ -8,12 +8,12 @@ describe('parseCommentTags', () => {
 
   it('null comment -> default fields', () => {
     const r = parseCommentTags(null);
-    expect(r).toEqual({ body: '', ai: [], widget: null, policy: [] });
+    expect(r).toEqual({ body: '', ai: [], widget: null, policy: [], examples: [] });
   });
 
   it('empty string -> default fields', () => {
     const r = parseCommentTags('');
-    expect(r).toEqual({ body: '', ai: [], widget: null, policy: [] });
+    expect(r).toEqual({ body: '', ai: [], widget: null, policy: [], examples: [] });
   });
 
   it('plain text with no tags -> body retains the text, tag fields empty', () => {
@@ -22,6 +22,7 @@ describe('parseCommentTags', () => {
     expect(r.ai).toEqual([]);
     expect(r.widget).toBeNull();
     expect(r.policy).toEqual([]);
+    expect(r.examples).toEqual([]);
   });
 
   it('single @ai line -> pushed to ai, kept in body', () => {
@@ -67,32 +68,113 @@ describe('parseCommentTags', () => {
     expect(r.policy).toEqual(['rule one', 'rule two']);
   });
 
-  it('@example (unknown tag) -> warn + kept in body', () => {
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    const r = parseCommentTags('Listing.\n@example: SELECT * FROM t;');
-    expect(r.body).toContain('@example: SELECT * FROM t;');
-    expect(warn).toHaveBeenCalledOnce();
-    expect(warn.mock.calls[0]![0]).toMatch(/unknown tag/);
+  it('@example with description + indented SQL -> single example, body excludes it', () => {
+    const r = parseCommentTags(
+      'View of active stock.\n' +
+        '@example: List items for sale by author\n' +
+        '  SELECT id, selling_price\n' +
+        '  FROM vw_inventory_for_sale\n' +
+        '  ORDER BY author_name;',
+    );
+    expect(r.examples).toEqual([
+      {
+        description: 'List items for sale by author',
+        sql:
+          'SELECT id, selling_price\n' +
+          'FROM vw_inventory_for_sale\n' +
+          'ORDER BY author_name;',
+      },
+    ]);
+    expect(r.body).toContain('View of active stock.');
+    expect(r.body).not.toContain('@example');
+    expect(r.body).not.toContain('SELECT');
+  });
+
+  it('@example with empty description -> description: "" + indented SQL captured', () => {
+    const r = parseCommentTags(
+      '@example:\n  SELECT * FROM books WHERE deleted_at IS NULL;',
+    );
+    expect(r.examples).toEqual([
+      {
+        description: '',
+        sql: 'SELECT * FROM books WHERE deleted_at IS NULL;',
+      },
+    ]);
+  });
+
+  it('@example with no continuation -> description captured, sql empty', () => {
+    // Convention is description first / SQL indented; a tag with no
+    // indented body therefore yields an empty sql rather than treating
+    // the tag-line text as SQL.
+    const r = parseCommentTags('@example: TBD');
+    expect(r.examples).toEqual([{ description: 'TBD', sql: '' }]);
+  });
+
+  it('multiple @example blocks -> each captured in order', () => {
+    const r = parseCommentTags(
+      '@example: First\n' +
+        '  SELECT 1;\n' +
+        '@example: Second\n' +
+        '  SELECT 2;\n',
+    );
+    expect(r.examples).toEqual([
+      { description: 'First', sql: 'SELECT 1;' },
+      { description: 'Second', sql: 'SELECT 2;' },
+    ]);
+  });
+
+  it('@example block terminates on a non-indented body line', () => {
+    const r = parseCommentTags(
+      'View of stock.\n' +
+        '@example: A query\n' +
+        '  SELECT 1;\n' +
+        'Trailing remark.',
+    );
+    expect(r.examples).toEqual([
+      { description: 'A query', sql: 'SELECT 1;' },
+    ]);
+    expect(r.body).toContain('Trailing remark.');
+  });
+
+  it('@example dedents the longest common leading whitespace', () => {
+    const r = parseCommentTags(
+      '@example: Indented SQL\n' +
+        '    SELECT a,\n' +
+        '           b\n' +
+        '    FROM t;',
+    );
+    expect(r.examples).toEqual([
+      {
+        description: 'Indented SQL',
+        sql: 'SELECT a,\n       b\nFROM t;',
+      },
+    ]);
   });
 
   it('all tags mixed', () => {
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const r = parseCommentTags(
       'Selling price.\n' +
         '@ai: differs from catalog_price\n' +
         '@widget: currency\n' +
         '@policy: pre-tax\n' +
-        '@example: SELECT selling_price FROM inventory_items',
+        '@example: Pull selling price for an item\n' +
+        '  SELECT selling_price FROM inventory_items;',
     );
     expect(r.ai).toEqual(['differs from catalog_price']);
     expect(r.widget).toBe('currency');
     expect(r.policy).toEqual(['pre-tax']);
+    expect(r.examples).toEqual([
+      {
+        description: 'Pull selling price for an item',
+        sql: 'SELECT selling_price FROM inventory_items;',
+      },
+    ]);
     expect(r.body).toContain('Selling price.');
     expect(r.body).toContain('@ai: differs from catalog_price');
     expect(r.body).not.toContain('@widget');
     expect(r.body).toContain('@policy: pre-tax');
-    expect(r.body).toContain('@example: SELECT');
-    expect(warn).toHaveBeenCalledOnce();
+    expect(r.body).not.toContain('@example');
+    expect(r.body).not.toContain('SELECT');
   });
 
   it('leading whitespace before a tag is allowed', () => {
