@@ -167,6 +167,39 @@ describe('introspect (generic English fixture)', () => {
     }
   });
 
+  it('include limits tables to matching patterns (bare name = *.<name>)', async () => {
+    const r = await introspect({
+      connection: db.connectionString,
+      schemas: [db.schema],
+      include: ['authors', 'books'],
+    });
+    expect(r.tables.map((t) => t.name).sort()).toEqual(['authors', 'books']);
+  });
+
+  it('exclude drops matching tables and prunes FKs that would dangle', async () => {
+    const r = await introspect({
+      connection: db.connectionString,
+      schemas: [db.schema],
+      exclude: ['editions'],
+    });
+    const names = r.tables.map((t) => t.name).sort();
+    expect(names).toEqual(['authors', 'books', 'inventory_items']);
+    // `inventory_items.edition_id` references `editions`, which is now
+    // filtered out. The FK to it must be pruned to avoid dangling
+    // references in downstream consumers.
+    const inv = r.tables.find((t) => t.name === 'inventory_items')!;
+    expect(inv.foreignKeys.some((fk) => fk.referencedTable === 'editions')).toBe(false);
+  });
+
+  it('include applies to views as well', async () => {
+    const r = await introspect({
+      connection: db.connectionString,
+      schemas: [db.schema],
+      include: ['authors'],
+    });
+    expect(r.views).toEqual([]);
+  });
+
   it('rowCountEstimate updates after INSERT + ANALYZE', async () => {
     const client = new pkg.Client({ connectionString: db.connectionString });
     await client.connect();
