@@ -6,6 +6,7 @@ type TableRow = {
   schema: string;
   name: string;
   comment: string | null;
+  row_count_estimate: number | null;
 };
 
 type ColumnRow = {
@@ -40,10 +41,16 @@ export async function fetchTables(client: Client, schemas: string[]): Promise<Ra
 
   const tableRows = await runQuery<TableRow>(
     client,
+    // `c.reltuples` is the planner's row-count estimate, maintained by
+    // ANALYZE / autovacuum. PostgreSQL uses -1 to mark "never
+    // analyzed", which we surface as null so downstream consumers
+    // always see "non-negative count or unknown" instead of mixing the
+    // sentinel into the numeric domain.
     `SELECT
        n.nspname AS schema,
        c.relname AS name,
-       d.description AS comment
+       d.description AS comment,
+       CASE WHEN c.reltuples < 0 THEN NULL ELSE c.reltuples::float8 END AS row_count_estimate
      FROM pg_class c
      JOIN pg_namespace n ON n.oid = c.relnamespace
      LEFT JOIN pg_description d ON d.objoid = c.oid AND d.objsubid = 0
@@ -176,6 +183,14 @@ export async function fetchTables(client: Client, schemas: string[]): Promise<Ra
       foreignKeys: [],
       checks: [],
       indexes: indexByTable.get(key) ?? [],
+      // pg returns float8 as a JS number; round to integer because
+      // the dev_spec contract (§7.3.1) types this as `number | null`
+      // and a fractional estimate would be misleading at the MCP
+      // surface.
+      rowCountEstimate:
+        row.row_count_estimate === null
+          ? null
+          : Math.round(row.row_count_estimate),
     };
   });
 }

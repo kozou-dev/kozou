@@ -31,6 +31,12 @@ export type RawTable = {
   foreignKeys: RawForeignKey[];
   checks: RawCheck[];
   indexes: RawIndex[];
+  /** Planner-maintained row count estimate (`pg_class.reltuples`).
+   *  PostgreSQL stores -1 for "never analyzed"; that case maps to
+   *  null here so consumers always see "a non-negative count, or
+   *  unknown" instead of mixing the sentinel into the numeric
+   *  domain. Surfaced through `list_tables` (Kozou v0.1 spec §7.3.1). */
+  rowCountEstimate: number | null;
 };
 
 export type RawColumn = {
