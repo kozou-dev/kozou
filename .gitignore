@@ -24,6 +24,11 @@ dist/
 coverage/
 .vitest-cache/
 
+# Playwright (svelte-ui e2e suite)
+playwright-report/
+test-results/
+.playwright-cache/
+
 # IDE / editor
 .vscode/
 .idea/
