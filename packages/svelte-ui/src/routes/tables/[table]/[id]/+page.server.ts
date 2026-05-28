@@ -1,14 +1,14 @@
-// Detail / Delete route. Reads the row via DataAdapter.get, hands
-// it (plus the column metadata) to the .svelte template, and
-// exposes a `?/delete` form action that calls DataAdapter.delete
-// + redirects back to the table listing.
+// Detail / Delete route. Reads the row via DataAdapter.get, resolves
+// each FK column to the referenced row's displayField label through
+// the per-process FkRowCache, then hands the row + column metadata +
+// resolved FK labels to the .svelte template. The `?/delete` form
+// action calls DataAdapter.delete + redirects back to the table
+// listing.
 //
-// FK label resolution is deferred to v0.1.1: the detail page
-// renders the raw FK column value for
-// now. Resolving each FK to its target row's displayField label
-// would require N extra adapter.get / .searchRelation calls per
-// detail render; v0.1.1 will batch them via /admin/refresh +
-// hooks.server caching (Kozou v0.1 design spec §16.1.1 B).
+// FK label resolution lands here in v0.1.1 (Kozou v0.1 design spec
+// §16.1.1 B). The cache keeps repeat renders / sibling detail pages
+// from re-fetching the same target rows; lookup misses fall back to
+// rendering the raw FK value.
 //
 // See Kozou v0.1 design spec §8.3.4.
 
@@ -16,6 +16,7 @@ import { error, redirect } from '@sveltejs/kit';
 
 import type { TableContext } from '@kozou/core';
 
+import { resolveFkLabels } from '$lib/detail/resolve-fk-labels.js';
 import { getAdapter } from '$lib/server/adapter.js';
 
 import type { Actions, PageServerLoad } from './$types';
@@ -46,10 +47,27 @@ export const load: PageServerLoad = async ({ params, locals }) => {
   if (!table) {
     throw error(404, `Unknown table: ${params.table}`);
   }
-  const row = await getAdapter().get(table.qualifiedName, params.id);
+  const adapter = getAdapter();
+  const row = await adapter.get(table.qualifiedName, params.id);
+
+  const fkLabels = await resolveFkLabels({
+    table,
+    row,
+    schema: locals.schema,
+    loadRow: (qualifiedName, id) =>
+      locals.fkRowCache.get(qualifiedName, id, (qn, identifier) =>
+        // Swallow adapter errors so a single missing target row
+        // does not block the rest of the FK columns from resolving;
+        // the template falls back to the raw FK value when the
+        // resolved label is null.
+        adapter.get(qn, identifier).catch(() => null),
+      ),
+  });
+
   return {
     table: tableViewModel(table),
     row,
+    fkLabels,
     id: params.id,
   };
 };

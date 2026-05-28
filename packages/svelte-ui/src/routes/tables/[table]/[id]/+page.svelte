@@ -14,6 +14,7 @@
 <dl class="space-y-4">
   {#each data.table.columns as col (col.name)}
     {@const rawValue = data.row[col.name]}
+    {@const fkLabel = data.fkLabels[col.name]}
     <div>
       <dt class="text-sm font-medium text-muted-foreground">{col.label}</dt>
       <dd class="mt-1 text-sm">
@@ -30,6 +31,16 @@
           />
         {:else if rawValue === null || rawValue === undefined}
           <span class="text-muted-foreground">—</span>
+        {:else if fkLabel !== undefined && fkLabel.label !== null}
+          <a
+            href={`/tables/${fkLabel.referencedQualifiedName}/${fkLabel.value}`}
+            class="text-primary underline"
+          >
+            {fkLabel.label}
+          </a>
+          <span class="ml-1 text-xs text-muted-foreground"
+            >({formatCellValue({ value: rawValue, widget: col.widget })})</span
+          >
         {:else}
           {formatCellValue({ value: rawValue, widget: col.widget })}
         {/if}
