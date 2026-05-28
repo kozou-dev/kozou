@@ -20,8 +20,10 @@ name: Release
 # was captured at Step 7-Z-6 from each action's latest stable tag
 # (docker/setup-buildx-action v3, docker/login-action v3,
 # docker/build-push-action v6, sigstore/cosign-installer v3,
-# softprops/action-gh-release v2). Dependabot keeps each pin
-# fresh - see .github/dependabot.yml.
+# softprops/action-gh-release v2). docker/setup-qemu-action v3.7.0
+# was added for the multi-arch publish (Kozou v0.1 design spec
+# §16.1.1 B). Dependabot keeps each pin fresh - see
+# .github/dependabot.yml.
 
 on:
   push:
@@ -204,6 +206,14 @@ jobs:
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
+      - name: Set up QEMU (emulators for non-amd64 build platforms)
+        # Required so that buildx can cross-build the linux/arm64 leg
+        # on the linux/amd64 GitHub-hosted runner. v0.1.0 shipped
+        # amd64 only and Apple Silicon `docker pull` failed with
+        # `no matching manifest for linux/arm64/v8` - see Kozou v0.1
+        # design spec §16.1.1 B for the broader v0.1.1 plan.
+        uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3.7.0
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
 
@@ -234,6 +244,14 @@ jobs:
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
           context: .
+          # Multi-arch build (Kozou v0.1 design spec §16.1.1 B). On a
+          # real tag push we publish a manifest list spanning amd64 +
+          # arm64; on workflow_dispatch we fall back to amd64 only
+          # because (a) buildx cannot `--load` a manifest list into
+          # the runner's Docker daemon, and (b) the QEMU-emulated
+          # arm64 leg roughly triples the build wall time, which is
+          # wasted cost for a smoke test that never ships an image.
+          platforms: ${{ inputs.dry_run != true && github.event_name == 'push' && 'linux/amd64,linux/arm64' || 'linux/amd64' }}
           push: ${{ inputs.dry_run != true && github.event_name == 'push' }}
           tags: |
             ghcr.io/kozou-dev/kozou:v${{ steps.ver.outputs.version }}
@@ -246,6 +264,11 @@ jobs:
       - name: Sign image with cosign (keyless)
         if: ${{ inputs.dry_run != true && github.event_name == 'push' }}
         env:
+          # For a multi-arch build `steps.build.outputs.digest` is
+          # the index/manifest-list digest. Signing the index is the
+          # documented way to attest a multi-arch image - `cosign
+          # verify` against either the tag or a per-arch digest then
+          # resolves back to this signature.
           DIGEST: ${{ steps.build.outputs.digest }}
         run: |
           cosign sign --yes "ghcr.io/kozou-dev/kozou@${DIGEST}"
