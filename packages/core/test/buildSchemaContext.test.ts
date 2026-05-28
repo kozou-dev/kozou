@@ -288,6 +288,35 @@ describe('buildSchemaContext', () => {
     expect(ctx.concepts[0]!.joinSuggestions).toEqual([
       { table: 'public.orders', on: 'vw_sample.<fk_column> = orders.<pk_column>' },
     ]);
+    expect(ctx.concepts[0]!.exampleQueries).toEqual([]);
+  });
+
+  it('VIEW concepts surface @example: blocks as exampleQueries', async () => {
+    const view: RawView = {
+      schema: 'public',
+      name: 'vw_sales_by_artist',
+      comment:
+        'Aggregated sales.\n' +
+        '@example: Totals by artist for the current month\n' +
+        '  SELECT artist_id, SUM(amount)\n' +
+        '  FROM vw_sales_by_artist\n' +
+        '  GROUP BY artist_id;',
+      columns: [],
+      underlyingTables: [],
+      definition: 'SELECT 1',
+    };
+    const raw = makeRaw({ views: [view] });
+    const ctx = await buildSchemaContext({ raw });
+    expect(ctx.concepts).toHaveLength(1);
+    expect(ctx.concepts[0]!.exampleQueries).toEqual([
+      {
+        description: 'Totals by artist for the current month',
+        sql:
+          'SELECT artist_id, SUM(amount)\n' +
+          'FROM vw_sales_by_artist\n' +
+          'GROUP BY artist_id;',
+      },
+    ]);
   });
 
   it('VIEW.label / description / purpose extraction', async () => {

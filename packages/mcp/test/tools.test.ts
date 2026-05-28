@@ -62,7 +62,11 @@ CREATE VIEW vw_inventory_for_sale AS
   JOIN authors a ON a.id = b.author_id AND a.deleted_at IS NULL
   WHERE i.status = 'for_sale' AND i.deleted_at IS NULL AND i.visibility = 'public';
 COMMENT ON VIEW vw_inventory_for_sale IS 'Inventory items currently available for sale.
-@ai: start from this VIEW for stock-related queries; no need to re-JOIN.';
+@ai: start from this VIEW for stock-related queries; no need to re-JOIN.
+@example: Items currently for sale, by author
+  SELECT author_name, book_title, selling_price
+  FROM vw_inventory_for_sale
+  ORDER BY author_name, book_title;';
 `;
 
 describe('MCP tools (generic English fixture, Kozou v0.1 spec §13.2)', () => {
@@ -214,7 +218,20 @@ describe('MCP tools (generic English fixture, Kozou v0.1 spec §13.2)', () => {
     expect(r.preferredQuerySource).toBe('FROM vw_inventory_for_sale');
     expect(r.aiNotes.length).toBeGreaterThan(0);
     expect(r.relatedTables.length).toBe(4);
-    expect(r.exampleQueries).toEqual([]);
+  });
+
+  it('get_concept_context: exampleQueries surfaces the @example: block on the VIEW comment', async () => {
+    const ctx = await cache.get();
+    const r = getConceptContext({ name: 'vw_inventory_for_sale' }, ctx);
+    expect(r.exampleQueries).toEqual([
+      {
+        description: 'Items currently for sale, by author',
+        sql:
+          'SELECT author_name, book_title, selling_price\n' +
+          'FROM vw_inventory_for_sale\n' +
+          'ORDER BY author_name, book_title;',
+      },
+    ]);
   });
 
   it('get_concept_context: throws for unknown concept', async () => {

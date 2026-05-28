@@ -121,4 +121,8 @@ export type ConceptContext = {
   joinSuggestions: { table: string; on: string }[];
   /** @ai: lines from the COMMENT */
   aiNotes: string[];
+  /** @example: blocks from the COMMENT (Kozou v0.1 spec §7.3.6). Each
+   *  entry is `{ description, sql }`: the text on the `@example:`
+   *  line and the indented continuation block. */
+  exampleQueries: { description: string; sql: string }[];
 };

@@ -28,6 +28,10 @@ export function getConceptContext(
       purpose: '',
     })),
     relatedTables,
-    exampleQueries: [],
+    // `@example:` blocks captured on the VIEW's COMMENT by
+    // @kozou/core (Kozou v0.1 spec §7.3.6). Each entry is
+    // `{ description, sql }`: the line after `@example:` is the
+    // description, the indented continuation block is the SQL.
+    exampleQueries: concept.exampleQueries,
   };
 }
