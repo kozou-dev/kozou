@@ -15,7 +15,10 @@ export function listTables(input: ListTablesInput, ctx: SchemaContext): ListTabl
         qualifiedName: t.qualifiedName,
         label: t.label,
         description: t.description,
-        rowCountEstimate: null,
+        // Planner estimate threaded through introspect ->
+        // RawTable.rowCountEstimate. `null` when PostgreSQL has not
+        // analyzed the table yet (Kozou v0.1 spec §7.3.1).
+        rowCountEstimate: t.rawTable.rowCountEstimate,
       })),
   };
 }

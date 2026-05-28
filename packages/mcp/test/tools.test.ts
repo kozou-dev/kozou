@@ -91,7 +91,7 @@ describe('MCP tools (generic English fixture, Kozou v0.1 spec §13.2)', () => {
     if (db) await db.cleanup();
   });
 
-  it('list_tables: returns 4 tables, rowCountEstimate is null', async () => {
+  it('list_tables: returns 4 tables', async () => {
     const ctx = await cache.get();
     const r = listTables({ schema: db.schema }, ctx);
     expect(r.tables.map((t) => t.qualifiedName).sort()).toEqual([
@@ -100,9 +100,46 @@ describe('MCP tools (generic English fixture, Kozou v0.1 spec §13.2)', () => {
       `${db.schema}.editions`,
       `${db.schema}.inventory_items`,
     ]);
+    // rowCountEstimate is either null (never analyzed) or a non-negative
+    // integer. The cache fixture inserts no rows and does not run
+    // ANALYZE, so PostgreSQL may leave reltuples at -1 (mapped to null)
+    // or autovacuum may bump it to 0 between fixture load and the
+    // introspect query. The dedicated `reflects analyzed table
+    // cardinality` test below covers the analyzed-with-rows path.
     for (const t of r.tables) {
-      expect(t.rowCountEstimate).toBeNull();
+      expect(t.rowCountEstimate === null || t.rowCountEstimate >= 0).toBe(true);
     }
+  });
+
+  it('list_tables: rowCountEstimate reflects analyzed table cardinality', async () => {
+    const client = new pkg.Client({ connectionString: db.connectionString });
+    await client.connect();
+    try {
+      await client.query(`SET search_path TO "${db.schema}"`);
+      await client.query(
+        `INSERT INTO authors (display_name) VALUES ('A'), ('B'), ('C')`,
+      );
+      await client.query(`ANALYZE "${db.schema}".authors`);
+    } finally {
+      await client.end();
+    }
+
+    // Fresh cache so the next introspect call re-runs against the now-
+    // analyzed table.
+    const freshCache = new SchemaCache({
+      connection: db.connectionString,
+      schemas: [db.schema],
+      ttlMs: 60_000,
+    });
+    const ctx = await freshCache.get();
+    const r = listTables({ schema: db.schema }, ctx);
+
+    const authors = r.tables.find(
+      (t) => t.qualifiedName === `${db.schema}.authors`,
+    );
+    expect(authors).toBeDefined();
+    expect(typeof authors!.rowCountEstimate).toBe('number');
+    expect(authors!.rowCountEstimate).toBeGreaterThanOrEqual(3);
   });
 
   it('list_tables: empty when targeting a different schema', async () => {

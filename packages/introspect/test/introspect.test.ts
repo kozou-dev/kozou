@@ -152,4 +152,37 @@ describe('introspect (generic English fixture)', () => {
     expect(r.introspectedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
     expect(r.schemas).toEqual([db.schema]);
   });
+
+  it('extracts rowCountEstimate from pg_class.reltuples', async () => {
+    const r = await introspectSuite();
+    // Fixture inserts no rows; PostgreSQL leaves `reltuples` at -1
+    // (mapped to null here) until autovacuum or an explicit ANALYZE
+    // runs. Either outcome is acceptable - what we care about is that
+    // the field is threaded through with the right type.
+    for (const t of r.tables) {
+      if (t.rowCountEstimate !== null) {
+        expect(typeof t.rowCountEstimate).toBe('number');
+        expect(t.rowCountEstimate).toBeGreaterThanOrEqual(0);
+      }
+    }
+  });
+
+  it('rowCountEstimate updates after INSERT + ANALYZE', async () => {
+    const client = new pkg.Client({ connectionString: db.connectionString });
+    await client.connect();
+    try {
+      await client.query(`SET search_path TO "${db.schema}"`);
+      await client.query(
+        `INSERT INTO authors (display_name) VALUES ('A1'), ('A2'), ('A3'), ('A4'), ('A5')`,
+      );
+      await client.query(`ANALYZE "${db.schema}".authors`);
+    } finally {
+      await client.end();
+    }
+    const r = await introspectSuite();
+    const authors = r.tables.find((t) => t.name === 'authors');
+    expect(authors).toBeDefined();
+    expect(typeof authors!.rowCountEstimate).toBe('number');
+    expect(authors!.rowCountEstimate).toBeGreaterThanOrEqual(5);
+  });
 });

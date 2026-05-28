@@ -25,6 +25,7 @@ function makeTable(name: string, overrides: Partial<RawTable> = {}): RawTable {
     foreignKeys: [],
     checks: [],
     indexes: [],
+    rowCountEstimate: null,
     ...overrides,
   };
 }
