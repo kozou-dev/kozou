@@ -43,6 +43,7 @@
     "@kozou/core": "workspace:*",
     "@kozou/introspect": "workspace:*",
     "@kozou/mcp": "workspace:*",
+    "@kozou/svelte-ui": "workspace:*",
     "commander": "^14.0.0",
     "yaml": "^2.9.0",
     "zod": "^3.23.0"
