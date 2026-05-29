@@ -112,6 +112,19 @@ export default async function globalSetup() {
       KOZOU_ADAPTER_URL: postgrestUrl,
       PORT: String(SVELTE_UI_PORT),
       HOST: SVELTE_UI_HOST,
+      // adapter-node assumes https when neither ORIGIN nor
+      // PROTOCOL_HEADER is set, so its computed request origin becomes
+      // `https://127.0.0.1:4173` while the browser sends an
+      // `http://127.0.0.1:4173` Origin header. SvelteKit's CSRF guard
+      // then rejects every POST form action with a 403
+      // "Cross-site POST form submissions are forbidden", which breaks
+      // the create / edit / delete flows this suite exercises. Setting
+      // ORIGIN to the real plain-http URL aligns the two so the
+      // mutation specs reach the actual server actions. Any plain-http
+      // adapter-node deployment of the Admin UI (e.g. `kozou dev` on
+      // http://localhost:3333) needs the same — tracked as a v0.1.1
+      // follow-up in dev_spec §16.1.1 B.
+      ORIGIN: `http://${SVELTE_UI_HOST}:${SVELTE_UI_PORT}`,
       NODE_ENV: 'production',
     },
     stdio: ['ignore', 'pipe', 'pipe'],

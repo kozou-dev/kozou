@@ -53,6 +53,12 @@ services:
   #   environment:
   #     DATABASE_URL: postgres://${POSTGRES_USER:-kozou}:${POSTGRES_PASSWORD:-kozou}@postgres:5432/${POSTGRES_DB:-kozou}
   #     KOZOU_ADAPTER_URL: http://postgrest:3000
+  #     # The Admin UI is a SvelteKit (adapter-node) app. Without ORIGIN
+  #     # it assumes https and rejects every form POST (create / edit /
+  #     # delete) over plain http with a 403 "Cross-site POST forbidden".
+  #     # Set it to the exact URL you open in the browser; override if you
+  #     # publish the Admin UI on a different host or port.
+  #     ORIGIN: ${KOZOU_ORIGIN:-http://localhost:3333}
   #   depends_on:
   #     postgres:
   #       condition: service_healthy
