@@ -18,6 +18,7 @@ type McpFlags = {
   stdio?: boolean;
   http?: boolean;
   port?: number;
+  host?: string;
   config?: string;
 };
 
@@ -48,16 +49,18 @@ program
 
 program
   .command('mcp')
-  .description('Run the MCP server (stdio in v0.1; HTTP in v0.1.1).')
+  .description('Run the MCP server (--stdio default, or --http).')
   .option('--stdio', 'use stdio transport (default)')
-  .option('--http', 'use HTTP transport (scheduled for v0.1.1)')
-  .option('--port <n>', 'HTTP port', (raw) => parseInt(raw, 10))
+  .option('--http', 'use Streamable HTTP transport')
+  .option('--port <n>', 'HTTP port (default 3334)', (raw) => parseInt(raw, 10))
+  .option('--host <host>', 'HTTP bind host (default 127.0.0.1)')
   .option('--config <path>', 'path to kozou.config.yaml')
   .action(async (flags: McpFlags) => {
     await mcpCommand({
       stdio: flags.stdio,
       http: flags.http,
       port: flags.port,
+      host: flags.host,
       config: flags.config,
     });
   });
