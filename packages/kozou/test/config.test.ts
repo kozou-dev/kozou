@@ -171,4 +171,57 @@ server:
     });
     expect(config.database.url).toBe('postgres://from-file:5432/db');
   });
+
+  it('$${VAR} escapes to a literal ${VAR} (not expanded even when VAR is set)', async () => {
+    const dir = await makeTempDir();
+    const file = await writeYaml(
+      dir,
+      `database:
+  url: postgres://u:p@h:5432/db
+adapter:
+  url: http://host/$\${TOKEN}
+`,
+    );
+    const config = await loadConfig({
+      path: file,
+      env: { TOKEN: 'should-not-appear' },
+    });
+    expect(config.adapter.url).toBe('http://host/${TOKEN}');
+  });
+
+  it('$$ becomes a literal $ and coexists with a real ${VAR} expansion', async () => {
+    const dir = await makeTempDir();
+    const file = await writeYaml(
+      dir,
+      `database:
+  url: postgres://u:p@h:5432/db
+adapter:
+  url: \${KOZOU_ADAPTER_URL}?cost=$$5
+`,
+    );
+    const config = await loadConfig({
+      path: file,
+      env: { KOZOU_ADAPTER_URL: 'http://adapter:3000' },
+    });
+    expect(config.adapter.url).toBe('http://adapter:3000?cost=$5');
+  });
+
+  it('a substituted value containing ${...} is taken verbatim (single-level, secret-safe)', async () => {
+    const dir = await makeTempDir();
+    const file = await writeYaml(
+      dir,
+      `database:
+  url: \${DATABASE_URL}
+`,
+    );
+    // A password that legitimately contains ${...} must survive intact:
+    // the env value is substituted once and never re-scanned, so the
+    // ${SECRET} fragment is not treated as a placeholder. `SECRET` is
+    // intentionally left undefined to prove it is never looked up.
+    const config = await loadConfig({
+      path: file,
+      env: { DATABASE_URL: 'postgres://u:p${SECRET}@h:5432/db' },
+    });
+    expect(config.database.url).toBe('postgres://u:p${SECRET}@h:5432/db');
+  });
 });
