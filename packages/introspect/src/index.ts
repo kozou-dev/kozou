@@ -7,6 +7,7 @@ import { fetchChecks } from './checks.js';
 import { fetchViews } from './views.js';
 import { fetchEnums } from './enums.js';
 import { KozouIntrospectError, runQuery } from './errors.js';
+import { filterTables, filterViews, pruneDanglingForeignKeys } from './filter.js';
 
 const PgClient = pkg.Client;
 
@@ -40,12 +41,6 @@ async function fetchExistingSchemas(client: Client, schemas: string[]): Promise<
 export async function introspect(opts: IntrospectOptions): Promise<RawIntrospection> {
   const schemas = opts.schemas ?? ['public'];
   const timeoutMs = opts.timeoutMs ?? 10_000;
-
-  if (opts.include?.length || opts.exclude?.length) {
-    console.warn(
-      '[@kozou/introspect] opts.include / opts.exclude are not implemented in v0.1 (warning only)',
-    );
-  }
 
   const baseConfig: ClientConfig =
     typeof opts.connection === 'string'
@@ -85,13 +80,18 @@ export async function introspect(opts: IntrospectOptions): Promise<RawIntrospect
     }
     const validSchemas = schemas.filter((s) => existing.includes(s));
 
-    const tables = await fetchTables(client, validSchemas);
+    const allTables = await fetchTables(client, validSchemas);
     const fks = await fetchForeignKeys(client, validSchemas);
     const checks = await fetchChecks(client, validSchemas);
-    mergeTableMetadata(tables, fks, checks);
+    mergeTableMetadata(allTables, fks, checks);
 
-    const views = await fetchViews(client, validSchemas);
+    const allViews = await fetchViews(client, validSchemas);
     const enums = await fetchEnums(client, validSchemas);
+
+    const filterOpts = { include: opts.include, exclude: opts.exclude };
+    const tables = filterTables(allTables, filterOpts);
+    pruneDanglingForeignKeys(tables);
+    const views = filterViews(allViews, filterOpts);
 
     return {
       serverVersion,
