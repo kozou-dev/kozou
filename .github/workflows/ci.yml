@@ -123,3 +123,42 @@ jobs:
 
       - name: Run Playwright E2E
         run: pnpm --filter @kozou/svelte-ui run test:e2e
+
+  e2e-kozou-dev:
+    name: Playwright E2E (kozou dev)
+    runs-on: ubuntu-latest
+    # Mirrors the svelte-ui E2E job, but launches `node dist/cli.js dev`
+    # so the dev command's own wiring (config -> env, ORIGIN propagation,
+    # MCP HTTP in-process, both servers together) is exercised against a
+    # real postgres + REST-adapter stack. The Playwright globalSetup owns
+    # the DB lifecycle via testcontainers, same as the svelte-ui suite.
+    # (See packages/kozou/e2e/setup/global-setup.ts.)
+    env:
+      NODE_OPTIONS: '--max-old-space-size=4096'
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@0e279bb959325dab635dd2c09392533439d90093 # v6.0.8
+
+      - name: Setup Node (with pnpm cache)
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version-file: '.nvmrc'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build workspace packages
+        # global-setup spawns `node packages/kozou/dist/cli.js dev`, which
+        # in turn spawns `packages/svelte-ui/build/index.js`; build the
+        # whole workspace so both outputs (and the workspace:* deps they
+        # resolve) are ready before the runtime stage.
+        run: pnpm -r run build
+
+      - name: Install Playwright browser (chromium)
+        run: pnpm --filter kozou exec playwright install --with-deps chromium
+
+      - name: Run Playwright E2E
+        run: pnpm --filter kozou run test:e2e
