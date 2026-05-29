@@ -5,6 +5,12 @@
 export { createMcpServer } from './server.js';
 export { SchemaCache, type SchemaCacheOptions } from './schemaCache.js';
 export { startStdioServer, type StartStdioServerOptions } from './startStdioServer.js';
+export {
+  startHttpServer,
+  isLoopbackHost,
+  type StartHttpServerOptions,
+  type HttpServerHandle,
+} from './startHttpServer.js';
 export { listTables } from './tools/list_tables.js';
 export { describeTable } from './tools/describe_table.js';
 export { listViews } from './tools/list_views.js';
