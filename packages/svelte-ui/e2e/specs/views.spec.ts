@@ -29,3 +29,16 @@ test('vw_inventory_for_sale hides reserved items and shows for_sale ones', async
   // 2 visible rows total (one row per for_sale + public item).
   await expect(page.getByText(/2 total/)).toBeVisible();
 });
+
+test('vw_inventory_for_sale renders sortable display column headers', async ({
+  page,
+}) => {
+  await page.goto('/views/public.vw_inventory_for_sale');
+
+  // Column labels are humanized from the view's columns; `book_title`
+  // is among the first display columns, so its header is rendered as a
+  // sort link (views share the table list's sortable-header markup).
+  const bookTitleHeader = page.getByRole('link', { name: /Book Title/ });
+  await expect(bookTitleHeader).toBeVisible();
+  await expect(bookTitleHeader).toHaveAttribute('href', /sort=book_title%3A/);
+});
