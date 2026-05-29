@@ -3,17 +3,20 @@ name: Security scan
 # Continuous secret-leak and dependency-vulnerability scanning. Added in
 # Step 4-A4-b; the action shapes were ironed out in Step 4-A4-d/e/f.
 #
-# Two jobs:
+# Three jobs:
 # - secret-scan (gitleaks, MIT): runs the gitleaks CLI directly in
 #   docker (gitleaks-action v2 became an organization-licensed
 #   commercial product)
 # - dependency-scan (OSV-Scanner, Apache 2.0): runs the OSV-Scanner CLI
 #   directly in docker (the google/osv-scanner-action root action.yml
 #   carries brand info only; the reusable-workflow form requires GHAS)
-#
-# CodeQL is planned for v0.1.1 once GHAS code-scanning is enabled in
-# repo settings (SARIF upload was failing during Step 4-A4, so the job
-# is currently absent).
+# - codeql (CodeQL, JS/TS): GitHub's first-party SAST. Code scanning /
+#   CodeQL is free for public repositories, so the analyze step uploads
+#   SARIF to the Security tab via `security-events: write`. Added in
+#   v0.1.1 (the Step 4-A4 deferral assumed GHAS had to be purchased; that
+#   only applies to private repos). Uses advanced setup (this workflow),
+#   so the repo's "Default setup" for code scanning must stay disabled -
+#   the two are mutually exclusive.
 # trufflehog (AGPL-3) is intentionally not adopted per Kozou v0.1
 # license compliance §4.
 
@@ -68,9 +71,36 @@ jobs:
         # Public repos often have GHAS disabled by default, so we run the
         # osv-scanner CLI directly in docker (same pattern as gitleaks).
         # Results land in the CI log; a high CVE finding fails the job
-        # via the non-zero exit code. The full GHAS + reusable-workflow
-        # + CodeQL setup is planned for v0.1.1.
+        # via the non-zero exit code. (CodeQL SARIF -> code scanning is
+        # handled by the separate `codeql` job below.)
         run: |
           docker run --rm -v "$PWD:/repo" -w /repo \
             ghcr.io/google/osv-scanner:latest \
             -r ./
+
+  codeql:
+    name: CodeQL (JavaScript/TypeScript)
+    runs-on: ubuntu-latest
+    # CodeQL's analyze step uploads SARIF to code scanning, which needs
+    # security-events: write. actions: read is required for analyzing
+    # workflow files / private-repo support; harmless on public repos.
+    permissions:
+      contents: read
+      security-events: write
+      actions: read
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Initialize CodeQL
+        # JavaScript + TypeScript share one extractor; it is build-free,
+        # so no autobuild/manual build step is needed. node_modules /
+        # dist / build are absent here (not installed, gitignored), so
+        # the scan stays on first-party source.
+        uses: github/codeql-action/init@051e2f90686233507fe9283ff167d2e709304b30 # v3.36.0
+        with:
+          languages: javascript-typescript
+
+      - name: Perform CodeQL analysis
+        uses: github/codeql-action/analyze@051e2f90686233507fe9283ff167d2e709304b30 # v3.36.0
+        with:
+          category: '/language:javascript-typescript'
