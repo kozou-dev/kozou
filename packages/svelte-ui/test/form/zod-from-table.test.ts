@@ -59,7 +59,10 @@ describe('zodFromTable', () => {
     }
   });
 
-  it('treats nullable columns as optional/nullable on the resulting object', () => {
+  it('accepts null or a value for nullable columns (key always present)', () => {
+    // superforms submits every field, so a nullable column appears as
+    // an explicit null rather than an omitted key. The schema therefore
+    // accepts null or a value but treats the field as required-present.
     const schema = zodFromTable(
       makeTable([
         makeColumn({ name: 'title', widget: 'text', nullable: false }),
@@ -67,7 +70,6 @@ describe('zodFromTable', () => {
       ]),
     );
 
-    expect(schema.safeParse({ title: 'A Book' }).success).toBe(true);
     expect(
       schema.safeParse({ title: 'A Book', subtitle: null }).success,
     ).toBe(true);

@@ -62,13 +62,41 @@ describe('zodFromColumn', () => {
     expect(schema.safeParse('not-a-uuid').success).toBe(false);
   });
 
-  it('wraps the inner schema in nullable + optional when the column is nullable', () => {
+  it('accepts a value or null for a nullable column, but not undefined', () => {
+    // The form always submits every field, defaulting an empty nullable
+    // column to `null` (never `undefined`). Allowing `undefined` would
+    // make superforms default the field to undefined, which crashes the
+    // widget bindings (`$bindable('')`) with Svelte's
+    // `props_invalid_value` on client-side navigation to /new and /edit.
     const schema = zodFromColumn(
       makeColumn({ widget: 'text', nullable: true }),
     );
     expect(schema.safeParse('hello').success).toBe(true);
     expect(schema.safeParse(null).success).toBe(true);
-    expect(schema.safeParse(undefined).success).toBe(true);
+    expect(schema.safeParse(undefined).success).toBe(false);
+  });
+
+  it('accepts the empty-string sentinel for a column with a DEFAULT', () => {
+    // A uuid PK with a gen_random_uuid() default is submitted empty by
+    // the create form; the empty string must validate (the create route
+    // then drops it so the DB default applies) instead of failing the
+    // uuid check.
+    const schema = zodFromColumn(
+      makeColumn({ widget: 'uuid', nullable: false, defaultExpr: 'gen_random_uuid()' }),
+    );
+    expect(schema.safeParse('').success).toBe(true);
+    expect(
+      schema.safeParse('11111111-1111-1111-1111-111111111111').success,
+    ).toBe(true);
+    expect(schema.safeParse('not-a-uuid').success).toBe(false);
+  });
+
+  it('accepts the empty-string sentinel for a read-only column', () => {
+    const schema = zodFromColumn(
+      makeColumn({ widget: 'text', nullable: false, readonly: true }),
+    );
+    expect(schema.safeParse('').success).toBe(true);
+    expect(schema.safeParse('value').success).toBe(true);
   });
 
   it('coerces boolean widget values from string inputs (form submissions)', () => {

@@ -10,6 +10,7 @@ import { zod } from 'sveltekit-superforms/adapters';
 
 import type { TableContext } from '@kozou/core';
 
+import { buildMutationPayload } from '$lib/form/mutation-payload.js';
 import { zodFromTable } from '$lib/form/zod-from-table.js';
 import { getAdapter } from '$lib/server/adapter.js';
 
@@ -67,8 +68,9 @@ export const actions: Actions = {
     if (!form.valid) {
       return fail(400, { form });
     }
-    const payload: Record<string, unknown> = Object.fromEntries(
-      Object.entries(form.data as object),
+    const payload = buildMutationPayload(
+      table,
+      form.data as Record<string, unknown>,
     );
     await getAdapter().update(table.qualifiedName, params.id, payload);
     throw redirect(303, `/tables/${table.qualifiedName}/${params.id}`);

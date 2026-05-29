@@ -16,7 +16,12 @@ import type { PageServerLoad } from './$types';
 
 const DISPLAY_COLUMN_LIMIT = 5;
 
-const TEXT_LIKE_TYPE_PREFIXES = ['text', 'character', 'varchar', 'citext', 'name', 'uuid'];
+// Types that support a case-insensitive `ILIKE` substring search. `uuid`
+// is deliberately excluded: PostgreSQL has no `uuid ILIKE text` operator,
+// so including it made the list search emit
+// `or=(id.ilike.*term*)` and fail with a 500 for every table with a uuid
+// column (i.e. every table with a gen_random_uuid() primary key).
+const TEXT_LIKE_TYPE_PREFIXES = ['text', 'character', 'varchar', 'citext', 'name'];
 
 export const load: PageServerLoad = async ({ params, locals, url }) => {
   const table = locals.schema.tables.find(

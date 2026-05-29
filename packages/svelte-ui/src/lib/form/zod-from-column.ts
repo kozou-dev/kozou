@@ -12,14 +12,48 @@ import type { ZodTypeAny } from 'zod';
 
 import type { ColumnContext } from '@kozou/core';
 
-export function zodFromColumn(column: ColumnContext): ZodTypeAny {
-  let schema: ZodTypeAny = pickBase(column);
+// True when the database can populate this column on its own, so the
+// create form is allowed to leave it empty:
+//   - it carries a DEFAULT (e.g. a `gen_random_uuid()` primary key or a
+//     `DEFAULT 'public'` enum); or
+//   - it is read-only / server-generated, so the form never collects a
+//     value for it.
+export function dbCanSupplyColumn(column: ColumnContext): boolean {
+  return column.defaultExpr !== null || column.readonly;
+}
 
-  if (column.nullable) {
-    schema = schema.nullable().optional();
+export function zodFromColumn(column: ColumnContext): ZodTypeAny {
+  const base = pickBase(column);
+
+  // A column the database can fill on its own must not be a required
+  // form field. The create form still renders an (empty / read-only)
+  // input for it and submits an empty string; the create route then
+  // strips empties so the DB default takes over (see mutation-payload).
+  //
+  // Accepting `z.literal('')` alongside the base type does two things:
+  //  1. validation passes for the empty submission — without it the
+  //     auto-generated uuid primary key fails with "Invalid uuid",
+  //     which made it impossible to create a row in any table with a
+  //     uuid-default PK (dev_spec §8.3.3);
+  //  2. the schema's inferred default becomes '' (the first union
+  //     member) rather than `undefined`, so the form binds a string.
+  //     Binding `undefined` to the widgets — which declare
+  //     `$bindable('')` — trips Svelte's `props_invalid_value` and
+  //     crashes the form on client-side navigation to /new and /edit.
+  if (dbCanSupplyColumn(column)) {
+    const inner = column.nullable ? base.nullable() : base;
+    return z.union([z.literal(''), inner]);
   }
 
-  return schema;
+  // Nullable (no default) columns allow null but NOT undefined, so the
+  // inferred form default is `null` instead of `undefined`. Binding null
+  // is fine; binding undefined trips the same `props_invalid_value`
+  // crash described above.
+  if (column.nullable) {
+    return base.nullable();
+  }
+
+  return base;
 }
 
 function pickBase(column: ColumnContext): ZodTypeAny {
