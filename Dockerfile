@@ -33,11 +33,10 @@ RUN pnpm install --frozen-lockfile
 # Build every workspace package in topological order so the
 # `pnpm deploy` step below can resolve each transitive
 # `workspace:*` reference against a real `dist/` (or `build/` for
-# svelte-ui). svelte-ui's vite build only inflates the builder
-# layer; it never reaches the runtime image because `kozou`'s
-# production dependency closure does not include `@kozou/svelte-ui`
-# in v0.1. v0.1.1's `kozou dev` host integration is where the
-# Admin UI bundle starts shipping alongside the CLI.
+# svelte-ui). As of v0.1.1, `kozou` depends on `@kozou/svelte-ui`
+# (its `kozou dev` command spawns the Admin UI's adapter-node
+# server), so svelte-ui's `build/` output is now part of kozou's
+# production dependency closure and ships in the runtime image below.
 RUN pnpm -r run build
 
 # Materialize a flat, self-contained tree under /deploy. pnpm
@@ -63,10 +62,14 @@ ENV NODE_ENV=production
 WORKDIR /app
 COPY --from=builder /deploy /app
 
-# `node:24-alpine` ships a non-root `node` user. Switching to it
-# means a future `kozou dev` HTTP transport (v0.1.1) starts under a
-# least-privilege account. The CLI itself does not bind any port in
-# v0.1, so no `EXPOSE` directive yet.
+# `node:24-alpine` ships a non-root `node` user. Running as it means
+# `kozou dev` starts the Admin UI + MCP HTTP servers under a
+# least-privilege account.
 USER node
+
+# `kozou dev` serves the Admin UI on 3333 and MCP HTTP on 3334
+# (Kozou v0.1 spec §9.1). Other subcommands (inspect / mcp --stdio)
+# bind nothing; EXPOSE is informational and harmless for them.
+EXPOSE 3333 3334
 
 ENTRYPOINT ["node", "/app/dist/cli.js"]

@@ -67,7 +67,7 @@ program
 
 program
   .command('dev')
-  .description('Run the bundled Admin UI + MCP HTTP dev server (v0.1.1).')
+  .description('Run the bundled Admin UI + MCP HTTP dev server.')
   .option('--config <path>', 'path to kozou.config.yaml')
   .action(async (flags: DevFlags) => {
     await devCommand({ config: flags.config });
