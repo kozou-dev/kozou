@@ -19,52 +19,59 @@ import { z } from 'zod';
 
 // ---- Schema ---------------------------------------------------------------
 
+// Nested sections use `.prefault({})` rather than `.default({})`: in zod 4
+// `.default(v)` short-circuits to `v` as-is when the input is undefined (so
+// it would need the fully-populated object), whereas `.prefault(v)` feeds
+// `v` back through the schema so each field's own `.default(...)` still
+// applies. `.prefault({})` therefore reproduces the zod 3 behaviour of
+// "absent section -> object filled entirely from inner defaults".
+
 const uiServerSchema = z
   .object({
     port: z.number().int().min(0).max(65_535).default(3333),
     host: z.string().min(1).default('0.0.0.0'),
   })
-  .default({});
+  .prefault({});
 
 const mcpHttpServerSchema = z
   .object({
     port: z.number().int().min(0).max(65_535).default(3334),
     host: z.string().min(1).default('0.0.0.0'),
   })
-  .default({});
+  .prefault({});
 
 const mcpServerSchema = z
   .object({
     http: mcpHttpServerSchema,
     stdio: z.boolean().default(false),
   })
-  .default({});
+  .prefault({});
 
 const serverSchema = z
   .object({
     ui: uiServerSchema,
     mcp: mcpServerSchema,
   })
-  .default({});
+  .prefault({});
 
 const adapterSchema = z
   .object({
     type: z.literal('postgrest').default('postgrest'),
     url: z.string().min(1).default('http://postgrest:3000'),
   })
-  .default({});
+  .prefault({});
 
 const uiHintsSchema = z
   .object({
     path: z.string().nullable().default(null),
   })
-  .default({});
+  .prefault({});
 
 const cacheSchema = z
   .object({
     ttlMs: z.number().int().min(0).default(60_000),
   })
-  .default({});
+  .prefault({});
 
 const databaseSchema = z.object({
   url: z.string().min(1, 'database.url is required (set DATABASE_URL or kozou.config.yaml)'),
