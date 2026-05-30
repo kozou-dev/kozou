@@ -4,6 +4,12 @@
 // against the process environment, fills in defaults, and validates the
 // result with zod. Every field has a default so kozou can run with only the
 // DATABASE_URL environment variable set, per the Kozou v0.1 design spec §9.2.
+//
+// A literal `$$` escapes to a single `$`, so `$${VAR}` produces the literal
+// text `${VAR}` instead of expanding it. Expansion is single-level by design:
+// a value substituted from the environment is never re-scanned, so a secret
+// that legitimately contains `${...}` (e.g. inside a DATABASE_URL password) is
+// preserved rather than mistaken for a placeholder. See expandEnvVars below.
 
 import { readFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
@@ -106,16 +112,30 @@ export type LoadConfigOptions = {
   skipFile?: boolean;
 };
 
-const ENV_VAR_RE = /\$\{([A-Za-z_][A-Za-z0-9_]*)(?::-([^}]*))?\}/g;
+// Matches either an escaped `$$` (which becomes a literal `$`) or a
+// `${VAR}` / `${VAR:-default}` placeholder. `$$` is listed first so the
+// alternation consumes it before the placeholder branch can see a stray `$`.
+const ENV_TOKEN_RE = /\$\$|\$\{([A-Za-z_][A-Za-z0-9_]*)(?::-([^}]*))?\}/g;
 
 function expandEnvVars(value: unknown, env: NodeJS.ProcessEnv): unknown {
   if (typeof value === 'string') {
-    return value.replace(ENV_VAR_RE, (_match, name: string, fallback?: string) => {
-      const v = env[name];
-      if (v !== undefined) return v;
-      if (fallback !== undefined) return fallback;
-      return '';
-    });
+    return value.replace(
+      ENV_TOKEN_RE,
+      (match, name: string | undefined, fallback?: string) => {
+        // `$$` -> literal `$`. So `$${VAR}` yields the literal `${VAR}`:
+        // the trailing `{VAR}` is left untouched because it no longer has
+        // a `$` prefix to start a placeholder.
+        if (match === '$$') return '$';
+        // Otherwise `match` is a `${...}` placeholder and `name` is its
+        // (always-present) variable name. The substituted value is taken
+        // verbatim and never re-scanned (single-level expansion), so a
+        // value containing `${...}` is preserved as-is.
+        const v = env[name as string];
+        if (v !== undefined) return v;
+        if (fallback !== undefined) return fallback;
+        return '';
+      },
+    );
   }
   if (Array.isArray(value)) {
     return value.map((v) => expandEnvVars(v, env));
