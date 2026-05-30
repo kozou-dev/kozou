@@ -7,8 +7,7 @@
 // inside published packages can be surprising).
 
 import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
-import { existsSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const DEFAULT_TEMPLATE_DIR = fileURLToPath(new URL('./templates', import.meta.url));
@@ -55,10 +54,21 @@ export async function createKozouScaffold(opts: CreateScaffoldOptions): Promise<
   if (target === '') {
     throw new KozouScaffoldError('create-kozou: target directory is required');
   }
-  if (existsSync(target)) {
-    throw new KozouScaffoldError(`create-kozou: "${target}" already exists`);
-  }
   const templatesDir = opts.templatesDir ?? DEFAULT_TEMPLATE_DIR;
-  await mkdir(target, { recursive: true });
+  // Create any missing parent directories, then create the target itself
+  // with a NON-recursive mkdir so an already-existing target fails
+  // atomically with EEXIST. A recursive mkdir silently succeeds on an
+  // existing directory, so the previous existsSync()-then-mkdir guard had
+  // a TOCTOU window (the target could be created between the check and the
+  // mkdir); letting mkdir own the "must not exist" check closes it.
+  await mkdir(dirname(target), { recursive: true });
+  try {
+    await mkdir(target);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'EEXIST') {
+      throw new KozouScaffoldError(`create-kozou: "${target}" already exists`);
+    }
+    throw err;
+  }
   await copyRecursive(templatesDir, target);
 }
