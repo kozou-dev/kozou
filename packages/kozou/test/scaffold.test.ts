@@ -68,6 +68,20 @@ describe('createKozouScaffold', () => {
     ).rejects.toBeInstanceOf(KozouScaffoldError);
   });
 
+  it('creates missing parent directories of the target', async () => {
+    const templatesDir = await makeTemplateDir();
+    const base = await makeTempBase();
+    // Two parent levels that do not exist yet: the target mkdir is
+    // non-recursive (for the atomic EEXIST guard), so the parent chain
+    // must be created first.
+    const target = join(base, 'nested', 'deep', 'my-app');
+
+    await createKozouScaffold({ target, templatesDir });
+
+    expect(existsSync(target)).toBe(true);
+    expect(existsSync(join(target, 'kozou.config.yaml'))).toBe(true);
+  });
+
   it('throws when target is empty', async () => {
     await expect(createKozouScaffold({ target: '' })).rejects.toBeInstanceOf(
       KozouScaffoldError,
