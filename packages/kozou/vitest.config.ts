@@ -2,6 +2,10 @@ import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
   test: {
+    // Unit/integration tests live under test/. The Playwright suite under
+    // e2e/ is driven by `pnpm test:e2e`, not vitest — scope the include so
+    // `vitest run` does not try to execute the *.spec.ts e2e files.
+    include: ['test/**/*.{test,spec}.ts'],
     coverage: {
       provider: 'v8',
       include: ['src/**/*.ts'],

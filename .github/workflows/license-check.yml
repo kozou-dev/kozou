@@ -127,6 +127,14 @@ jobs:
         #   public Docker image tag + env var names.)
         # - packages/svelte-ui/playwright.config.ts (Playwright config
         #   header documenting the same sidecar arrangement)
+        # - packages/kozou/e2e/** (the `kozou dev` full-stack Playwright
+        #   suite per Kozou v0.1 spec §16.1.1 B; launches `kozou dev`
+        #   against the same postgrest sidecar via testcontainers. Ships
+        #   no PostgREST source / binary; references the public Docker
+        #   image tag + env var names only, and is not in the package's
+        #   published `files`.)
+        # - packages/kozou/playwright.config.ts (Playwright config header
+        #   documenting the same sidecar arrangement)
         # The actual contamination risk lives in shippable artifacts
         # (npm pack / python -m build); the artifact-grep job below
         # covers those separately.
@@ -143,7 +151,9 @@ jobs:
              ':(exclude)packages/svelte-ui/src/lib/server/adapter.ts' \
              ':(exclude)packages/svelte-ui/test/adapter/postgrest.*.test.ts' \
              ':(exclude)packages/svelte-ui/e2e/**' \
-             ':(exclude)packages/svelte-ui/playwright.config.ts'; then
+             ':(exclude)packages/svelte-ui/playwright.config.ts' \
+             ':(exclude)packages/kozou/e2e/**' \
+             ':(exclude)packages/kozou/playwright.config.ts'; then
             echo "ERROR: code files contain AGPL/GPL/PostgREST vocabulary"
             exit 1
           fi

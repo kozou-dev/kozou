@@ -37,7 +37,8 @@
     "typecheck": "tsc --noEmit",
     "build": "tsc && node scripts/copy-templates.mjs",
     "prepublishOnly": "pnpm run build",
-    "test": "vitest run --coverage"
+    "test": "vitest run --coverage",
+    "test:e2e": "playwright test"
   },
   "dependencies": {
     "@kozou/core": "workspace:*",
@@ -49,6 +50,12 @@
     "zod": "^3.23.0"
   },
   "devDependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "@playwright/test": "^1.50.0",
+    "@testcontainers/postgresql": "^12.0.0",
+    "@types/pg": "^8.11.10",
+    "pg": "^8.13.0",
+    "testcontainers": "^12.0.0",
     "tsx": "^4.19.0"
   }
 }
