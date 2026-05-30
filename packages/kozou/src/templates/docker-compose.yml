@@ -1,15 +1,12 @@
 # Docker Compose stack for a kozou project.
 #
-# Brings up (v0.1.0):
+# Brings up:
 #   - postgres   PostgreSQL 16 (the source of truth)
 #   - postgrest  REST adapter consumed by the Kozou DataAdapter
 #                (MIT-licensed external dependency, not bundled)
-#
-# The `kozou` service block is commented out for v0.1.0: the
-# published `ghcr.io/kozou-dev/kozou:v0.1.0` image's entrypoint is
-# the `kozou` CLI, which does not bind a port. Host integration
-# (`kozou dev` spawning the bundled Admin UI + MCP HTTP server)
-# lands in v0.1.1; uncomment the block then.
+#   - kozou      `kozou dev` - the bundled Admin UI + MCP HTTP server
+#                (ghcr.io/kozou-dev/kozou). Binds 0.0.0.0 inside the
+#                container so the port mappings below reach your host.
 #
 # Customize the credentials in .env before running `docker compose up`.
 

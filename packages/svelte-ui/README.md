@@ -5,10 +5,9 @@ a `SchemaContext` from [`@kozou/core`](../core) and talks to a
 backend through the `DataAdapter` interface defined there. The
 default adapter speaks PostgREST.
 
-> **v0.1.0 status:** published to npm as `@kozou/svelte-ui`. The
-> package ships only the adapter-node `build/` artifact - host
-> integration via `kozou dev` lands in v0.1.1 (design spec
-> §16.1.1 B).
+> **Status:** published to npm as `@kozou/svelte-ui`. The package
+> ships only the adapter-node `build/` artifact; host integration
+> via `kozou dev` shipped in v0.1.1.
 
 ## Stack
 
@@ -17,7 +16,7 @@ default adapter speaks PostgREST.
 | Framework | SvelteKit 2.6+ / Svelte 5.55+ |
 | Adapter | `@sveltejs/adapter-node` |
 | Styling | Tailwind v4 + shadcn-svelte design tokens |
-| Forms | `sveltekit-superforms` + `formsnap` + `zod` (3.25) |
+| Forms | `sveltekit-superforms` + `formsnap` + `zod` (4.4) |
 | Tables | `@tanstack/table-core` (Svelte 5 wrapper internalised) |
 | HTTP | `fetch` via the `DataAdapter` interface from `@kozou/core` |
 

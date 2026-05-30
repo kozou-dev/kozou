@@ -2,7 +2,7 @@
 
 Thank you for your interest in contributing to Kozou — a PostgreSQL compiler that emits an Admin UI, REST API, and MCP context from your DDL and COMMENT.
 
-This project is in its initial public release (`v0.1.0`). The CLI, schema introspection, MCP server, and reference Admin UI are all available on npm, and the runtime image is on GHCR. The contribution flow described below is active.
+Kozou is publicly released — the CLI, schema introspection, MCP server, and reference Admin UI are all available on npm, and the runtime image is on GHCR. The contribution flow described below is active.
 
 ## License
 
