@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { performance } from 'node:perf_hooks';
 import pkg from 'pg';
-import { setupDatabase, type DatabaseHandle } from './setup.js';
+import { setupDatabase, type DatabaseHandle } from '@kozou/test-utils';
 import { introspect } from '../src/index.js';
 
 // Kozou v0.1 design spec §5.3 performance requirement: introspecting a
