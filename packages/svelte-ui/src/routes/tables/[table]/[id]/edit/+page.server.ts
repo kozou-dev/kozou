@@ -6,7 +6,7 @@
 
 import { error, fail, redirect } from '@sveltejs/kit';
 import { superValidate } from 'sveltekit-superforms';
-import { zod } from 'sveltekit-superforms/adapters';
+import { zod4 } from 'sveltekit-superforms/adapters';
 
 import type { TableContext } from '@kozou/core';
 
@@ -47,13 +47,7 @@ export const load: PageServerLoad = async ({ params, locals }) => {
   }
   const row = await getAdapter().get(table.qualifiedName, params.id);
   const schema = zodFromTable(table);
-  // superforms 2 + zod 3 hit a TS type-instantiation depth limit
-  // when the inferred ZodObject<ZodRawShape> flows into super
-  // Validate's generic. Runtime validation works correctly; the
-  // zod 3 -> 4 + TS 5 -> 6 migration tracked in Kozou v0.1
-  // design spec §16.1.1 B is expected to lift this.
-  // @ts-expect-error -- superforms generic depth exceeds tsc limit
-  const form = await superValidate(row, zod(schema));
+  const form = await superValidate(row, zod4(schema));
   return { table: tableViewModel(table), form, id: params.id };
 };
 
@@ -64,7 +58,7 @@ export const actions: Actions = {
       throw error(404, `Unknown table: ${params.table}`);
     }
     const schema = zodFromTable(table);
-    const form = await superValidate(request, zod(schema));
+    const form = await superValidate(request, zod4(schema));
     if (!form.valid) {
       return fail(400, { form });
     }

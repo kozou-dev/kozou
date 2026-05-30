@@ -37,7 +37,7 @@
   },
   "dependencies": {
     "yaml": "^2.6.0",
-    "zod": "^3.23.0"
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@types/pg": "^8.11.0",

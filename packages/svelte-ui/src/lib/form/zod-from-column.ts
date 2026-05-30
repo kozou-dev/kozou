@@ -74,7 +74,11 @@ function pickBase(column: ColumnContext): ZodTypeAny {
     case 'relation-select':
       return z.union([z.string(), z.number()]);
     case 'uuid':
-      return z.string().uuid();
+      // PostgreSQL's `uuid` type accepts any 8-4-4-4-12 hex string and does
+      // not enforce the RFC version/variant bits. zod 4's `z.uuid()` does
+      // enforce them (rejecting otherwise-valid stored values), so use the
+      // format-only `z.guid()` to mirror what the database will accept.
+      return z.guid();
     case 'json':
       return z.unknown();
     case 'image-url':
