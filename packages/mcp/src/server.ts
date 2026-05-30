@@ -1,3 +1,6 @@
+import { readFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
+
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import {
   CallToolRequestSchema,
@@ -10,6 +13,16 @@ import { describeView } from './tools/describe_view.js';
 import { listConcepts } from './tools/list_concepts.js';
 import { getConceptContext } from './tools/get_concept_context.js';
 import type { SchemaCache } from './schemaCache.js';
+
+// Read the advertised server version from this package's package.json so
+// it tracks a release bump automatically instead of being hardcoded.
+// `../package.json` resolves to packages/mcp/package.json from the
+// compiled dist/server.js; npm always ships package.json in the tarball.
+const require = createRequire(import.meta.url);
+const pkg = JSON.parse(readFileSync(require.resolve('../package.json'), 'utf8')) as {
+  version: string;
+};
+const SERVER_VERSION = pkg.version;
 
 const TOOL_DEFINITIONS = [
   {
@@ -80,7 +93,7 @@ function errorResult(message: string) {
 
 export function createMcpServer(cache: SchemaCache): Server {
   const server = new Server(
-    { name: 'kozou', version: '0.1.0' },
+    { name: 'kozou', version: SERVER_VERSION },
     { capabilities: { tools: {} } },
   );
 

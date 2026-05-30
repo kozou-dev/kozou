@@ -1,10 +1,13 @@
 import { describe, expect, it } from 'vitest';
 
+import { version } from '../package.json';
 import { PACKAGE_VERSION } from '../src/lib/index.js';
 
 describe('@kozou/svelte-ui sanity', () => {
-  it('exposes a string package version constant', () => {
+  it('exposes the package version sourced from package.json', () => {
     expect(typeof PACKAGE_VERSION).toBe('string');
-    expect(PACKAGE_VERSION).toBe('0.1.0');
+    // Asserts against package.json directly rather than a hardcoded
+    // literal, so the test cannot go stale across a version bump.
+    expect(PACKAGE_VERSION).toBe(version);
   });
 });
