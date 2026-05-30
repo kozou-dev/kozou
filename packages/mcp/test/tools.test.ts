@@ -98,6 +98,14 @@ describe('MCP tools (generic English fixture, Kozou v0.1 spec §13.2)', () => {
     expect(r.tables).toEqual([]);
   });
 
+  it('list_tables: defaults to the public schema when no schema arg is given', async () => {
+    // Exercises the `schema ?? "public"` default: the fixture lives under
+    // the test schema, so the public default yields no matches.
+    const ctx = await cache.get();
+    const r = listTables({}, ctx);
+    expect(r.tables).toEqual([]);
+  });
+
   it('describe_table: inventory_items columns + checkConstraints + references', async () => {
     const ctx = await cache.get();
     const r = describeTable({ qualifiedName: `${db.schema}.inventory_items` }, ctx);
@@ -128,6 +136,13 @@ describe('MCP tools (generic English fixture, Kozou v0.1 spec §13.2)', () => {
     expect(r.views.map((v) => v.qualifiedName).sort()).toEqual([
       `${db.schema}.vw_inventory_for_sale`,
     ]);
+  });
+
+  it('list_views: defaults to the public schema when no schema arg is given', async () => {
+    // Exercises the `schema ?? "public"` default (see list_tables above).
+    const ctx = await cache.get();
+    const r = listViews({}, ctx);
+    expect(r.views).toEqual([]);
   });
 
   it('describe_view: vw_inventory_for_sale underlyingTables + definition', async () => {
