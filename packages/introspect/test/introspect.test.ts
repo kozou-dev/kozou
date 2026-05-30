@@ -1,61 +1,11 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import pkg from 'pg';
-import { setupDatabase, type DatabaseHandle } from './setup.js';
 import { introspect } from '../src/index.js';
-
-// Inline self-contained SQL fixture for this integration test. Keeps the
-// suite independent of any external sample SQL.
-const FIXTURE_SQL = `
-CREATE TABLE authors (
-  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  display_name text NOT NULL,
-  deleted_at timestamptz
-);
-COMMENT ON TABLE authors IS 'Authors of books.';
-COMMENT ON COLUMN authors.display_name IS 'Display name of the author.';
-
-CREATE TABLE books (
-  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  author_id uuid NOT NULL REFERENCES authors(id),
-  title text NOT NULL,
-  deleted_at timestamptz
-);
-COMMENT ON TABLE books IS 'Books authored by an author.';
-COMMENT ON COLUMN books.author_id IS 'Reference to the author.';
-
-CREATE TABLE editions (
-  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  book_id uuid NOT NULL REFERENCES books(id),
-  isbn text UNIQUE,
-  deleted_at timestamptz
-);
-COMMENT ON TABLE editions IS 'Editions of a book.';
-
-CREATE TABLE inventory_items (
-  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  edition_id uuid NOT NULL REFERENCES editions(id),
-  status text NOT NULL CHECK (status IN ('for_sale', 'reserved', 'sold')),
-  selling_price numeric(12, 2),
-  visibility text NOT NULL DEFAULT 'public' CHECK (visibility IN ('public', 'private')),
-  deleted_at timestamptz
-);
-COMMENT ON TABLE inventory_items IS 'Inventory items available for sale.
-@ai: prefer vw_inventory_for_sale when querying active stock.';
-COMMENT ON COLUMN inventory_items.status IS 'Current state of the item.
-@widget: enum-select';
-COMMENT ON COLUMN inventory_items.selling_price IS 'Actual selling price.
-@widget: currency';
-
-CREATE VIEW vw_inventory_for_sale AS
-  SELECT i.id, i.edition_id, i.selling_price, e.book_id, b.title AS book_title, b.author_id, a.display_name AS author_name
-  FROM inventory_items i
-  JOIN editions e ON e.id = i.edition_id AND e.deleted_at IS NULL
-  JOIN books b ON b.id = e.book_id AND b.deleted_at IS NULL
-  JOIN authors a ON a.id = b.author_id AND a.deleted_at IS NULL
-  WHERE i.status = 'for_sale' AND i.deleted_at IS NULL AND i.visibility = 'public';
-COMMENT ON VIEW vw_inventory_for_sale IS 'Inventory items currently available for sale.
-@ai: start from this VIEW for stock-related queries; no need to re-JOIN.';
-`;
+import {
+  setupDatabase,
+  type DatabaseHandle,
+  GENERIC_FIXTURE_SQL,
+} from '@kozou/test-utils';
 
 describe('introspect (generic English fixture)', () => {
   let db: DatabaseHandle;
@@ -67,7 +17,7 @@ describe('introspect (generic English fixture)', () => {
     try {
       await client.query(`CREATE SCHEMA "${db.schema}"`);
       await client.query(`SET search_path TO "${db.schema}"`);
-      await client.query(FIXTURE_SQL);
+      await client.query(GENERIC_FIXTURE_SQL);
     } finally {
       await client.end();
     }
