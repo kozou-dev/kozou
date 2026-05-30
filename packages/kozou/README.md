@@ -50,17 +50,20 @@ DATABASE_URL=postgres://kozou:kozou@localhost:5432/kozou \
 
 The `${DATABASE_URL}` placeholder inside the bundled
 `kozou.config.yaml` template is what consumes that env var; the
-CLI does not honor `KOZOU_DATABASE_URL` directly (an alias is on
-the v0.1.1 roadmap). HTTP transport (`--http`) is also reserved
-for v0.1.1.
+`kozou` CLI does not honor `KOZOU_DATABASE_URL` directly (an alias
+is on the roadmap). HTTP transport is available via
+`kozou mcp --http` (`--port` / `--host` configure the listener;
+stdio stays the default).
 
 ### `kozou dev`
 
-Reserved for v0.1.1. In v0.1.0 the command prints a hand-off
-message listing the subcommands available today
-(`kozou mcp --stdio`, `kozou inspect`) and exits. In v0.1.1 it
-will spawn the bundled `@kozou/svelte-ui` Admin UI + an MCP HTTP
-server.
+Runs the bundled `@kozou/svelte-ui` Admin UI (adapter-node)
+alongside an MCP HTTP server, both wired up from
+`kozou.config.yaml`. The Admin UI listens on port 3333 and the MCP
+HTTP server on 3334 by default (override via `server.ui` /
+`server.mcp.http` in the config); `Ctrl-C` (SIGINT / SIGTERM)
+tears both down. This is the command behind the `kozou` service in
+the scaffolded `docker-compose.yml`.
 
 ### `create-kozou <dir>`
 
@@ -74,11 +77,9 @@ cp .env.example .env
 docker compose up
 ```
 
-The generated `docker-compose.yml` brings up PostgreSQL + PostgREST.
-The `kozou` service block (which would host the Admin UI + MCP HTTP
-server) is commented out in v0.1.0; it gets reactivated in v0.1.1
-once `kozou dev` ships as a real implementation rather than a
-hand-off placeholder.
+The generated `docker-compose.yml` brings up PostgreSQL, PostgREST,
+and a `kozou` service that runs `kozou dev` to host the Admin UI +
+MCP HTTP server.
 
 ## Configuration
 

@@ -6,7 +6,7 @@ Kozou reads a PostgreSQL schema once and produces every form a modern team and i
 
 ## Status
 
-v0.1.0 (initial public release). The CLI, schema introspection, MCP server, and reference Admin UI are all available on npm; the runtime image lives on GHCR. Subsequent v0.1.x releases land via the workflow in `.github/workflows/release.yml`.
+v0.1.1 (latest release; v0.1.0 was the initial public release). The CLI, schema introspection, MCP server (stdio + HTTP), and reference Admin UI are all available on npm; the runtime image lives on GHCR as a multi-arch manifest (linux/amd64 + linux/arm64). Subsequent v0.1.x releases land via the workflow in `.github/workflows/release.yml`.
 
 ## Quickstart
 
@@ -17,11 +17,10 @@ v0.1.0 (initial public release). The CLI, schema introspection, MCP server, and 
 npx -p kozou create-kozou my-project
 cd my-project
 
-# Bring up PostgreSQL + PostgREST. The Admin UI host integration
-# (`kozou dev` spawning the bundled SvelteKit + MCP HTTP server)
-# lands in v0.1.1, so the scaffold's docker-compose currently only
-# brings the database + REST layer online and the `kozou` service
-# block is commented out.
+# Bring up PostgreSQL, the REST layer, and the Admin UI. The
+# scaffold's docker-compose includes a `kozou` service that runs
+# `kozou dev` (the bundled SvelteKit Admin UI + MCP HTTP server),
+# so `docker compose up` brings the full stack online.
 cp .env.example .env
 docker compose up
 ```
@@ -29,9 +28,9 @@ docker compose up
 Or pull the CLI runtime image directly:
 
 ```bash
-docker pull ghcr.io/kozou-dev/kozou:v0.1.0
-docker run --rm ghcr.io/kozou-dev/kozou:v0.1.0 inspect --help
-docker run --rm ghcr.io/kozou-dev/kozou:v0.1.0 mcp --help
+docker pull ghcr.io/kozou-dev/kozou:v0.1.1
+docker run --rm ghcr.io/kozou-dev/kozou:v0.1.1 inspect --help
+docker run --rm ghcr.io/kozou-dev/kozou:v0.1.1 mcp --help
 ```
 
 For library use (custom hosts, embedded MCP), install the workspace packages from npm:
@@ -48,18 +47,18 @@ Designs where tenants in a multi-tenant SaaS can edit DB COMMENT text are **disc
 
 ## Requirements
 
-Runtime requirements for v0.1.0:
+Runtime requirements for v0.1.1:
 
 - **PostgreSQL 16 or later** — the canonical source of truth
-- **Docker 24 or later** (optional) — recommended for the v0.1.0 `docker compose up` stack, which currently brings up PostgreSQL + PostgREST. The Kozou CLI ships separately as `ghcr.io/kozou-dev/kozou:v0.1.0`; the scaffold's `kozou` compose service is intentionally commented out until `kozou dev` host integration lands in v0.1.1. PostgREST stays a side-by-side container and is **not** bundled inside the Kozou image.
+- **Docker 24 or later** (optional) — recommended for the `docker compose up` stack, which brings up PostgreSQL, PostgREST, and a `kozou` service running `kozou dev` (the bundled Admin UI + MCP HTTP server) from `ghcr.io/kozou-dev/kozou:v0.1.1` (a multi-arch image, native on linux/amd64 and linux/arm64). PostgREST stays a side-by-side container and is **not** bundled inside the Kozou image.
 - **Node.js 20 or later** — for running the npm-published packages directly (`npx kozou …`)
 
 Contributors additionally need **pnpm 9 or later**. See [CONTRIBUTING.md](CONTRIBUTING.md) for the development environment setup.
 
 ## Roadmap
 
-- v0.1 (shipped): schema introspection, MCP server (stdio), reference Admin UI, `create-kozou` scaffold, PostgREST adapter
-- v0.1.1: MCP HTTP transport, `kozou dev` host integration, Playwright E2E for the Admin UI, CodeQL reactivation
+- v0.1.0 (shipped): schema introspection, MCP server (stdio), reference Admin UI, `create-kozou` scaffold, PostgREST adapter
+- v0.1.1 (shipped): MCP HTTP transport, `kozou dev` host integration, multi-arch Docker image (linux/amd64 + linux/arm64), Playwright E2E for the Admin UI, CodeQL reactivation, zod 4 / TypeScript 6 migration
 - v0.2: `@kozou/api` (in-house REST), COMMENT tag policy hardening, TypeScript type generation, React UI exploration
 - v1.0: drop the PostgREST dependency, ship JWT + RLS integration, multi-hop relation embedding, business-document emitters (Markdown / HTML)
 
