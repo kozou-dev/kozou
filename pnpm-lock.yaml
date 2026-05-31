@@ -46,6 +46,25 @@ importers:
         specifier: ^4.1.7
         version: 4.1.7(@types/node@25.9.1)(@vitest/coverage-v8@4.1.7)(jsdom@25.0.1)(vite@8.0.14(@types/node@25.9.1)(esbuild@0.28.0)(jiti@2.7.0)(tsx@4.22.3)(yaml@2.9.0))
 
+  packages/api:
+    dependencies:
+      '@kozou/core':
+        specifier: workspace:*
+        version: link:../core
+      pg:
+        specifier: ^8.13.0
+        version: 8.21.0
+    devDependencies:
+      '@kozou/introspect':
+        specifier: workspace:*
+        version: link:../introspect
+      '@kozou/test-utils':
+        specifier: workspace:*
+        version: link:../test-utils
+      '@types/pg':
+        specifier: ^8.11.0
+        version: 8.20.0
+
   packages/core:
     dependencies:
       yaml:
