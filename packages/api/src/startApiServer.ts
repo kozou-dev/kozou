@@ -16,6 +16,7 @@ import type { SchemaContext } from '@kozou/core';
 import { errorBody } from './errors.js';
 import { handleApiRequest, type ApiHandlerDeps, type Queryable } from './handler.js';
 import { buildResourceLookup } from './schema-lookup.js';
+import { buildOpenApiDocument } from './openapi.js';
 
 export type StartApiServerOptions = {
   /** Introspected schema that drives routing + the identifier allowlist. */
@@ -128,6 +129,7 @@ export async function startApiServer(opts: StartApiServerOptions): Promise<ApiSe
     db: opts.db,
     lookup: buildResourceLookup(opts.schema),
     version: opts.version,
+    openapi: buildOpenApiDocument(opts.schema, { version: opts.version }),
   });
   const httpServer = createServer(listener);
 

@@ -1,0 +1,141 @@
+import { describe, it, expect } from 'vitest';
+import type { WidgetType } from '@kozou/core';
+import { buildOpenApiDocument } from '../src/openapi.js';
+import { schemaOf, col } from './helpers.js';
+
+type SchemaObj = {
+  type?: unknown;
+  format?: string;
+  enum?: unknown[];
+  description?: string;
+  required?: string[];
+  properties?: Record<string, SchemaObj>;
+  'x-kozou-ai'?: string;
+  'x-kozou-widget'?: string;
+};
+type Doc = {
+  openapi: string;
+  info: { title: string; version: string; description: string };
+  paths: Record<string, Record<string, unknown>>;
+  components: { schemas: Record<string, SchemaObj> };
+};
+
+function build(): Doc {
+  const schema = schemaOf(
+    [
+      {
+        name: 'authors',
+        description: 'Authors of books.',
+        columns: [
+          col('id', 'uuid', { isPrimaryKey: true, nullable: false }),
+          col('display_name', 'text', { nullable: false, description: 'Display name.' }),
+          col('status', 'enum-select', { nullable: false, enumValues: ['a', 'b'] }),
+          col('bio', 'textarea', { nullable: true, aiDescription: 'free text' }),
+          col('price', 'currency', { nullable: true }),
+        ],
+        primaryKey: ['id'],
+      },
+    ],
+    [
+      {
+        name: 'vw_active',
+        description: 'Active authors.',
+        aiDescription: 'start here for active authors',
+        columns: [col('id', 'uuid'), col('label', 'text')],
+      },
+    ],
+  );
+  return buildOpenApiDocument(schema, { version: '1.2.3' }) as unknown as Doc;
+}
+
+describe('buildOpenApiDocument', () => {
+  it('emits an OpenAPI 3.1 envelope with the configured version', () => {
+    const doc = build();
+    expect(doc.openapi).toBe('3.1.0');
+    expect(doc.info.version).toBe('1.2.3');
+    expect(doc.info.title).toBe('Kozou API');
+  });
+
+  it('exposes full CRUD paths for tables and read-only paths for views', () => {
+    const doc = build();
+    expect(doc.paths['/authors'].get).toBeDefined();
+    expect(doc.paths['/authors'].post).toBeDefined();
+    expect(doc.paths['/authors/{id}'].get).toBeDefined();
+    expect(doc.paths['/authors/{id}'].patch).toBeDefined();
+    expect(doc.paths['/authors/{id}'].delete).toBeDefined();
+
+    expect(doc.paths['/vw_active'].get).toBeDefined();
+    expect(doc.paths['/vw_active'].post).toBeUndefined();
+    expect(doc.paths['/vw_active/{id}'].patch).toBeUndefined();
+    expect(doc.paths['/vw_active/{id}'].delete).toBeUndefined();
+  });
+
+  it('reflects table COMMENTs into the component schema', () => {
+    const authors = build().components.schemas['public.authors'];
+    expect(authors.description).toBe('Authors of books.');
+    expect(authors.required).toEqual(expect.arrayContaining(['id', 'display_name', 'status']));
+    expect(authors.required).not.toContain('bio');
+  });
+
+  it('maps widgets, enums, nullability, and AI notes onto column schemas', () => {
+    const props = build().components.schemas['public.authors'].properties!;
+    expect(props.id.type).toBe('string');
+    expect(props.id.format).toBe('uuid');
+    expect(props.id['x-kozou-widget']).toBe('uuid');
+
+    expect(props.display_name.description).toBe('Display name.');
+
+    expect(props.status.enum).toEqual(['a', 'b']);
+    expect(props.status['x-kozou-widget']).toBe('enum-select');
+
+    // nullable -> JSON Schema type union including "null"
+    expect(props.bio.type).toEqual(['string', 'null']);
+    expect(props.bio['x-kozou-ai']).toBe('free text');
+
+    expect(props.price.type).toEqual(['number', 'null']);
+  });
+
+  it('carries the view @ai note as x-kozou-ai', () => {
+    const vw = build().components.schemas['public.vw_active'];
+    expect(vw['x-kozou-ai']).toBe('start here for active authors');
+  });
+
+  it('wires list responses to the row component via $ref', () => {
+    const doc = build();
+    expect(JSON.stringify(doc.paths['/authors'])).toContain(
+      '#/components/schemas/public.authors',
+    );
+  });
+
+  it('maps every widget type to a JSON Schema type/format', () => {
+    const widgets: WidgetType[] = [
+      'text',
+      'textarea',
+      'number',
+      'boolean',
+      'date',
+      'datetime',
+      'enum-select',
+      'relation-select',
+      'json',
+      'image-url',
+      'uuid',
+      'currency',
+    ];
+    const schema = schemaOf([
+      { name: 't', columns: widgets.map((w) => col(`c_${w.replaceAll('-', '_')}`, w, { nullable: false })) },
+    ]);
+    const props = (buildOpenApiDocument(schema) as unknown as Doc).components.schemas['public.t']
+      .properties!;
+    expect(props.c_text.type).toBe('string');
+    expect(props.c_number.type).toBe('number');
+    expect(props.c_currency.type).toBe('number');
+    expect(props.c_boolean.type).toBe('boolean');
+    expect(props.c_date).toMatchObject({ type: 'string', format: 'date' });
+    expect(props.c_datetime).toMatchObject({ type: 'string', format: 'date-time' });
+    expect(props.c_uuid).toMatchObject({ type: 'string', format: 'uuid' });
+    expect(props.c_image_url).toMatchObject({ type: 'string', format: 'uri' });
+    expect(props.c_json.type).toBe('object');
+    expect(props.c_relation_select.type).toBe('string');
+  });
+});

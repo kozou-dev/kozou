@@ -47,4 +47,6 @@ export {
   type SortDirection,
 } from './query-builder.js';
 
+export { buildOpenApiDocument, type OpenApiOptions } from './openapi.js';
+
 export { KozouApiError, type ApiErrorBody } from './errors.js';
