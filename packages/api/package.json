@@ -1,0 +1,43 @@
+{
+  "name": "@kozou/api",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Kozou's own REST layer: serves table CRUD / VIEW reads / OpenAPI from a SchemaContext (Kozou v0.2 spec, experimental).",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kozou-dev/kozou.git",
+    "directory": "packages/api"
+  },
+  "homepage": "https://kozou.org",
+  "bugs": {
+    "url": "https://github.com/kozou-dev/kozou/issues"
+  },
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.test.json",
+    "build": "tsc",
+    "test": "vitest run --coverage"
+  },
+  "dependencies": {
+    "@kozou/core": "workspace:*",
+    "pg": "^8.13.0"
+  },
+  "devDependencies": {
+    "@kozou/introspect": "workspace:*",
+    "@kozou/test-utils": "workspace:*",
+    "@types/pg": "^8.11.0"
+  }
+}
