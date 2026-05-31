@@ -2,11 +2,15 @@
 // JSON result, independent of node:http (so it can be unit-tested with a
 // fake Queryable and driven by the node:http wiring in startApiServer.ts).
 
-import { KozouApiError, errorBody, methodNotAllowed, notFound } from './errors.js';
+import { KozouApiError, badRequest, errorBody, methodNotAllowed, notFound } from './errors.js';
 import type { ResourceLookup, Resource } from './schema-lookup.js';
 import {
   buildGetQuery,
   buildListQuery,
+  buildInsertQuery,
+  buildUpdateQuery,
+  buildDeleteQuery,
+  buildRelationOptionsQuery,
   type ListQueryParams,
   type SortDirection,
 } from './query-builder.js';
@@ -31,6 +35,8 @@ export type ApiHttpRequest = {
   /** URL-decoded path segments with empty segments removed. */
   segments: string[];
   query: URLSearchParams;
+  /** Parsed JSON request body (create / update). Undefined when absent. */
+  body?: unknown;
 };
 
 export type ApiHttpResult = {
@@ -57,6 +63,7 @@ export async function handleApiRequest(
 
 async function route(deps: ApiHandlerDeps, req: ApiHttpRequest): Promise<ApiHttpResult> {
   const { method, segments, query } = req;
+  const m = method.toUpperCase();
 
   if (segments.length === 0) {
     requireMethod(method, 'GET');
@@ -68,14 +75,22 @@ async function route(deps: ApiHandlerDeps, req: ApiHttpRequest): Promise<ApiHttp
 
   if (segments.length === 1) {
     const resource = resolveOr404(deps.lookup, segments[0]);
-    requireMethod(method, 'GET'); // create (POST) arrives in Phase 2
-    return listResource(deps, resource, query);
+    if (m === 'GET') {
+      return query.get('as') === 'options'
+        ? relationOptions(deps, resource, query)
+        : listResource(deps, resource, query);
+    }
+    if (m === 'POST') return createResource(deps, resource, req.body);
+    throw methodNotAllowed(`Method ${method} not allowed on a collection; use GET or POST.`);
   }
 
   if (segments.length === 2) {
     const resource = resolveOr404(deps.lookup, segments[0]);
-    requireMethod(method, 'GET'); // update/delete arrive in Phase 2
-    return getResource(deps, resource, segments[1]);
+    const id = segments[1];
+    if (m === 'GET') return getResource(deps, resource, id);
+    if (m === 'PATCH') return updateResource(deps, resource, id, req.body);
+    if (m === 'DELETE') return deleteResource(deps, resource, id);
+    throw methodNotAllowed(`Method ${method} not allowed on an item; use GET, PATCH, or DELETE.`);
   }
 
   throw notFound(`No route for /${segments.join('/')}.`);
@@ -109,12 +124,92 @@ async function getResource(
   const built = buildGetQuery(resource, id);
   const result = await deps.db.query<Record<string, unknown>>(built.text, built.values);
   if (result.rows.length === 0) {
-    return {
-      status: 404,
-      body: errorBody('not_found', `No "${resource.name}" row with id "${id}".`),
-    };
+    return notFoundResult(resource, id);
   }
   return { status: 200, body: result.rows[0] };
+}
+
+async function createResource(
+  deps: ApiHandlerDeps,
+  resource: Resource,
+  body: unknown,
+): Promise<ApiHttpResult> {
+  requireWritable(resource);
+  const built = buildInsertQuery(resource, requireObjectBody(body));
+  const result = await deps.db.query<Record<string, unknown>>(built.text, built.values);
+  return { status: 201, body: result.rows[0] };
+}
+
+async function updateResource(
+  deps: ApiHandlerDeps,
+  resource: Resource,
+  id: string,
+  body: unknown,
+): Promise<ApiHttpResult> {
+  requireWritable(resource);
+  const built = buildUpdateQuery(resource, id, requireObjectBody(body));
+  const result = await deps.db.query<Record<string, unknown>>(built.text, built.values);
+  if (result.rows.length === 0) return notFoundResult(resource, id);
+  return { status: 200, body: result.rows[0] };
+}
+
+async function deleteResource(
+  deps: ApiHandlerDeps,
+  resource: Resource,
+  id: string,
+): Promise<ApiHttpResult> {
+  requireWritable(resource);
+  const built = buildDeleteQuery(resource, id);
+  const result = await deps.db.query<Record<string, unknown>>(built.text, built.values);
+  if (result.rows.length === 0) return notFoundResult(resource, id);
+  return { status: 200, body: result.rows[0] };
+}
+
+async function relationOptions(
+  deps: ApiHandlerDeps,
+  resource: Resource,
+  query: URLSearchParams,
+): Promise<ApiHttpResult> {
+  const labelField = query.get('label');
+  if (labelField === null || labelField.length === 0) {
+    throw badRequest('Relation options require a "label" query parameter.');
+  }
+  const fieldsRaw = query.get('fields');
+  const searchFields = fieldsRaw
+    ? fieldsRaw.split(',').map((s) => s.trim()).filter((s) => s.length > 0)
+    : [];
+  const built = buildRelationOptionsQuery(resource, {
+    labelField,
+    searchFields,
+    query: query.get('q') ?? undefined,
+    limit: parsePositiveInt(query.get('limit')),
+  });
+  const result = await deps.db.query<Record<string, unknown>>(built.text, built.values);
+  const options = result.rows.map((row) => ({
+    id: row[built.primaryKey] as string | number,
+    label: String(row[built.labelField] ?? ''),
+  }));
+  return { status: 200, body: { options } };
+}
+
+function notFoundResult(resource: Resource, id: string): ApiHttpResult {
+  return {
+    status: 404,
+    body: errorBody('not_found', `No "${resource.name}" row with id "${id}".`),
+  };
+}
+
+function requireWritable(resource: Resource): void {
+  if (resource.kind === 'view') {
+    throw methodNotAllowed(`Resource "${resource.name}" is a read-only view.`);
+  }
+}
+
+function requireObjectBody(body: unknown): Record<string, unknown> {
+  if (body === null || typeof body !== 'object' || Array.isArray(body)) {
+    throw badRequest('Request body must be a JSON object.');
+  }
+  return body as Record<string, unknown>;
 }
 
 function resolveOr404(lookup: ResourceLookup, name: string): Resource {

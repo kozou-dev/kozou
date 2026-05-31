@@ -13,7 +13,7 @@ This is the in-house data layer that Kozou v1.0 will make the default
 the same `DataAdapter` seam (`@kozou/core`) it already uses, so swapping
 the data layer is not a breaking change for UI code.
 
-## Status (v0.2 Phase 1 — read path)
+## Status (v0.2 Phase 1–2 — read + write path)
 
 Implemented:
 
@@ -24,13 +24,21 @@ Implemented:
   - `search=<text>` free-text `ILIKE` across text columns,
   - `<column>=<value>` equality filters.
   Returns `{ rows, total, page, pageSize }`.
+- `GET /<resource>?as=options&label=<col>&fields=<a,b>&q=<text>&limit=<n>`
+  — lightweight relation-select lookup. Returns `{ options: [{ id, label }] }`.
 - `GET /<resource>/<id>` — fetch a single table row by its single-column
   primary key. Returns the row, or `404`.
+- `POST /<resource>` — create a row from a JSON body; returns `201` + the
+  created row. An empty body inserts a row of column defaults.
+- `PATCH /<resource>/<id>` — update the supplied columns; returns the row,
+  or `404`.
+- `DELETE /<resource>/<id>` — delete by primary key; returns the deleted
+  row, or `404`.
+
+Writes are rejected on views (`405`) and on unknown columns (`400`).
 
 Deferred to later phases (Kozou v0.2 design spec §4):
 
-- Phase 2: `POST` / `PATCH` / `DELETE` (create / update / delete) and the
-  relation-select search endpoint.
 - Phase 3: `GET /openapi.json` (OpenAPI 3.1 with `COMMENT`-derived
   descriptions).
 - Phase 4: a `KozouApiDataAdapter` so the Admin UI can run against this

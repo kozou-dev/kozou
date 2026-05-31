@@ -2,9 +2,15 @@ import { describe, it, expect } from 'vitest';
 import {
   buildListQuery,
   buildGetQuery,
+  buildInsertQuery,
+  buildUpdateQuery,
+  buildDeleteQuery,
+  buildRelationOptionsQuery,
   quoteIdent,
   DEFAULT_PAGE_SIZE,
   MAX_PAGE_SIZE,
+  DEFAULT_RELATION_LIMIT,
+  MAX_RELATION_LIMIT,
 } from '../src/query-builder.js';
 import { KozouApiError } from '../src/errors.js';
 import { col, tableResource, viewResource } from './helpers.js';
@@ -128,5 +134,105 @@ describe('buildGetQuery', () => {
   it('rejects a view (no primary key)', () => {
     const v = viewResource('vw', [col('a', 'text')]);
     expect(() => buildGetQuery(v, '1')).toThrow(/single-column primary key/);
+  });
+});
+
+describe('buildInsertQuery', () => {
+  it('inserts the supplied columns as bound parameters and RETURNs the row', () => {
+    const q = buildInsertQuery(authors, { display_name: 'Ada', rank: 1 });
+    expect(q.text).toBe(
+      'INSERT INTO "public"."authors" ("display_name", "rank") VALUES ($1, $2) RETURNING "id", "display_name", "bio", "rank"',
+    );
+    expect(q.values).toEqual(['Ada', 1]);
+  });
+
+  it('uses DEFAULT VALUES for an empty body', () => {
+    const q = buildInsertQuery(authors, {});
+    expect(q.text).toBe(
+      'INSERT INTO "public"."authors" DEFAULT VALUES RETURNING "id", "display_name", "bio", "rank"',
+    );
+    expect(q.values).toEqual([]);
+  });
+
+  it('rejects an unknown column', () => {
+    expect(() => buildInsertQuery(authors, { bogus: 1 })).toThrow(/Unknown column "bogus"/);
+  });
+});
+
+describe('buildUpdateQuery', () => {
+  it('sets the supplied columns and matches on the primary key', () => {
+    const q = buildUpdateQuery(authors, 'abc', { display_name: 'Ada2', rank: 2 });
+    expect(q.text).toBe(
+      'UPDATE "public"."authors" SET "display_name" = $1, "rank" = $2 WHERE "id" = $3 RETURNING "id", "display_name", "bio", "rank"',
+    );
+    expect(q.values).toEqual(['Ada2', 2, 'abc']);
+  });
+
+  it('rejects an empty update', () => {
+    expect(() => buildUpdateQuery(authors, 'abc', {})).toThrow(/No fields to update/);
+  });
+
+  it('rejects an unknown column', () => {
+    expect(() => buildUpdateQuery(authors, 'abc', { bogus: 1 })).toThrow(/Unknown column "bogus"/);
+  });
+
+  it('rejects a resource without a single-column primary key', () => {
+    const composite = tableResource('cp', [col('a', 'text'), col('b', 'text')], ['a', 'b']);
+    expect(() => buildUpdateQuery(composite, '1', { a: 'x' })).toThrow(/single-column primary key/);
+  });
+});
+
+describe('buildDeleteQuery', () => {
+  it('deletes by primary key and RETURNs the row', () => {
+    const q = buildDeleteQuery(authors, 'abc');
+    expect(q.text).toBe(
+      'DELETE FROM "public"."authors" WHERE "id" = $1 RETURNING "id", "display_name", "bio", "rank"',
+    );
+    expect(q.values).toEqual(['abc']);
+  });
+
+  it('rejects a resource without a single-column primary key', () => {
+    const v = viewResource('vw', [col('a', 'text')]);
+    expect(() => buildDeleteQuery(v, '1')).toThrow(/single-column primary key/);
+  });
+});
+
+describe('buildRelationOptionsQuery', () => {
+  it('searches the given fields and selects pk + label', () => {
+    const q = buildRelationOptionsQuery(authors, {
+      labelField: 'display_name',
+      searchFields: ['display_name', 'bio'],
+      query: 'ad',
+    });
+    expect(q.text).toBe(
+      'SELECT "id", "display_name" FROM "public"."authors" WHERE ("display_name" ILIKE $1 OR "bio" ILIKE $1) LIMIT $2',
+    );
+    expect(q.values).toEqual(['%ad%', DEFAULT_RELATION_LIMIT]);
+    expect(q.primaryKey).toBe('id');
+    expect(q.labelField).toBe('display_name');
+  });
+
+  it('omits the WHERE clause when no query is given', () => {
+    const q = buildRelationOptionsQuery(authors, { labelField: 'display_name', searchFields: [] });
+    expect(q.text).toBe('SELECT "id", "display_name" FROM "public"."authors" LIMIT $1');
+    expect(q.values).toEqual([DEFAULT_RELATION_LIMIT]);
+  });
+
+  it('clamps the limit and selects a single column when label === pk', () => {
+    const capped = buildRelationOptionsQuery(authors, {
+      labelField: 'display_name',
+      searchFields: [],
+      limit: 9999,
+    });
+    expect(capped.values).toEqual([MAX_RELATION_LIMIT]);
+
+    const labelIsPk = buildRelationOptionsQuery(authors, { labelField: 'id', searchFields: [] });
+    expect(labelIsPk.text).toBe('SELECT "id" FROM "public"."authors" LIMIT $1');
+  });
+
+  it('rejects an unknown label column', () => {
+    expect(() =>
+      buildRelationOptionsQuery(authors, { labelField: 'bogus', searchFields: [] }),
+    ).toThrow(/Unknown column "bogus"/);
   });
 });

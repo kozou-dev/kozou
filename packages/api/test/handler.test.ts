@@ -18,12 +18,18 @@ const authors = tableResource('authors', [
 ]);
 const vw = viewResource('vw_active', [col('id', 'uuid'), col('label', 'text')]);
 
-function reqOf(method: string, path: string, qs = ''): {
+function reqOf(method: string, path: string, qs = '', body?: unknown): {
   method: string;
   segments: string[];
   query: URLSearchParams;
+  body?: unknown;
 } {
-  return { method, segments: path.split('/').filter((s) => s.length > 0), query: new URLSearchParams(qs) };
+  return {
+    method,
+    segments: path.split('/').filter((s) => s.length > 0),
+    query: new URLSearchParams(qs),
+    body,
+  };
 }
 
 function depsWith(
@@ -88,17 +94,92 @@ describe('handleApiRequest — routing', () => {
     expect(errorOf(r.body).code).toBe('not_found');
   });
 
-  it('returns 405 for non-GET on a collection (create lands in Phase 2)', async () => {
-    const { deps } = depsWith(() => ({ rows: [], rowCount: 0 }));
-    const r = await handleApiRequest(deps, reqOf('POST', '/authors'));
-    expect(r.status).toBe(405);
-    expect(errorOf(r.body).code).toBe('method_not_allowed');
+  it('POST /<table> creates a row and returns 201', async () => {
+    const { deps, calls } = depsWith((text) =>
+      text.startsWith('INSERT')
+        ? { rows: [{ id: 'new', display_name: 'Ada' }], rowCount: 1 }
+        : { rows: [], rowCount: 0 },
+    );
+    const r = await handleApiRequest(deps, reqOf('POST', '/authors', '', { display_name: 'Ada' }));
+    expect(r.status).toBe(201);
+    expect(r.body).toEqual({ id: 'new', display_name: 'Ada' });
+    expect(calls[0].text).toContain('INSERT INTO "public"."authors"');
+    expect(calls[0].values).toEqual(['Ada']);
   });
 
-  it('returns 405 for non-GET on an item (update/delete land in Phase 2)', async () => {
+  it('rejects a non-object create body with 400', async () => {
     const { deps } = depsWith(() => ({ rows: [], rowCount: 0 }));
-    const r = await handleApiRequest(deps, reqOf('PATCH', '/authors/abc'));
+    const r = await handleApiRequest(deps, reqOf('POST', '/authors', '', 'not-an-object'));
+    expect(r.status).toBe(400);
+    expect(errorOf(r.body).code).toBe('bad_request');
+  });
+
+  it('PATCH /<table>/<id> updates and returns the row', async () => {
+    const { deps } = depsWith((text) =>
+      text.startsWith('UPDATE')
+        ? { rows: [{ id: 'abc', display_name: 'Ada2' }], rowCount: 1 }
+        : { rows: [], rowCount: 0 },
+    );
+    const r = await handleApiRequest(deps, reqOf('PATCH', '/authors/abc', '', { display_name: 'Ada2' }));
+    expect(r.status).toBe(200);
+    expect(r.body).toEqual({ id: 'abc', display_name: 'Ada2' });
+  });
+
+  it('PATCH returns 404 when the row is missing', async () => {
+    const { deps } = depsWith(() => ({ rows: [], rowCount: 0 }));
+    const r = await handleApiRequest(deps, reqOf('PATCH', '/authors/missing', '', { display_name: 'x' }));
+    expect(r.status).toBe(404);
+  });
+
+  it('DELETE /<table>/<id> removes and returns the row', async () => {
+    const { deps } = depsWith((text) =>
+      text.startsWith('DELETE') ? { rows: [{ id: 'abc' }], rowCount: 1 } : { rows: [], rowCount: 0 },
+    );
+    const r = await handleApiRequest(deps, reqOf('DELETE', '/authors/abc'));
+    expect(r.status).toBe(200);
+    expect(r.body).toEqual({ id: 'abc' });
+  });
+
+  it('DELETE returns 404 when the row is missing', async () => {
+    const { deps } = depsWith(() => ({ rows: [], rowCount: 0 }));
+    const r = await handleApiRequest(deps, reqOf('DELETE', '/authors/missing'));
+    expect(r.status).toBe(404);
+  });
+
+  it('rejects writes to a read-only view with 405', async () => {
+    const { deps } = depsWith(() => ({ rows: [], rowCount: 0 }));
+    const r = await handleApiRequest(deps, reqOf('POST', '/vw_active', '', { x: 1 }));
     expect(r.status).toBe(405);
+  });
+
+  it('returns 405 for an unsupported method on a collection', async () => {
+    const { deps } = depsWith(() => ({ rows: [], rowCount: 0 }));
+    const r = await handleApiRequest(deps, reqOf('PUT', '/authors', '', {}));
+    expect(r.status).toBe(405);
+  });
+
+  it('returns 405 for an unsupported method on an item', async () => {
+    const { deps } = depsWith(() => ({ rows: [], rowCount: 0 }));
+    const r = await handleApiRequest(deps, reqOf('PUT', '/authors/abc', '', {}));
+    expect(r.status).toBe(405);
+  });
+
+  it('GET /<table>?as=options returns id/label pairs', async () => {
+    const { deps, calls } = depsWith(() => ({ rows: [{ id: '1', display_name: 'Ada' }], rowCount: 1 }));
+    const r = await handleApiRequest(
+      deps,
+      reqOf('GET', '/authors', 'as=options&label=display_name&fields=display_name&q=ad'),
+    );
+    expect(r.status).toBe(200);
+    expect(r.body).toEqual({ options: [{ id: '1', label: 'Ada' }] });
+    expect(calls[0].text).toContain('SELECT "id", "display_name" FROM "public"."authors"');
+    expect(calls[0].values).toEqual(['%ad%', 20]);
+  });
+
+  it('relation options require a label parameter (400)', async () => {
+    const { deps } = depsWith(() => ({ rows: [], rowCount: 0 }));
+    const r = await handleApiRequest(deps, reqOf('GET', '/authors', 'as=options'));
+    expect(r.status).toBe(400);
   });
 
   it('returns 404 for a path deeper than two segments', async () => {

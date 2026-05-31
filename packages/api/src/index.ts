@@ -29,12 +29,21 @@ export {
 export {
   buildListQuery,
   buildGetQuery,
+  buildInsertQuery,
+  buildUpdateQuery,
+  buildDeleteQuery,
+  buildRelationOptionsQuery,
   quoteIdent,
   DEFAULT_PAGE_SIZE,
   MAX_PAGE_SIZE,
+  DEFAULT_RELATION_LIMIT,
+  MAX_RELATION_LIMIT,
   type ListQueryParams,
   type BuiltListQuery,
   type BuiltGetQuery,
+  type BuiltMutation,
+  type RelationOptionsParams,
+  type BuiltRelationOptions,
   type SortDirection,
 } from './query-builder.js';
 
