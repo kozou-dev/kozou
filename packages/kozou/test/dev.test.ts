@@ -83,6 +83,25 @@ describe('buildAdminUiEnv', () => {
     expect(env.PORT).toBe('4000');
     expect(env.HOST).toBe('127.0.0.1');
   });
+
+  it('omits KOZOU_ADAPTER_KIND and uses the config url for the default adapter', async () => {
+    const config = await makeConfig();
+    const env = buildAdminUiEnv(config, 'http://localhost:3333', {});
+    expect(env.KOZOU_ADAPTER_KIND).toBeUndefined();
+    expect(env.KOZOU_ADAPTER_URL).toBe(config.adapter.url);
+  });
+
+  it('wires the in-house @kozou/api backend when an api url is given', async () => {
+    const config = await makeConfig();
+    const env = buildAdminUiEnv(
+      config,
+      'http://localhost:3333',
+      {},
+      'http://127.0.0.1:3335',
+    );
+    expect(env.KOZOU_ADAPTER_KIND).toBe('api');
+    expect(env.KOZOU_ADAPTER_URL).toBe('http://127.0.0.1:3335');
+  });
 });
 
 describe('resolveAdminUiEntry', () => {

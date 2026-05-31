@@ -38,7 +38,8 @@
     "build": "tsc && node scripts/copy-templates.mjs",
     "prepublishOnly": "pnpm run build",
     "test": "vitest run --coverage",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "test:e2e:api": "playwright test --config playwright.kozou-api.config.ts"
   },
   "dependencies": {
     "@kozou/core": "workspace:*",
@@ -50,6 +51,7 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
+    "@kozou/api": "workspace:*",
     "@modelcontextprotocol/sdk": "^1.0.0",
     "@playwright/test": "^1.50.0",
     "@testcontainers/postgresql": "^12.0.0",

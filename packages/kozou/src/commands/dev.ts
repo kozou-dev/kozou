@@ -21,7 +21,7 @@ import { existsSync } from 'node:fs';
 
 import { SchemaCache, startHttpServer, isLoopbackHost } from '@kozou/mcp';
 
-import { loadConfig } from '../config.js';
+import { loadConfig, type KozouConfig } from '../config.js';
 import {
   buildAdminUiEnv,
   resolveAdminUiEntry,
@@ -30,9 +30,65 @@ import {
 
 export type DevOptions = {
   config?: string;
+  /** Set to 'api' for the experimental in-house @kozou/api backend; omit for the default REST adapter. */
+  adapter?: string;
+  /** Port for the in-house @kozou/api server (used when adapter === 'api'). */
+  apiPort?: number;
 };
 
 const PREFIX = '[kozou dev]';
+
+// The in-house @kozou/api server is reached only by the Admin UI's
+// server-side fetch (same host), so bind it to loopback — no need to
+// expose it to the browser or the network.
+const API_HOST = '127.0.0.1';
+const DEFAULT_API_PORT = 3335;
+
+type InhouseApi = { url: string; close: () => Promise<void> };
+
+// Start the in-house @kozou/api server in-process: introspect the
+// configured database, build its SchemaContext, and serve it over a pg
+// pool. @kozou/api is an experimental, unpublished workspace package, so
+// it is imported dynamically and is only resolvable from a source /
+// workspace checkout — a published `kozou` install gets a clear error.
+async function startInhouseApi(config: KozouConfig, port: number): Promise<InhouseApi> {
+  let apiModule: typeof import('@kozou/api');
+  try {
+    apiModule = await import('@kozou/api');
+  } catch {
+    throw new Error(
+      `${PREFIX} --adapter api needs the experimental @kozou/api package, which is ` +
+        'not bundled in this release. Run kozou from a source / workspace checkout ' +
+        'to use it, or drop --adapter api to use the default REST adapter.',
+    );
+  }
+
+  const { introspect } = await import('@kozou/introspect');
+  const { buildSchemaContext } = await import('@kozou/core');
+  const { default: pg } = await import('pg');
+
+  const raw = await introspect({
+    connection: config.database.url,
+    schemas: config.database.schemas,
+  });
+  const schema = await buildSchemaContext({ raw });
+  const pool = new pg.Pool({ connectionString: config.database.url });
+  const server = await apiModule.startApiServer({
+    schema,
+    db: { query: (text: string, values?: unknown[]) => pool.query(text, values) },
+    host: API_HOST,
+    port,
+    logPrefix: `${PREFIX} api`,
+  });
+
+  return {
+    url: `http://${API_HOST}:${server.port}`,
+    close: async () => {
+      await server.close();
+      await pool.end();
+    },
+  };
+}
 
 function warnIfPublic(label: string, host: string): void {
   if (isLoopbackHost(host)) return;
@@ -45,6 +101,13 @@ function warnIfPublic(label: string, host: string): void {
 }
 
 export async function devCommand(opts: DevOptions = {}): Promise<void> {
+  if (opts.adapter !== undefined && opts.adapter !== 'api') {
+    throw new Error(
+      `${PREFIX} unknown --adapter "${opts.adapter}" ` +
+        '(the only supported value is "api"; omit it for the default REST adapter).',
+    );
+  }
+
   const config = await loadConfig({ path: opts.config });
 
   const adminUiEntry = resolveAdminUiEntry();
@@ -54,6 +117,16 @@ export async function devCommand(opts: DevOptions = {}): Promise<void> {
         'Reinstall @kozou/svelte-ui (its `build/` output ships in the package), ' +
         'or in a workspace checkout run `pnpm --filter @kozou/svelte-ui run build`.',
     );
+  }
+
+  // Optional in-house @kozou/api backend (--adapter api), started before
+  // the other servers so its URL can be wired into the UI environment.
+  const api: InhouseApi | null =
+    opts.adapter === 'api'
+      ? await startInhouseApi(config, opts.apiPort ?? DEFAULT_API_PORT)
+      : null;
+  if (api) {
+    process.stderr.write(`${PREFIX} in-house @kozou/api on ${api.url}\n`);
   }
 
   const cache = new SchemaCache({
@@ -74,7 +147,7 @@ export async function devCommand(opts: DevOptions = {}): Promise<void> {
   warnIfPublic('Admin UI', config.server.ui.host);
   const origin = resolveOrigin(config, process.env);
   const child = spawn('node', [adminUiEntry], {
-    env: buildAdminUiEnv(config, origin, process.env),
+    env: buildAdminUiEnv(config, origin, process.env, api?.url),
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   child.stdout?.on('data', (b: Buffer) => process.stdout.write(`${PREFIX} ui | ${b}`));
@@ -85,8 +158,11 @@ export async function devCommand(opts: DevOptions = {}): Promise<void> {
       ` (origin ${origin})\n`,
   );
 
-  // 3. Lifecycle: tear both down together. Resolve the promise (and thus
-  //    let the CLI exit) only once everything has stopped.
+  // 3. Lifecycle: tear everything down together. Resolve the promise (and
+  //    thus let the CLI exit) only once everything has stopped.
+  const closeBackends = (): Promise<unknown> =>
+    Promise.allSettled([mcp.close(), api ? api.close() : Promise.resolve()]);
+
   await new Promise<void>((resolve) => {
     let shuttingDown = false;
 
@@ -97,7 +173,7 @@ export async function devCommand(opts: DevOptions = {}): Promise<void> {
       if (child.exitCode === null && child.signalCode === null) {
         child.kill('SIGTERM');
       }
-      void mcp.close().finally(() => resolve());
+      void closeBackends().finally(() => resolve());
     };
 
     process.on('SIGINT', () => shutdown('SIGINT received'));
@@ -112,7 +188,7 @@ export async function devCommand(opts: DevOptions = {}): Promise<void> {
       );
       process.exitCode = code ?? 1;
       shuttingDown = true;
-      void mcp.close().finally(() => resolve());
+      void closeBackends().finally(() => resolve());
     });
 
     child.on('error', (err) => {

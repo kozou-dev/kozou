@@ -24,6 +24,8 @@ type McpFlags = {
 
 type DevFlags = {
   config?: string;
+  adapter?: string;
+  apiPort?: number;
 };
 
 const program = new Command()
@@ -69,8 +71,21 @@ program
   .command('dev')
   .description('Run the bundled Admin UI + MCP HTTP dev server.')
   .option('--config <path>', 'path to kozou.config.yaml')
+  .option(
+    '--adapter <kind>',
+    'set to "api" for the experimental in-house @kozou/api backend (default: the bundled REST adapter)',
+  )
+  .option(
+    '--api-port <n>',
+    'port for the in-house @kozou/api server (with --adapter api)',
+    (raw) => parseInt(raw, 10),
+  )
   .action(async (flags: DevFlags) => {
-    await devCommand({ config: flags.config });
+    await devCommand({
+      config: flags.config,
+      adapter: flags.adapter,
+      apiPort: flags.apiPort,
+    });
   });
 
 program.parseAsync(process.argv).catch((err) => {
