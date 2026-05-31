@@ -38,7 +38,8 @@
     "prepublishOnly": "pnpm run build",
     "typecheck": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
     "test": "vitest run",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "test:e2e:api": "playwright test --config playwright.kozou-api.config.ts"
   },
   "dependencies": {
     "@internationalized/date": "^3.12.1",
@@ -55,6 +56,7 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
+    "@kozou/api": "workspace:*",
     "@playwright/test": "^1.50.0",
     "@sveltejs/adapter-node": "^5.5.4",
     "@sveltejs/kit": "^2.61.1",
