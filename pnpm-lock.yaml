@@ -210,6 +210,9 @@ importers:
         specifier: ^4.4.3
         version: 4.4.3
     devDependencies:
+      '@kozou/api':
+        specifier: workspace:*
+        version: link:../api
       '@playwright/test':
         specifier: ^1.50.0
         version: 1.60.0
