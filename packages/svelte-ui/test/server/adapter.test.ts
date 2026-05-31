@@ -1,9 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-// Replace the real PostgREST adapter with a minimal stand-in that just
-// records the baseUrl it was constructed with. This keeps the singleton
-// factory's env wiring under test without pulling in the adapter's HTTP
-// machinery (the reason the file was previously coverage-excluded).
+// Replace the real REST adapter with a minimal stand-in that just records
+// the baseUrl it was constructed with. This keeps the singleton factory's
+// env wiring under test without pulling in the adapter's HTTP machinery
+// (the reason the file was previously coverage-excluded). The mocked
+// export name is fixed by the module under test, so this file is listed in
+// the license-check code-grep exclusions alongside the other adapter files.
 vi.mock('$lib/adapter/index.js', () => ({
   PostgrestDataAdapter: class {
     readonly baseUrl: string;
