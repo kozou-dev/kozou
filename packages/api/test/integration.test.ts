@@ -135,9 +135,63 @@ describe('@kozou/api integration (generic fixture)', () => {
     expect(status).toBe(400);
   });
 
-  it('rejects a write method with 405 (writes land in Phase 2)', async () => {
-    const r = await fetch(`${base}/authors`, { method: 'POST' });
+  it('runs a full create -> get -> update -> delete loop', async () => {
+    const created = await fetch(`${base}/authors`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ display_name: 'Katherine Johnson' }),
+    });
+    expect(created.status).toBe(201);
+    const createdRow = (await created.json()) as { id: string; display_name: string };
+    expect(createdRow.display_name).toBe('Katherine Johnson');
+    const id = createdRow.id;
+
+    const got = await getJson<{ display_name: string }>(`/authors/${id}`);
+    expect(got.status).toBe(200);
+    expect(got.body.display_name).toBe('Katherine Johnson');
+
+    const updated = await fetch(`${base}/authors/${id}`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ display_name: 'Katherine G. Johnson' }),
+    });
+    expect(updated.status).toBe(200);
+    expect(((await updated.json()) as { display_name: string }).display_name).toBe(
+      'Katherine G. Johnson',
+    );
+
+    const deleted = await fetch(`${base}/authors/${id}`, { method: 'DELETE' });
+    expect(deleted.status).toBe(200);
+
+    const gone = await getJson(`/authors/${id}`);
+    expect(gone.status).toBe(404);
+  });
+
+  it('returns relation-select options via ?as=options', async () => {
+    const { status, body } = await getJson<{ options: { id: string; label: string }[] }>(
+      '/authors?as=options&label=display_name&fields=display_name&q=turing',
+    );
+    expect(status).toBe(200);
+    expect(body.options).toHaveLength(1);
+    expect(body.options[0].label).toBe('Alan Turing');
+  });
+
+  it('rejects writes to a VIEW with 405', async () => {
+    const r = await fetch(`${base}/vw_inventory_for_sale`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ x: 1 }),
+    });
     expect(r.status).toBe(405);
+  });
+
+  it('rejects an unknown column on create with 400', async () => {
+    const r = await fetch(`${base}/authors`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ bogus: 1 }),
+    });
+    expect(r.status).toBe(400);
   });
 
   it('returns 404 for an unknown resource', async () => {

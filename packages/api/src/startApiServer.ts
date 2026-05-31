@@ -69,23 +69,46 @@ export function createApiRequestListener(
   deps: ApiHandlerDeps,
 ): (req: IncomingMessage, res: ServerResponse) => void {
   return (req, res) => {
-    const url = new URL(req.url ?? '/', 'http://localhost');
-    const segments = url.pathname
-      .split('/')
-      .filter((s) => s.length > 0)
-      .map((s) => safeDecode(s));
-
-    handleApiRequest(deps, {
-      method: req.method ?? 'GET',
-      segments,
-      query: url.searchParams,
-    })
-      .then((result) => respondJson(res, result.status, result.body))
-      .catch((err: unknown) => {
-        const message = err instanceof Error ? err.message : String(err);
-        respondJson(res, 500, errorBody('internal', message));
-      });
+    dispatch(deps, req, res).catch((err: unknown) => {
+      const message = err instanceof Error ? err.message : String(err);
+      respondJson(res, 500, errorBody('internal', message));
+    });
   };
+}
+
+async function dispatch(
+  deps: ApiHandlerDeps,
+  req: IncomingMessage,
+  res: ServerResponse,
+): Promise<void> {
+  const url = new URL(req.url ?? '/', 'http://localhost');
+  const segments = url.pathname
+    .split('/')
+    .filter((s) => s.length > 0)
+    .map((s) => safeDecode(s));
+  const body = await readJsonBody(req);
+  const result = await handleApiRequest(deps, {
+    method: req.method ?? 'GET',
+    segments,
+    query: url.searchParams,
+    body,
+  });
+  respondJson(res, result.status, result.body);
+}
+
+async function readJsonBody(req: IncomingMessage): Promise<unknown> {
+  const chunks: Buffer[] = [];
+  for await (const chunk of req) {
+    chunks.push(chunk as Buffer);
+  }
+  if (chunks.length === 0) return undefined;
+  const raw = Buffer.concat(chunks).toString('utf8');
+  if (raw.length === 0) return undefined;
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return undefined;
+  }
 }
 
 /**

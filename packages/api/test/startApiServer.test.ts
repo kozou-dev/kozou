@@ -70,6 +70,23 @@ describe('startApiServer over real HTTP', () => {
     expect(server.host).toBe('0.0.0.0');
     expect(server.port).toBeGreaterThan(0);
   });
+
+  it('reads a JSON body for create (POST) requests', async () => {
+    const { db, calls } = recordingDb((text) =>
+      text.startsWith('INSERT')
+        ? { rows: [{ id: 'new', display_name: 'Ada' }], rowCount: 1 }
+        : { rows: [], rowCount: 0 },
+    );
+    server = await startApiServer({ schema, db, host: '127.0.0.1', port: 0 });
+    const r = await fetch(`http://127.0.0.1:${server.port}/authors`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ display_name: 'Ada' }),
+    });
+    expect(r.status).toBe(201);
+    expect((await r.json()) as unknown).toEqual({ id: 'new', display_name: 'Ada' });
+    expect(calls[0].values).toEqual(['Ada']);
+  });
 });
 
 describe('createApiRequestListener', () => {
@@ -104,7 +121,13 @@ function driveListener(
         resolve({ status, body: body ?? '' });
       },
     } as unknown as ServerResponse;
-    const req = { url, method } as IncomingMessage;
+    const req = {
+      url,
+      method,
+      [Symbol.asyncIterator]() {
+        return (async function* (): AsyncGenerator<Buffer> {})();
+      },
+    } as unknown as IncomingMessage;
     listener(req, res);
   });
 }
