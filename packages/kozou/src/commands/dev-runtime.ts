@@ -30,15 +30,24 @@ export function resolveOrigin(config: KozouConfig, env: NodeJS.ProcessEnv): stri
 
 // Build the child-process environment for the Admin UI server. Keeping
 // it pure makes the wiring unit-testable without spawning anything.
+//
+// When `apiAdapterUrl` is given (`kozou dev --adapter api`), the UI is
+// pointed at the in-house @kozou/api server via KOZOU_ADAPTER_KIND=api;
+// otherwise it uses the default REST adapter URL from config.
 export function buildAdminUiEnv(
   config: KozouConfig,
   origin: string,
   baseEnv: NodeJS.ProcessEnv,
+  apiAdapterUrl?: string,
 ): NodeJS.ProcessEnv {
+  const adapter =
+    apiAdapterUrl !== undefined
+      ? { KOZOU_ADAPTER_KIND: 'api', KOZOU_ADAPTER_URL: apiAdapterUrl }
+      : { KOZOU_ADAPTER_URL: config.adapter.url };
   return {
     ...baseEnv,
     DATABASE_URL: config.database.url,
-    KOZOU_ADAPTER_URL: config.adapter.url,
+    ...adapter,
     PORT: String(config.server.ui.port),
     HOST: config.server.ui.host,
     ORIGIN: origin,
