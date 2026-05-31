@@ -1,12 +1,12 @@
 // Playwright config for the @kozou/api seam-swap E2E suite (Kozou v0.2
-// Phase 4b). Identical Admin UI to the PostgREST suite — only the backend
-// differs: globalSetup starts the in-house @kozou/api server and spawns
-// svelte-ui with KOZOU_ADAPTER_KIND=api. Proving the same UI build passes
-// a CRUD loop here is the Kozou v0.2 DoD (§1.3 c).
+// Phase 4b). Identical Admin UI to the sibling e2e/ suite — only the
+// backend differs: globalSetup starts the in-house @kozou/api server and
+// spawns svelte-ui with KOZOU_ADAPTER_KIND=api. Proving the same UI build
+// passes a CRUD loop here is the Kozou v0.2 DoD (§1.3 c).
 //
 // Kept as a separate config (distinct testDir + report folders) so it can
-// run as its own CI job alongside the PostgREST suite without clobbering
-// its artifacts.
+// run as its own CI job alongside the sibling e2e/ suite without
+// clobbering its artifacts.
 
 import { defineConfig } from '@playwright/test';
 

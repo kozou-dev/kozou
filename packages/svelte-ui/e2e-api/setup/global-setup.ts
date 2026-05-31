@@ -5,15 +5,15 @@
 //   1. postgres:16 via @testcontainers/postgresql
 //   2. fixture schema + seed rows applied with `pg`
 //   3. @kozou/api started in-process (introspect -> buildSchemaContext ->
-//      startApiServer against a pg Pool) — the PostgREST container's
-//      replacement
+//      startApiServer against a pg Pool) — the in-house backend, run with
+//      no external backend container
 //   4. svelte-ui (`node build/index.js`) as a child process with
 //      KOZOU_ADAPTER_KIND=api + KOZOU_ADAPTER_URL pointing at @kozou/api
 //
 // The point of the suite: the same Admin UI build, with only the adapter
 // swapped via env, drives a full browser CRUD loop against @kozou/api
 // (the Kozou v0.2 DoD). It reuses e2e/fixture.sql so the seeded data and
-// the spec assertions match the PostgREST suite.
+// the spec assertions match the sibling e2e/ suite.
 
 import { spawn } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
@@ -33,12 +33,12 @@ import { state } from './state.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const packageRoot = resolve(here, '../..');
-// Reuse the PostgREST suite's fixture: same schema + seed rows. Its
-// web_anon role / grants are inert here (the API connects as the
-// container superuser), but keeping one fixture keeps the two suites'
-// assertions in lockstep.
+// Reuse the sibling e2e/ suite's fixture: same schema + seed rows. Its
+// extra role / grants are inert here (the API connects as the container
+// superuser), but keeping one fixture keeps the two suites' assertions in
+// lockstep.
 const FIXTURE_SQL_PATH = resolve(packageRoot, 'e2e/fixture.sql');
-const SVELTE_UI_PORT = 4174; // 4173 is the PostgREST suite's port
+const SVELTE_UI_PORT = 4174; // 4173 is the sibling e2e/ suite's port
 const SVELTE_UI_HOST = '127.0.0.1';
 
 function log(msg: string) {
@@ -106,7 +106,7 @@ export default async function globalSetup() {
       KOZOU_ADAPTER_URL: apiUrl,
       PORT: String(SVELTE_UI_PORT),
       HOST: SVELTE_UI_HOST,
-      // Same plain-http CSRF alignment the PostgREST suite documents:
+      // Same plain-http CSRF alignment the sibling e2e/ suite documents:
       // adapter-node assumes https without ORIGIN, so the computed origin
       // would mismatch the browser's http Origin and SvelteKit's CSRF
       // guard would 403 every form POST.

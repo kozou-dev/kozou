@@ -1,7 +1,7 @@
 // Shared lifecycle state for the @kozou/api seam-swap E2E suite.
 //
 // Mirrors e2e/setup/state.ts but the backend is the in-house @kozou/api
-// server started in-process (no PostgREST container). globalSetup writes
+// server started in-process (no external backend container). globalSetup writes
 // each handle here; globalTeardown reads them back to tear everything
 // down in reverse order.
 

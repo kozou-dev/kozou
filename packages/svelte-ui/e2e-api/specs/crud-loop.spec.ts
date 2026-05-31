@@ -2,7 +2,7 @@
 // swapped to the in-house @kozou/api server (KOZOU_ADAPTER_KIND=api, wired
 // in global-setup), drives a full CRUD loop end-to-end through a real
 // browser — list (read) -> + New -> Save (create) -> Edit -> Save (update)
-// -> Delete. No UI code differs from the PostgREST suite; only the backend.
+// -> Delete. No UI code differs from the sibling e2e/ suite; only the backend.
 //
 // The loop creates and then deletes its row, so the shared fixture DB is
 // left in its seeded state (three authors incl. Margaret Atwood).
