@@ -35,6 +35,18 @@ function fakeClient(query: () => Promise<unknown>): Client {
   return { query } as unknown as Client;
 }
 
+// Await `op`, asserting it rejects, and hand back the rejection typed as a
+// KozouIntrospectError. Resolving instead is a test failure (so the union
+// of `runQuery`'s success rows never leaks into the assertions below).
+async function rejectionOf(op: Promise<unknown>): Promise<KozouIntrospectError> {
+  return op.then(
+    () => {
+      throw new Error('expected runQuery to reject');
+    },
+    (e: unknown) => e as KozouIntrospectError,
+  );
+}
+
 describe('runQuery', () => {
   it('returns the rows on success', async () => {
     const client = fakeClient(() => Promise.resolve({ rows: [{ a: 1 }, { a: 2 }] }));
@@ -45,8 +57,8 @@ describe('runQuery', () => {
   it('wraps a pg-style error with its code, message and cause', async () => {
     const pgErr = { code: '42P01', message: 'relation "x" does not exist' };
     const client = fakeClient(() => Promise.reject(pgErr));
-    const error = await runQuery(client, 'SELECT * FROM x', [], 'fetchThing').catch(
-      (e: unknown) => e as KozouIntrospectError,
+    const error = await rejectionOf(
+      runQuery(client, 'SELECT * FROM x', [], 'fetchThing'),
     );
     expect(error).toBeInstanceOf(KozouIntrospectError);
     expect(error.message).toBe('fetchThing: relation "x" does not exist');
@@ -57,9 +69,7 @@ describe('runQuery', () => {
 
   it('falls back to String(err) for a non-object throw and leaves pgErrorCode unset', async () => {
     const client = fakeClient(() => Promise.reject('plain string failure'));
-    const error = await runQuery(client, 'q', [], 'ctx').catch(
-      (e: unknown) => e as KozouIntrospectError,
-    );
+    const error = await rejectionOf(runQuery(client, 'q', [], 'ctx'));
     expect(error).toBeInstanceOf(KozouIntrospectError);
     expect(error.message).toBe('ctx: plain string failure');
     expect(error.pgErrorCode).toBeUndefined();
@@ -69,9 +79,7 @@ describe('runQuery', () => {
     // isPgErrorLike(err) is true (object), but `.message` is absent, so the
     // `pgErr.message ?? String(err)` fallback applies.
     const client = fakeClient(() => Promise.reject({ code: '08006' }));
-    const error = await runQuery(client, 'q', [], 'ctx').catch(
-      (e: unknown) => e as KozouIntrospectError,
-    );
+    const error = await rejectionOf(runQuery(client, 'q', [], 'ctx'));
     expect(error.pgErrorCode).toBe('08006');
     expect(error.message).toBe(`ctx: ${String({ code: '08006' })}`);
   });

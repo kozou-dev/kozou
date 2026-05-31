@@ -10,17 +10,10 @@ export default defineConfig({
     coverage: {
       provider: 'v8',
       include: ['src/lib/**/*.ts'],
-      exclude: [
-        'src/lib/components/ui/**',
-        // The server DataAdapter singleton is a thin
-        // `getEnv("KOZOU_ADAPTER_URL")` factory consumed by
-        // `hooks.server.ts`; isolating it under unit test would
-        // mean mocking `$env/static/private`, which the test
-        // environment doesn't load. Excluded by Plan 7-H, same
-        // policy as kozou's `cli.ts` / `server.ts` in design spec
-        // §16.1.1 D.
-        'src/lib/server/adapter.ts',
-      ],
+      // `src/lib/server/adapter.ts` used to be excluded here; it is now
+      // unit-tested (test/server/adapter.test.ts) by mocking the adapter
+      // class and driving `KOZOU_ADAPTER_URL` via `process.env`.
+      exclude: ['src/lib/components/ui/**'],
       reporter: ['text', 'lcov'],
       // Enforce DoD #6 from Step 6. Branches/functions stay
       // unmetered for v0.1; design spec §16.1.1 B reactivates the

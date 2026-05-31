@@ -120,6 +120,10 @@ jobs:
         # - packages/svelte-ui/test/adapter/postgrest.*.test.ts (asserts
         #   the URLs/headers the adapter sends; documented coverage
         #   only)
+        # - packages/svelte-ui/test/server/adapter.test.ts (unit-tests
+        #   the server DataAdapter singleton; vi.mock replaces the
+        #   PostgrestDataAdapter export the module imports - the mocked
+        #   export name is fixed by the module under test, identifier only)
         # - packages/svelte-ui/e2e/** (Playwright E2E suite; spawns
         #   postgrest/postgrest as a sidecar container via
         #   testcontainers per Kozou v0.1 spec §16.1.1 B. The directory
@@ -150,6 +154,7 @@ jobs:
              ':(exclude)packages/svelte-ui/src/lib/index.ts' \
              ':(exclude)packages/svelte-ui/src/lib/server/adapter.ts' \
              ':(exclude)packages/svelte-ui/test/adapter/postgrest.*.test.ts' \
+             ':(exclude)packages/svelte-ui/test/server/adapter.test.ts' \
              ':(exclude)packages/svelte-ui/e2e/**' \
              ':(exclude)packages/svelte-ui/playwright.config.ts' \
              ':(exclude)packages/kozou/e2e/**' \
