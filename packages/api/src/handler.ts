@@ -28,6 +28,8 @@ export type ApiHandlerDeps = {
   lookup: ResourceLookup;
   /** Advertised in `GET /`. Optional; defaults to null. */
   version?: string;
+  /** Prebuilt OpenAPI document served at `GET /openapi.json`. */
+  openapi?: Record<string, unknown>;
 };
 
 export type ApiHttpRequest = {
@@ -71,6 +73,14 @@ async function route(deps: ApiHandlerDeps, req: ApiHttpRequest): Promise<ApiHttp
       status: 200,
       body: { name: 'kozou-api', version: deps.version ?? null, resources: deps.lookup.list() },
     };
+  }
+
+  if (segments.length === 1 && segments[0] === 'openapi.json') {
+    requireMethod(method, 'GET');
+    if (!deps.openapi) {
+      throw notFound('OpenAPI document is not configured.');
+    }
+    return { status: 200, body: deps.openapi };
   }
 
   if (segments.length === 1) {

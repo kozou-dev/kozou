@@ -40,11 +40,19 @@ export function viewResource(name: string, columns: ColumnContext[], schema = 'p
   return { kind: 'view', schema, name, qualifiedName: `${schema}.${name}`, columns, primaryKey: [] };
 }
 
-/** A SchemaContext with only the fields buildResourceLookup reads. */
-export function schemaOf(
-  tables: { schema?: string; name: string; columns?: ColumnContext[]; primaryKey?: string[] }[],
-  views: { schema?: string; name: string; columns?: ColumnContext[] }[] = [],
-): SchemaContext {
+type TableSpec = {
+  schema?: string;
+  name: string;
+  columns?: ColumnContext[];
+  primaryKey?: string[];
+  label?: string;
+  description?: string | null;
+  aiDescription?: string | null;
+};
+type ViewSpec = Omit<TableSpec, 'primaryKey'>;
+
+/** A SchemaContext carrying the fields the lookup + OpenAPI builder read. */
+export function schemaOf(tables: TableSpec[], views: ViewSpec[] = []): SchemaContext {
   return {
     meta: { serverVersion: '16', builtAt: '2026-01-01T00:00:00Z', sourceSchemas: ['public'] },
     tables: tables.map(
@@ -53,6 +61,9 @@ export function schemaOf(
           schema: t.schema ?? 'public',
           name: t.name,
           qualifiedName: `${t.schema ?? 'public'}.${t.name}`,
+          label: t.label ?? t.name,
+          description: t.description ?? null,
+          aiDescription: t.aiDescription ?? null,
           columns: t.columns ?? [],
           primaryKey: t.primaryKey ?? ['id'],
         }) as unknown as TableContext,
@@ -63,6 +74,9 @@ export function schemaOf(
           schema: v.schema ?? 'public',
           name: v.name,
           qualifiedName: `${v.schema ?? 'public'}.${v.name}`,
+          label: v.label ?? v.name,
+          description: v.description ?? null,
+          aiDescription: v.aiDescription ?? null,
           columns: v.columns ?? [],
         }) as unknown as ViewContext,
     ),

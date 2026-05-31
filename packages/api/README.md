@@ -13,7 +13,7 @@ This is the in-house data layer that Kozou v1.0 will make the default
 the same `DataAdapter` seam (`@kozou/core`) it already uses, so swapping
 the data layer is not a breaking change for UI code.
 
-## Status (v0.2 Phase 1–2 — read + write path)
+## Status (v0.2 Phase 1–3 — read + write + OpenAPI)
 
 Implemented:
 
@@ -34,13 +34,16 @@ Implemented:
   or `404`.
 - `DELETE /<resource>/<id>` — delete by primary key; returns the deleted
   row, or `404`.
+- `GET /openapi.json` — an OpenAPI 3.1 document for the whole API.
+  Descriptions, `enum`s, and AI notes are sourced from the database
+  `COMMENT`s: table/view/column descriptions become schema `description`s,
+  `@ai:` notes become `x-kozou-ai`, CHECK / ENUM members become `enum`,
+  and the resolved widget becomes `x-kozou-widget`.
 
 Writes are rejected on views (`405`) and on unknown columns (`400`).
 
 Deferred to later phases (Kozou v0.2 design spec §4):
 
-- Phase 3: `GET /openapi.json` (OpenAPI 3.1 with `COMMENT`-derived
-  descriptions).
 - Phase 4: a `KozouApiDataAdapter` so the Admin UI can run against this
   server, plus CLI integration.
 

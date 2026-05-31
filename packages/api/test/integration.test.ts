@@ -194,6 +194,42 @@ describe('@kozou/api integration (generic fixture)', () => {
     expect(r.status).toBe(400);
   });
 
+  it('serves a COMMENT-enriched OpenAPI 3.1 document', async () => {
+    type Doc = {
+      openapi: string;
+      paths: Record<string, Record<string, unknown>>;
+      components: {
+        schemas: Record<
+          string,
+          {
+            description?: string;
+            'x-kozou-ai'?: string;
+            properties: Record<string, { enum?: unknown[]; 'x-kozou-widget'?: string }>;
+          }
+        >;
+      };
+    };
+    const { status, body } = await getJson<Doc>('/openapi.json');
+    expect(status).toBe(200);
+    expect(body.openapi).toBe('3.1.0');
+
+    // tables expose write paths; views are read-only
+    expect(body.paths['/authors'].post).toBeDefined();
+    expect(body.paths['/vw_inventory_for_sale'].post).toBeUndefined();
+
+    // COMMENT-derived metadata is baked into the component schemas
+    const inv = body.components.schemas[`${db.schema}.inventory_items`];
+    expect(inv.description).toContain('Inventory items available for sale');
+    expect(inv['x-kozou-ai']).toContain('vw_inventory_for_sale');
+    expect(inv.properties.status.enum).toEqual(
+      expect.arrayContaining(['for_sale', 'reserved', 'sold']),
+    );
+    expect(inv.properties.status['x-kozou-widget']).toBe('enum-select');
+    expect(inv.properties.selling_price['x-kozou-widget']).toBe('currency');
+
+    expect(body.components.schemas[`${db.schema}.authors`].description).toBe('Authors of books.');
+  });
+
   it('returns 404 for an unknown resource', async () => {
     const { status } = await getJson('/does_not_exist');
     expect(status).toBe(404);

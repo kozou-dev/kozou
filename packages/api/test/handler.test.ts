@@ -203,6 +203,24 @@ describe('handleApiRequest — routing', () => {
     expect(r.status).toBe(500);
     expect(errorOf(r.body)).toEqual({ code: 'internal', message: 'boom' });
   });
+
+  it('serves the OpenAPI document at GET /openapi.json when configured', async () => {
+    const { db } = recordingDb(() => ({ rows: [], rowCount: 0 }));
+    const deps: ApiHandlerDeps = {
+      db,
+      lookup: lookupOf([authors, vw]),
+      openapi: { openapi: '3.1.0', paths: {} },
+    };
+    const r = await handleApiRequest(deps, reqOf('GET', '/openapi.json'));
+    expect(r.status).toBe(200);
+    expect(r.body).toEqual({ openapi: '3.1.0', paths: {} });
+  });
+
+  it('returns 404 for /openapi.json when not configured', async () => {
+    const { deps } = depsWith(() => ({ rows: [], rowCount: 0 }));
+    const r = await handleApiRequest(deps, reqOf('GET', '/openapi.json'));
+    expect(r.status).toBe(404);
+  });
 });
 
 describe('parseListParams', () => {
