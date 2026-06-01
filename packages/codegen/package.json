@@ -1,0 +1,41 @@
+{
+  "name": "@kozou/codegen",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Kozou TypeScript codegen: emit row / entity types from a SchemaContext (Kozou v0.2 spec §5.2, experimental).",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kozou-dev/kozou.git",
+    "directory": "packages/codegen"
+  },
+  "homepage": "https://kozou.org",
+  "bugs": {
+    "url": "https://github.com/kozou-dev/kozou/issues"
+  },
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.test.json",
+    "build": "tsc",
+    "test": "vitest run --coverage"
+  },
+  "dependencies": {
+    "@kozou/core": "workspace:*"
+  },
+  "devDependencies": {
+    "@kozou/introspect": "workspace:*",
+    "typescript": "^6.0.3"
+  }
+}

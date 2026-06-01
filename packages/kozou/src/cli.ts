@@ -4,12 +4,18 @@
 
 import { Command } from 'commander';
 import { inspectCommand } from './commands/inspect.js';
+import { codegenCommand } from './commands/codegen.js';
 import { mcpCommand } from './commands/mcp.js';
 import { devCommand } from './commands/dev.js';
 import { PACKAGE_VERSION } from './index.js';
 
 type InspectFlags = {
   format?: 'json' | 'yaml';
+  output?: string;
+  config?: string;
+};
+
+type CodegenFlags = {
   output?: string;
   config?: string;
 };
@@ -44,6 +50,18 @@ program
   .action(async (flags: InspectFlags) => {
     await inspectCommand({
       format: flags.format,
+      output: flags.output,
+      config: flags.config,
+    });
+  });
+
+program
+  .command('codegen')
+  .description('Generate TypeScript row types from the database schema (experimental).')
+  .option('--output <path>', 'output file (- for stdout)', '-')
+  .option('--config <path>', 'path to kozou.config.yaml')
+  .action(async (flags: CodegenFlags) => {
+    await codegenCommand({
       output: flags.output,
       config: flags.config,
     });

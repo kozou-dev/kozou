@@ -68,6 +68,19 @@ importers:
         specifier: ^8.11.0
         version: 8.20.0
 
+  packages/codegen:
+    dependencies:
+      '@kozou/core':
+        specifier: workspace:*
+        version: link:../core
+    devDependencies:
+      '@kozou/introspect':
+        specifier: workspace:*
+        version: link:../introspect
+      typescript:
+        specifier: ^6.0.3
+        version: 6.0.3
+
   packages/core:
     dependencies:
       yaml:
@@ -127,6 +140,9 @@ importers:
       '@kozou/api':
         specifier: workspace:*
         version: link:../api
+      '@kozou/codegen':
+        specifier: workspace:*
+        version: link:../codegen
       '@modelcontextprotocol/sdk':
         specifier: ^1.0.0
         version: 1.29.0(zod@4.4.3)
