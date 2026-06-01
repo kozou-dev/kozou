@@ -11,6 +11,7 @@ import {
   importSPKI,
   importJWK,
   jwtVerify,
+  SignJWT,
   errors as joseErrors,
   type JWTPayload,
   type JWTVerifyOptions,
@@ -136,4 +137,45 @@ function resolveRole(payload: JWTPayload, roleClaim: string, config: AuthConfig)
     throw forbidden(`Role "${role}" is not permitted.`);
   }
   return role;
+}
+
+export type ServiceTokenOptions = {
+  /** HS256 shared secret used to sign. Must match the verifier's secret. */
+  secret: string;
+  /** Claim that names the database role. Default: 'role'. */
+  roleClaim?: string;
+  /** Role to assume. When omitted, no role claim is set and the verifier
+   *  falls back to its configured defaultRole. */
+  role?: string;
+  /** `iss` to set; required when the verifier expects a matching issuer. */
+  issuer?: string;
+  /** `aud` to set; required when the verifier expects a matching audience. */
+  audience?: string | string[];
+};
+
+/**
+ * Mint an HS256 service token for a trusted same-host caller — the bundled
+ * Admin UI under `kozou dev`, which has no end user to obtain a token from.
+ * The token is signed with the same HS256 secret the API verifies against
+ * and carries the role claim the authenticator reads, so the caller runs
+ * under that role with the schema author's own RLS policies applied.
+ *
+ * No `exp` is set: the token lives only for the lifetime of the dev process
+ * that mints it and is passed in-process to the UI, never persisted. Minting
+ * needs the shared secret, so it is HS256-only — an RS256 deployment must
+ * supply a token from its identity provider instead.
+ */
+export async function signServiceToken(opts: ServiceTokenOptions): Promise<string> {
+  if (typeof opts.secret !== 'string' || opts.secret.length === 0) {
+    throw new Error('@kozou/api signServiceToken: a non-empty HS256 secret is required.');
+  }
+  const roleClaim = opts.roleClaim ?? 'role';
+  const payload: JWTPayload = {};
+  if (typeof opts.role === 'string' && opts.role.length > 0) {
+    payload[roleClaim] = opts.role;
+  }
+  let jwt = new SignJWT(payload).setProtectedHeader({ alg: 'HS256' }).setIssuedAt();
+  if (opts.issuer !== undefined) jwt = jwt.setIssuer(opts.issuer);
+  if (opts.audience !== undefined) jwt = jwt.setAudience(opts.audience);
+  return jwt.sign(new TextEncoder().encode(opts.secret));
 }

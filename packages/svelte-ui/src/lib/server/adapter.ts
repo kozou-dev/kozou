@@ -9,6 +9,10 @@
 //   - unset / "postgrest" (default): the REST adapter against PostgREST
 //   - "api":                         the in-house @kozou/api server
 // KOZOU_ADAPTER_URL overrides the base URL for whichever is selected.
+// KOZOU_ADAPTER_TOKEN (api backend only): when the @kozou/api server has
+// JWT auth enabled, this Bearer token is attached to every request. Under
+// `kozou dev --adapter api` the CLI sets it; it is empty otherwise and the
+// adapter sends no Authorization header (the unauthenticated default).
 
 import type { DataAdapter } from '@kozou/core';
 
@@ -24,7 +28,12 @@ export function getAdapter(): DataAdapter {
     const kind = process.env.KOZOU_ADAPTER_KIND ?? 'postgrest';
     if (kind === 'api') {
       const baseUrl = process.env.KOZOU_ADAPTER_URL ?? DEFAULT_API_URL;
-      cached = new KozouApiDataAdapter({ baseUrl });
+      const token = process.env.KOZOU_ADAPTER_TOKEN;
+      const headers =
+        token !== undefined && token.length > 0
+          ? { Authorization: `Bearer ${token}` }
+          : undefined;
+      cached = new KozouApiDataAdapter({ baseUrl, headers });
     } else {
       const baseUrl = process.env.KOZOU_ADAPTER_URL ?? DEFAULT_POSTGREST_URL;
       cached = new PostgrestDataAdapter({ baseUrl });

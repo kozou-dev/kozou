@@ -14,10 +14,12 @@ export {
 
 export {
   createAuthenticator,
+  signServiceToken,
   type AuthConfig,
   type AuthContext,
   type Authenticator,
   type JwtAlgorithm,
+  type ServiceTokenOptions,
 } from './auth.js';
 
 export {

@@ -25,6 +25,7 @@ import { loadConfig, type KozouConfig } from '../config.js';
 import {
   buildAdminUiEnv,
   resolveAdminUiEntry,
+  resolveAdminUiToken,
   resolveOrigin,
 } from './dev-runtime.js';
 
@@ -135,6 +136,20 @@ export async function devCommand(opts: DevOptions = {}): Promise<void> {
     process.stderr.write(`${PREFIX} in-house @kozou/api on ${api.url}\n`);
   }
 
+  // When the in-house API enforces auth, resolve the token the bundled Admin
+  // UI presents to it: a minted HS256 token, a supplied RS256 / external one,
+  // or none (with a warning) when neither is available. @kozou/api is already
+  // imported (startInhouseApi succeeded), so this dynamic import is cached.
+  let apiToken: string | undefined;
+  if (api && config.auth) {
+    const apiModule = await import('@kozou/api');
+    const resolved = await resolveAdminUiToken(config, apiModule, process.env);
+    if (resolved.warning) {
+      process.stderr.write(`${PREFIX} WARNING: ${resolved.warning}\n`);
+    }
+    apiToken = resolved.token;
+  }
+
   const cache = new SchemaCache({
     connection: config.database.url,
     schemas: config.database.schemas,
@@ -153,7 +168,7 @@ export async function devCommand(opts: DevOptions = {}): Promise<void> {
   warnIfPublic('Admin UI', config.server.ui.host);
   const origin = resolveOrigin(config, process.env);
   const child = spawn('node', [adminUiEntry], {
-    env: buildAdminUiEnv(config, origin, process.env, api?.url),
+    env: buildAdminUiEnv(config, origin, process.env, api?.url, apiToken),
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   child.stdout?.on('data', (b: Buffer) => process.stdout.write(`${PREFIX} ui | ${b}`));

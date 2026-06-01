@@ -17,8 +17,10 @@ vi.mock('$lib/adapter/index.js', () => ({
   KozouApiDataAdapter: class {
     readonly kind = 'api';
     readonly baseUrl: string;
-    constructor(opts: { baseUrl: string }) {
+    readonly headers: Record<string, string> | undefined;
+    constructor(opts: { baseUrl: string; headers?: Record<string, string> }) {
       this.baseUrl = opts.baseUrl;
+      this.headers = opts.headers;
     }
   },
 }));
@@ -27,6 +29,7 @@ import { getAdapter, resetAdapterForTests } from '../../src/lib/server/adapter.j
 
 const ORIGINAL_URL = process.env.KOZOU_ADAPTER_URL;
 const ORIGINAL_KIND = process.env.KOZOU_ADAPTER_KIND;
+const ORIGINAL_TOKEN = process.env.KOZOU_ADAPTER_TOKEN;
 
 function baseUrlOf(adapter: unknown): string {
   return (adapter as { baseUrl: string }).baseUrl;
@@ -36,15 +39,21 @@ function kindOf(adapter: unknown): string {
   return (adapter as { kind: string }).kind;
 }
 
+function headersOf(adapter: unknown): Record<string, string> | undefined {
+  return (adapter as { headers?: Record<string, string> }).headers;
+}
+
 beforeEach(() => {
   delete process.env.KOZOU_ADAPTER_URL;
   delete process.env.KOZOU_ADAPTER_KIND;
+  delete process.env.KOZOU_ADAPTER_TOKEN;
   resetAdapterForTests();
 });
 
 afterEach(() => {
   restoreEnv('KOZOU_ADAPTER_URL', ORIGINAL_URL);
   restoreEnv('KOZOU_ADAPTER_KIND', ORIGINAL_KIND);
+  restoreEnv('KOZOU_ADAPTER_TOKEN', ORIGINAL_TOKEN);
   resetAdapterForTests();
 });
 
@@ -100,5 +109,22 @@ describe('getAdapter — KOZOU_ADAPTER_KIND switch', () => {
   it('treats an explicit kind=postgrest like the default', () => {
     process.env.KOZOU_ADAPTER_KIND = 'postgrest';
     expect(kindOf(getAdapter())).toBe('postgrest');
+  });
+
+  it('attaches a Bearer Authorization header from KOZOU_ADAPTER_TOKEN', () => {
+    process.env.KOZOU_ADAPTER_KIND = 'api';
+    process.env.KOZOU_ADAPTER_TOKEN = 'jwt-abc';
+    expect(headersOf(getAdapter())).toEqual({ Authorization: 'Bearer jwt-abc' });
+  });
+
+  it('sends no Authorization header when KOZOU_ADAPTER_TOKEN is unset', () => {
+    process.env.KOZOU_ADAPTER_KIND = 'api';
+    expect(headersOf(getAdapter())).toBeUndefined();
+  });
+
+  it('ignores an empty KOZOU_ADAPTER_TOKEN', () => {
+    process.env.KOZOU_ADAPTER_KIND = 'api';
+    process.env.KOZOU_ADAPTER_TOKEN = '';
+    expect(headersOf(getAdapter())).toBeUndefined();
   });
 });
