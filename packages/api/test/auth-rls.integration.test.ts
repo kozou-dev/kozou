@@ -29,6 +29,9 @@ describe('@kozou/api JWT + RLS (generic fixture)', () => {
   let pool: pkg.Pool;
   let server: ApiServerHandle;
   let base: string;
+  // A second server, same DB/pool, configured with an anonymous role.
+  let anonServer: ApiServerHandle;
+  let anonBase: string;
 
   beforeAll(async () => {
     db = await setupDatabase();
@@ -62,6 +65,17 @@ describe('@kozou/api JWT + RLS (generic fixture)', () => {
         `CREATE POLICY authors_owner ON authors
          USING (owner = current_setting('request.jwt.claims', true)::jsonb ->> 'sub')`,
       );
+
+      // Anonymous access: a dedicated role the connection can assume, plus a
+      // permissive policy that exposes only the rows owned by 'public'.
+      await admin.query(`CREATE ROLE app_anon`);
+      await admin.query(`GRANT USAGE ON SCHEMA "${db.schema}" TO app_anon`);
+      await admin.query(`GRANT SELECT ON ALL TABLES IN SCHEMA "${db.schema}" TO app_anon`);
+      await admin.query(`GRANT app_anon TO CURRENT_USER`);
+      await admin.query(`INSERT INTO authors (display_name, owner) VALUES ('Public Notice', 'public')`);
+      await admin.query(
+        `CREATE POLICY authors_anon ON authors FOR SELECT TO app_anon USING (owner = 'public')`,
+      );
     } finally {
       await admin.end();
     }
@@ -83,10 +97,27 @@ describe('@kozou/api JWT + RLS (generic fixture)', () => {
       version: '0.0.0-test',
     });
     base = `http://127.0.0.1:${server.port}`;
+
+    anonServer = await startApiServer({
+      schema,
+      db: queryable,
+      pool,
+      auth: {
+        jwt: { secret: SECRET },
+        allowedRoles: ['app_reader'],
+        defaultRole: 'app_reader',
+        anonRole: 'app_anon',
+      },
+      host: '127.0.0.1',
+      port: 0,
+      version: '0.0.0-test',
+    });
+    anonBase = `http://127.0.0.1:${anonServer.port}`;
   }, 120_000);
 
   afterAll(async () => {
     if (server) await server.close();
+    if (anonServer) await anonServer.close();
     if (pool) await pool.end();
     if (db) await db.cleanup();
   });
@@ -149,5 +180,34 @@ describe('@kozou/api JWT + RLS (generic fixture)', () => {
       const denied = await getAuthed('/authors');
       expect(denied.status).toBe(401);
     }
+  });
+
+  describe('anonymous role (anonRole configured)', () => {
+    const getAnon = async <T>(path: string, jwt?: string): Promise<{ status: number; body: T }> => {
+      const headers: Record<string, string> = jwt ? { Authorization: `Bearer ${jwt}` } : {};
+      const r = await fetch(`${anonBase}${path}`, { headers });
+      return { status: r.status, body: (await r.json()) as T };
+    };
+
+    it('serves a no-token request under the anon role via RLS (not 401)', async () => {
+      const { status, body } = await getAnon<ListBody>('/authors');
+      expect(status).toBe(200);
+      expect(body.total).toBe(1);
+      expect(body.rows.every((row) => row.owner === 'public')).toBe(true);
+    });
+
+    it('still honours a valid JWT — the anon policy does not leak to app_reader', async () => {
+      const { status, body } = await getAnon<ListBody>(
+        '/authors',
+        await token({ sub: 'ada', role: 'app_reader' }),
+      );
+      expect(status).toBe(200);
+      expect(body.total).toBe(2);
+      expect(body.rows.every((row) => row.owner === 'ada')).toBe(true);
+    });
+
+    it('still rejects an invalid token with 401', async () => {
+      expect((await getAnon('/authors', 'not-a-jwt')).status).toBe(401);
+    });
   });
 });

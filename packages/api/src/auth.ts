@@ -39,6 +39,12 @@ export type AuthConfig = {
   allowedRoles?: string[];
   /** Role used when the token carries no role claim. */
   defaultRole?: string;
+  /** Role assumed when a request carries NO Authorization header at all, so
+   *  the database's RLS policies decide what an anonymous caller may see.
+   *  Unset (default): a request with no token is rejected with 401. A present
+   *  but invalid/expired token is always 401 — only a fully absent header is
+   *  treated as anonymous (it is not subject to `allowedRoles`). */
+  anonRole?: string;
   /** Runtime setting the claims are published under. Default 'request.jwt.claims'. */
   claimsGuc?: string;
 };
@@ -84,6 +90,12 @@ export function createAuthenticator(config: AuthConfig): Authenticator {
     async authenticate(header) {
       const token = extractBearer(header);
       if (token === undefined) {
+        // Only a fully absent header is anonymous. A present-but-malformed
+        // header ("Basic …", "Bearer "} is a failed auth attempt, never
+        // silently downgraded to the anonymous role.
+        if (header === undefined && config.anonRole !== undefined) {
+          return { role: config.anonRole, claims: {} };
+        }
         throw unauthorized('Missing or malformed Authorization header.');
       }
       let payload: JWTPayload;

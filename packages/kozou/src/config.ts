@@ -104,6 +104,7 @@ const authSchema = z.object({
   roleClaim: z.string().min(1).optional(),
   allowedRoles: z.array(z.string().min(1)).optional(),
   defaultRole: z.string().min(1).optional(),
+  anonRole: z.string().min(1).optional(),
   claimsGuc: z.string().min(1).optional(),
   ui: authUiSchema.optional(),
 });
@@ -241,6 +242,7 @@ function injectAuthFromEnv(raw: unknown, env: NodeJS.ProcessEnv): unknown {
   const allowedRoles = splitList(env.KOZOU_JWT_ALLOWED_ROLES);
   if (allowedRoles) auth.allowedRoles = allowedRoles;
   if (env.KOZOU_JWT_DEFAULT_ROLE) auth.defaultRole = env.KOZOU_JWT_DEFAULT_ROLE;
+  if (env.KOZOU_JWT_ANON_ROLE) auth.anonRole = env.KOZOU_JWT_ANON_ROLE;
   if (env.KOZOU_JWT_CLAIMS_GUC) auth.claimsGuc = env.KOZOU_JWT_CLAIMS_GUC;
 
   // How the bundled Admin UI authenticates: KOZOU_UI_ROLE names the role the
