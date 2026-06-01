@@ -41,6 +41,7 @@ const lookup = buildResourceLookup(
 );
 const books = lookup.resolve('books')!;
 const inventory = lookup.resolve('inventory_items')!;
+const authors = lookup.resolve('authors')!;
 
 function expect400(fn: () => unknown, re: RegExp): void {
   try {
@@ -204,6 +205,51 @@ describe('resolveEmbedSpec', () => {
       /Cannot derive a non-conflicting embed key/,
     );
   });
+
+  it('resolves a reverse one-to-many relation by child table name', () => {
+    const spec = resolveEmbedSpec(authors, parseEmbedParam('books'), lookup);
+    expect(spec).toHaveLength(1);
+    expect(spec[0].kind).toBe('to-many');
+    expect(spec[0].target.name).toBe('books');
+    expect(spec[0].key).toBe('books');
+    expect(spec[0].relation.field).toBe('author_id');
+  });
+
+  it('composes reverse embeds across two levels', () => {
+    const spec = resolveEmbedSpec(authors, parseEmbedParam('books.editions'), lookup);
+    expect(spec[0].kind).toBe('to-many');
+    expect(spec[0].children[0].kind).toBe('to-many');
+    expect(spec[0].children[0].key).toBe('editions');
+  });
+
+  it('composes a forward embed under a reverse embed', () => {
+    const spec = resolveEmbedSpec(authors, parseEmbedParam('books.authors'), lookup);
+    expect(spec[0].kind).toBe('to-many');
+    expect(spec[0].children[0].kind).toBe('to-one');
+    expect(spec[0].children[0].key).toBe('authors');
+  });
+
+  it('rejects an ambiguous reverse selector', () => {
+    const social = buildResourceLookup(
+      schemaOf([
+        { name: 'users', columns: [col('id', 'uuid', { isPrimaryKey: true })], relations: [] },
+        {
+          name: 'follows',
+          columns: [
+            col('id', 'uuid', { isPrimaryKey: true }),
+            col('follower_id', 'uuid'),
+            col('followee_id', 'uuid'),
+          ],
+          relations: [relation('follower_id', 'users'), relation('followee_id', 'users')],
+        },
+      ]),
+    );
+    const users = social.resolve('users')!;
+    expect400(
+      () => resolveEmbedSpec(users, parseEmbedParam('follows'), social),
+      /Ambiguous reverse embed "follows"/,
+    );
+  });
 });
 
 describe('buildEmbedSelectFragment', () => {
@@ -227,6 +273,14 @@ describe('buildEmbedSelectFragment', () => {
     const spec = resolveEmbedSpec(inventory, parseEmbedParam('editions.books.authors'), lookup);
     const frag = buildEmbedSelectFragment(spec, '"public"."inventory_items"', { n: 0 });
     expect(frag).not.toContain('$');
+  });
+
+  it('renders a reverse to-many aggregate with ORDER BY and a child cap', () => {
+    const spec = resolveEmbedSpec(authors, parseEmbedParam('books'), lookup);
+    const frag = buildEmbedSelectFragment(spec, '"public"."authors"', { n: 0 });
+    expect(frag).toBe(
+      `, (SELECT coalesce(jsonb_agg(to_jsonb(e1) ORDER BY e1."id"), '[]'::jsonb) FROM (SELECT "id", "author_id", "title" FROM "public"."books" e1 WHERE e1."author_id" = "public"."authors"."id" ORDER BY e1."id" LIMIT 100) e1) AS "books"`,
+    );
   });
 
   it('returns an empty string for an empty spec', () => {

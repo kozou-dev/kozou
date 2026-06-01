@@ -303,6 +303,28 @@ describe('@kozou/api integration (generic fixture)', () => {
     expect(status).toBe(400);
   });
 
+  it('embeds a reverse one-to-many relation as an array (?embed=books)', async () => {
+    const { status, body } = await getJson<{
+      rows: { display_name: string; books: { title: string }[] }[];
+    }>('/authors?embed=books&sort=display_name.asc');
+    expect(status).toBe(200);
+    const ada = body.rows.find((r) => r.display_name === 'Ada Lovelace')!;
+    expect(Array.isArray(ada.books)).toBe(true);
+    expect(ada.books).toHaveLength(1);
+    expect(ada.books[0].title).toBe('Notes on the Analytical Engine');
+    // an author with no books gets an empty array, not null
+    const turing = body.rows.find((r) => r.display_name === 'Alan Turing')!;
+    expect(turing.books).toEqual([]);
+  });
+
+  it('composes reverse embedding across two levels (?embed=books.editions)', async () => {
+    const { body } = await getJson<{
+      rows: { display_name: string; books: { editions: { isbn: string }[] }[] }[];
+    }>('/authors?embed=books.editions');
+    const ada = body.rows.find((r) => r.display_name === 'Ada Lovelace')!;
+    expect(ada.books[0].editions[0].isbn).toBe('978-0-00-000000-1');
+  });
+
   it('reflects embeddable relations in the OpenAPI document', async () => {
     const { body } = await getJson<{
       paths: Record<string, { get?: { parameters?: { name: string }[] } }>;

@@ -249,7 +249,13 @@ describe('embed in read queries', () => {
     col('display_name', 'text'),
   ]);
   const embedAuthors: EmbedNode[] = [
-    { relation: relation('author_id', 'authors'), target: authorsTarget, key: 'authors', children: [] },
+    {
+      kind: 'to-one',
+      relation: relation('author_id', 'authors'),
+      target: authorsTarget,
+      key: 'authors',
+      children: [],
+    },
   ];
 
   it('splices an embed fragment into the list SELECT and keeps limit/offset params', () => {
@@ -281,5 +287,28 @@ describe('embed in read queries', () => {
     expect(q.text).toContain('AS "authors"');
     expect(q.text).toContain('WHERE "id" = $1 LIMIT 1');
     expect(q.values).toEqual(['abc']);
+  });
+
+  it('splices a reverse to-many aggregate capped at MAX_EMBED_CHILDREN', () => {
+    const childBooks = tableResource('books', [
+      col('id', 'uuid', { isPrimaryKey: true }),
+      col('author_id', 'uuid'),
+    ]);
+    const embedBooks: EmbedNode[] = [
+      {
+        kind: 'to-many',
+        relation: relation('author_id', 'authors'),
+        target: childBooks,
+        key: 'books',
+        children: [],
+      },
+    ];
+    const q = buildListQuery(authors, { embed: embedBooks });
+    expect(q.dataText).toContain('jsonb_agg');
+    expect(q.dataText).toContain('AS "books"');
+    expect(q.dataText).toContain('LIMIT 100');
+    // outer pagination stays parameterized
+    expect(q.dataText).toContain('LIMIT $1 OFFSET $2');
+    expect(q.countText).toBe('SELECT count(*) AS total FROM "public"."authors"');
   });
 });

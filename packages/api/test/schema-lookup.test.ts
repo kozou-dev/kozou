@@ -52,4 +52,22 @@ describe('buildResourceLookup', () => {
     expect(lookup.resolve('books')?.relations[0].field).toBe('author_id');
     expect(lookup.resolve('vw_active')?.relations).toEqual([]);
   });
+
+  it('indexes reverse relations (children that reference a parent)', () => {
+    const lookup = buildResourceLookup(
+      schemaOf([
+        { name: 'authors', columns: [col('id', 'uuid')], relations: [] },
+        {
+          name: 'books',
+          columns: [col('id', 'uuid'), col('author_id', 'uuid')],
+          relations: [relation('author_id', 'authors')],
+        },
+      ]),
+    );
+    const rev = lookup.reverse('public.authors');
+    expect(rev).toHaveLength(1);
+    expect(rev[0].child.name).toBe('books');
+    expect(rev[0].relation.field).toBe('author_id');
+    expect(lookup.reverse('public.books')).toEqual([]);
+  });
 });

@@ -20,11 +20,20 @@ export type Resource = {
   relations: RelationContext[];
 };
 
+/** A child resource holding a foreign key that points back at some parent —
+ *  the basis for reverse (one-to-many) embedding. */
+export type ReverseRelation = {
+  child: Resource;
+  relation: RelationContext;
+};
+
 export type ResourceLookup = {
   /** Resolve by bare name (when unambiguous) or by `schema.name`. */
   resolve(name: string): Resource | undefined;
   /** Qualified names of every addressable resource, sorted. */
   list(): string[];
+  /** Children whose foreign key references the given qualified resource. */
+  reverse(qualifiedName: string): ReverseRelation[];
 };
 
 export function buildResourceLookup(schema: SchemaContext): ResourceLookup {
@@ -69,8 +78,20 @@ export function buildResourceLookup(schema: SchemaContext): ResourceLookup {
 
   const sortedNames = resources.map((r) => r.qualifiedName).sort();
 
+  // Reverse index: parent qualifiedName -> children that reference it.
+  const reverseIndex = new Map<string, ReverseRelation[]>();
+  for (const r of resources) {
+    for (const rel of r.relations) {
+      const parentKey = `${rel.references.schema}.${rel.references.table}`;
+      const list = reverseIndex.get(parentKey);
+      if (list) list.push({ child: r, relation: rel });
+      else reverseIndex.set(parentKey, [{ child: r, relation: rel }]);
+    }
+  }
+
   return {
     resolve: (name) => byKey.get(name),
     list: () => sortedNames,
+    reverse: (qualifiedName) => reverseIndex.get(qualifiedName) ?? [],
   };
 }

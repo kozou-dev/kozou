@@ -24,6 +24,7 @@ export {
   type Resource,
   type ResourceKind,
   type ResourceLookup,
+  type ReverseRelation,
 } from './schema-lookup.js';
 
 export {
@@ -55,6 +56,8 @@ export {
   buildEmbedSelectFragment,
   MAX_EMBED_DEPTH,
   MAX_EMBED_RELATIONS,
+  MAX_EMBED_CHILDREN,
+  type EmbedKind,
   type EmbedNode,
   type EmbedSpec,
 } from './embed.js';
