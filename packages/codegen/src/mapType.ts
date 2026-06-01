@@ -36,15 +36,36 @@ export function mapDataType(dataType: string): string {
   }
 
   // Drop every `(...)` modifier ("numeric(12,2)", "timestamp(6) with time
-  // zone", "character varying(255)") and normalize whitespace + case.
-  const normalized = base
-    .replace(/\([^)]*\)/g, '')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .toLowerCase();
+  // zone", "character varying(255)") and normalize whitespace + case. The
+  // paren stripping is a linear scan rather than a regex so it stays O(n) on
+  // adversarial input like a long run of "(" (no super-linear backtracking).
+  const normalized = collapseWhitespace(stripParenGroups(base)).toLowerCase();
 
   const element = SCALAR_TYPE_MAP[normalized] ?? 'unknown';
   return isArray ? `${element}[]` : element;
+}
+
+/** Remove every parenthesized group (including nested ones), keeping only the
+ *  characters at paren-depth zero. Single linear pass, no backtracking. */
+function stripParenGroups(input: string): string {
+  let out = '';
+  let depth = 0;
+  for (const ch of input) {
+    if (ch === '(') {
+      depth += 1;
+    } else if (ch === ')') {
+      if (depth > 0) depth -= 1;
+    } else if (depth === 0) {
+      out += ch;
+    }
+  }
+  return out;
+}
+
+/** Collapse runs of whitespace to a single space and trim. `\s+` (unanchored,
+ *  single repetition) matches linearly, so this is not a ReDoS vector. */
+function collapseWhitespace(input: string): string {
+  return input.replace(/\s+/g, ' ').trim();
 }
 
 const SCALAR_TYPE_MAP: Record<string, string> = {

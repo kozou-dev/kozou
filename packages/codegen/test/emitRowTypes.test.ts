@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { randomBytes } from 'node:crypto';
 import ts from 'typescript';
 import { buildSchemaContext, type RawColumn, type RawIntrospection } from '@kozou/core';
-import { emitRowTypes } from '../src/index.js';
+import { emitRowTypes, mapDataType } from '../src/index.js';
 
 function col(name: string, dataType: string, overrides: Partial<RawColumn> = {}): RawColumn {
   return {
@@ -187,6 +187,23 @@ describe('emitRowTypes', () => {
       ts.flattenDiagnosticMessageText(d.messageText, '\n'),
     );
     expect(messages).toEqual([]);
+  });
+});
+
+describe('mapDataType', () => {
+  it('strips precision/length modifiers and resolves the base type', () => {
+    expect(mapDataType('numeric(12,2)')).toBe('string');
+    expect(mapDataType('character varying(255)')).toBe('string');
+    expect(mapDataType('timestamp(6) with time zone')).toBe('string');
+    expect(mapDataType('integer[]')).toBe('number[]');
+  });
+
+  it('handles unbalanced parentheses linearly without hanging', () => {
+    // A long run of "(" used to back-track quadratically against a regex; the
+    // linear scanner returns promptly and falls back to `unknown`.
+    expect(mapDataType('('.repeat(50_000))).toBe('unknown');
+    expect(mapDataType('text)')).toBe('string'); // stray ")" at depth 0
+    expect(mapDataType('text((')).toBe('string'); // unmatched "("
   });
 });
 
