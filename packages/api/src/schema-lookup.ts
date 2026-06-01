@@ -3,7 +3,7 @@
 // the allowlist: only resources that exist in the schema are addressable,
 // and only their declared columns can be filtered / sorted on.
 
-import type { SchemaContext, ColumnContext } from '@kozou/core';
+import type { SchemaContext, ColumnContext, RelationContext } from '@kozou/core';
 
 export type ResourceKind = 'table' | 'view';
 
@@ -16,6 +16,8 @@ export type Resource = {
   columns: ColumnContext[];
   /** Primary-key columns. Empty for views and PK-less tables. */
   primaryKey: string[];
+  /** Outgoing forward (to-one / one-to-one) relations. Empty for views. */
+  relations: RelationContext[];
 };
 
 export type ResourceLookup = {
@@ -36,6 +38,7 @@ export function buildResourceLookup(schema: SchemaContext): ResourceLookup {
       qualifiedName: t.qualifiedName,
       columns: t.columns,
       primaryKey: t.primaryKey,
+      relations: t.relations ?? [],
     });
   }
   for (const v of schema.views) {
@@ -46,6 +49,7 @@ export function buildResourceLookup(schema: SchemaContext): ResourceLookup {
       qualifiedName: v.qualifiedName,
       columns: v.columns,
       primaryKey: [],
+      relations: [],
     });
   }
 

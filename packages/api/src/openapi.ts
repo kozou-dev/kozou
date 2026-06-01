@@ -12,6 +12,7 @@ import type {
   TableContext,
   ViewContext,
   ColumnContext,
+  RelationContext,
   WidgetType,
 } from '@kozou/core';
 
@@ -43,12 +44,15 @@ export function buildOpenApiDocument(
   const segmentFor = (r: ResourceLike): string =>
     nameCounts.get(r.name) === 1 ? r.name : r.qualifiedName;
 
+  const knownQNames = new Set(resources.map(({ resource }) => resource.qualifiedName));
+
   const paths: JsonObject = {};
   const schemas: JsonObject = {};
 
   for (const { resource, writable } of resources) {
     const ref = `#/components/schemas/${resource.qualifiedName}`;
-    schemas[resource.qualifiedName] = resourceSchema(resource);
+    const relations: RelationContext[] = 'relations' in resource ? resource.relations : [];
+    schemas[resource.qualifiedName] = resourceSchema(resource, relations, knownQNames);
     Object.assign(paths, resourcePaths(resource, segmentFor(resource), ref, writable));
   }
 
@@ -65,7 +69,11 @@ export function buildOpenApiDocument(
   };
 }
 
-function resourceSchema(resource: ResourceLike): JsonObject {
+function resourceSchema(
+  resource: ResourceLike,
+  relations: RelationContext[],
+  knownQNames: Set<string>,
+): JsonObject {
   const properties: JsonObject = {};
   const required: string[] = [];
   for (const column of resource.columns) {
@@ -77,7 +85,22 @@ function resourceSchema(resource: ResourceLike): JsonObject {
   if (resource.description) schema.description = resource.description;
   if (resource.aiDescription) schema['x-kozou-ai'] = resource.aiDescription;
   if (required.length > 0) schema.required = required;
+
+  // Embeddable forward relations, as a hint for clients building `?embed=`.
+  // Only relations whose target is itself an exposed resource are listed.
+  const embeds = embedHints(relations, knownQNames);
+  if (embeds.length > 0) schema['x-kozou-embeds'] = embeds;
   return schema;
+}
+
+function embedHints(relations: RelationContext[], knownQNames: Set<string>): JsonObject[] {
+  const hints: JsonObject[] = [];
+  for (const r of relations) {
+    const qn = `${r.references.schema}.${r.references.table}`;
+    if (!knownQNames.has(qn)) continue;
+    hints.push({ field: r.field, key: r.references.table, target: `#/components/schemas/${qn}` });
+  }
+  return hints;
 }
 
 function columnSchema(column: ColumnContext): JsonObject {
@@ -135,7 +158,7 @@ function resourcePaths(
     get: {
       summary: `List ${label}`,
       description: resource.description ?? undefined,
-      parameters: listParameters(),
+      parameters: [...listParameters(), embedParam()],
       responses: {
         '200': jsonResponse(`A page of ${label}.`, listResultSchema(rowRef)),
       },
@@ -162,7 +185,7 @@ function resourcePaths(
   const item: JsonObject = {
     get: {
       summary: `Fetch a ${label} row by id`,
-      parameters: [idParam],
+      parameters: [idParam, embedParam()],
       responses: {
         '200': jsonResponse('The row.', rowRef),
         '404': errorResponse('No such row.'),
@@ -206,6 +229,14 @@ function listParameters(): JsonObject[] {
 
 function queryParam(name: string, schema: JsonObject, description: string): JsonObject {
   return { name, in: 'query', required: false, schema, description };
+}
+
+function embedParam(): JsonObject {
+  return queryParam(
+    'embed',
+    { type: 'string' },
+    'Comma-separated forward to-one relations to inline as nested objects; dot for depth (e.g. "author,editions.books.authors"). Each segment is a foreign-key column name or its referenced table name.',
+  );
 }
 
 function listResultSchema(rowRef: JsonObject): JsonObject {

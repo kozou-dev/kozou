@@ -14,6 +14,7 @@ import {
   type ListQueryParams,
   type SortDirection,
 } from './query-builder.js';
+import { parseEmbedParam, resolveEmbedSpec } from './embed.js';
 
 /** Minimal query interface satisfied by both `pg.Pool` and `pg.Client`. */
 export type Queryable = {
@@ -46,7 +47,7 @@ export type ApiHttpResult = {
   body: unknown;
 };
 
-const RESERVED_PARAMS = new Set(['page', 'pageSize', 'sort', 'search']);
+const RESERVED_PARAMS = new Set(['page', 'pageSize', 'sort', 'search', 'embed']);
 
 export async function handleApiRequest(
   deps: ApiHandlerDeps,
@@ -97,7 +98,7 @@ async function route(deps: ApiHandlerDeps, req: ApiHttpRequest): Promise<ApiHttp
   if (segments.length === 2) {
     const resource = resolveOr404(deps.lookup, segments[0]);
     const id = segments[1];
-    if (m === 'GET') return getResource(deps, resource, id);
+    if (m === 'GET') return getResource(deps, resource, id, query);
     if (m === 'PATCH') return updateResource(deps, resource, id, req.body);
     if (m === 'DELETE') return deleteResource(deps, resource, id);
     throw methodNotAllowed(`Method ${method} not allowed on an item; use GET, PATCH, or DELETE.`);
@@ -112,7 +113,8 @@ async function listResource(
   query: URLSearchParams,
 ): Promise<ApiHttpResult> {
   const params = parseListParams(query);
-  const built = buildListQuery(resource, params);
+  const embed = resolveEmbedSpec(resource, parseEmbedParam(query.get('embed')), deps.lookup);
+  const built = buildListQuery(resource, { ...params, embed });
 
   const [dataResult, countResult] = await Promise.all([
     deps.db.query<Record<string, unknown>>(built.dataText, built.dataValues),
@@ -130,8 +132,10 @@ async function getResource(
   deps: ApiHandlerDeps,
   resource: Resource,
   id: string,
+  query: URLSearchParams,
 ): Promise<ApiHttpResult> {
-  const built = buildGetQuery(resource, id);
+  const embed = resolveEmbedSpec(resource, parseEmbedParam(query.get('embed')), deps.lookup);
+  const built = buildGetQuery(resource, id, embed);
   const result = await deps.db.query<Record<string, unknown>>(built.text, built.values);
   if (result.rows.length === 0) {
     return notFoundResult(resource, id);

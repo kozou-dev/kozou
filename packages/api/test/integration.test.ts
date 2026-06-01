@@ -25,6 +25,7 @@ describe('@kozou/api integration (generic fixture)', () => {
   let server: ApiServerHandle;
   let base: string;
   let adaId: string;
+  let inventoryItemId: string;
 
   beforeAll(async () => {
     db = await setupDatabase();
@@ -40,6 +41,22 @@ describe('@kozou/api integration (generic fixture)', () => {
         ['Ada Lovelace', 'Alan Turing', 'Grace Hopper'],
       );
       adaId = inserted.rows.find((r) => r.display_name === 'Ada Lovelace')!.id;
+
+      // A forward to-one chain rooted at Ada: author <- book <- edition <- item.
+      const book = await client.query<{ id: string }>(
+        `INSERT INTO books (author_id, title) VALUES ($1, $2) RETURNING id`,
+        [adaId, 'Notes on the Analytical Engine'],
+      );
+      const edition = await client.query<{ id: string }>(
+        `INSERT INTO editions (book_id, isbn) VALUES ($1, $2) RETURNING id`,
+        [book.rows[0].id, '978-0-00-000000-1'],
+      );
+      const item = await client.query<{ id: string }>(
+        `INSERT INTO inventory_items (edition_id, status, selling_price, visibility)
+         VALUES ($1, 'for_sale', 42.50, 'public') RETURNING id`,
+        [edition.rows[0].id],
+      );
+      inventoryItemId = item.rows[0].id;
     } finally {
       await client.end();
     }
@@ -228,6 +245,74 @@ describe('@kozou/api integration (generic fixture)', () => {
     expect(inv.properties.selling_price['x-kozou-widget']).toBe('currency');
 
     expect(body.components.schemas[`${db.schema}.authors`].description).toBe('Authors of books.');
+  });
+
+  it('embeds a forward to-one relation as a nested object (?embed=authors)', async () => {
+    const { status, body } = await getJson<{
+      rows: { author_id: string; authors: { display_name: string } | null }[];
+    }>('/books?embed=authors');
+    expect(status).toBe(200);
+    expect(body.rows).toHaveLength(1);
+    expect(body.rows[0].authors?.display_name).toBe('Ada Lovelace');
+    // the raw foreign-key scalar is preserved alongside the nested object
+    expect(typeof body.rows[0].author_id).toBe('string');
+  });
+
+  it('embeds a multi-level chain (?embed=editions.books.authors)', async () => {
+    const { status, body } = await getJson<{
+      rows: { id: string; editions: { id: string; books: { authors: { display_name: string } } } }[];
+    }>('/inventory_items?embed=editions.books.authors');
+    expect(status).toBe(200);
+    expect(body.rows[0].editions.books.authors.display_name).toBe('Ada Lovelace');
+    // nested uuid survives the JSON round-trip as a string
+    expect(typeof body.rows[0].editions.id).toBe('string');
+  });
+
+  it('embeds on the fetch-by-id route', async () => {
+    const { status, body } = await getJson<{
+      id: string;
+      editions: { books: { authors: { display_name: string } } };
+    }>(`/inventory_items/${inventoryItemId}?embed=editions.books.authors`);
+    expect(status).toBe(200);
+    expect(body.editions.books.authors.display_name).toBe('Ada Lovelace');
+  });
+
+  it('combines embed with pagination', async () => {
+    const { status, body } = await getJson<{
+      rows: { authors: { display_name: string } }[];
+      pageSize: number;
+    }>('/books?embed=authors&pageSize=10');
+    expect(status).toBe(200);
+    expect(body.pageSize).toBe(10);
+    expect(body.rows[0].authors.display_name).toBe('Ada Lovelace');
+  });
+
+  it('leaves the row count unaffected by embedding', async () => {
+    const plain = await getJson<ListBody>('/books');
+    const embedded = await getJson<ListBody>('/books?embed=authors');
+    expect(embedded.body.total).toBe(plain.body.total);
+  });
+
+  it('rejects an unknown embed relation with 400', async () => {
+    const { status } = await getJson('/books?embed=bogus');
+    expect(status).toBe(400);
+  });
+
+  it('rejects embedding on a VIEW with 400', async () => {
+    const { status } = await getJson('/vw_inventory_for_sale?embed=anything');
+    expect(status).toBe(400);
+  });
+
+  it('reflects embeddable relations in the OpenAPI document', async () => {
+    const { body } = await getJson<{
+      paths: Record<string, { get?: { parameters?: { name: string }[] } }>;
+      components: {
+        schemas: Record<string, { 'x-kozou-embeds'?: { field: string; target: string }[] }>;
+      };
+    }>('/openapi.json');
+    const booksEmbeds = body.components.schemas[`${db.schema}.books`]['x-kozou-embeds'];
+    expect(booksEmbeds?.some((e) => e.field === 'author_id')).toBe(true);
+    expect(body.paths['/books'].get?.parameters?.some((p) => p.name === 'embed')).toBe(true);
   });
 
   it('returns 404 for an unknown resource', async () => {

@@ -1,7 +1,14 @@
 // Shared test scaffolding. Not a test file (no *.test.ts suffix), so
 // vitest does not run it as a suite; it is only typechecked + imported.
 
-import type { ColumnContext, WidgetType, SchemaContext, TableContext, ViewContext } from '@kozou/core';
+import type {
+  ColumnContext,
+  WidgetType,
+  SchemaContext,
+  TableContext,
+  ViewContext,
+  RelationContext,
+} from '@kozou/core';
 import type { Resource } from '../src/schema-lookup.js';
 import type { Queryable } from '../src/handler.js';
 
@@ -27,17 +34,47 @@ export function col(
   };
 }
 
+export function relation(
+  field: string,
+  table: string,
+  opts: { schema?: string; column?: string; cardinality?: 'many-to-one' | 'one-to-one' } = {},
+): RelationContext {
+  return {
+    field,
+    references: { schema: opts.schema ?? 'public', table, column: opts.column ?? 'id' },
+    cardinality: opts.cardinality ?? 'many-to-one',
+    meaning: null,
+  };
+}
+
 export function tableResource(
   name: string,
   columns: ColumnContext[],
   primaryKey: string[] = ['id'],
   schema = 'public',
+  relations: RelationContext[] = [],
 ): Resource {
-  return { kind: 'table', schema, name, qualifiedName: `${schema}.${name}`, columns, primaryKey };
+  return {
+    kind: 'table',
+    schema,
+    name,
+    qualifiedName: `${schema}.${name}`,
+    columns,
+    primaryKey,
+    relations,
+  };
 }
 
 export function viewResource(name: string, columns: ColumnContext[], schema = 'public'): Resource {
-  return { kind: 'view', schema, name, qualifiedName: `${schema}.${name}`, columns, primaryKey: [] };
+  return {
+    kind: 'view',
+    schema,
+    name,
+    qualifiedName: `${schema}.${name}`,
+    columns,
+    primaryKey: [],
+    relations: [],
+  };
 }
 
 type TableSpec = {
@@ -48,6 +85,7 @@ type TableSpec = {
   label?: string;
   description?: string | null;
   aiDescription?: string | null;
+  relations?: RelationContext[];
 };
 type ViewSpec = Omit<TableSpec, 'primaryKey'>;
 
@@ -66,6 +104,7 @@ export function schemaOf(tables: TableSpec[], views: ViewSpec[] = []): SchemaCon
           aiDescription: t.aiDescription ?? null,
           columns: t.columns ?? [],
           primaryKey: t.primaryKey ?? ['id'],
+          relations: t.relations ?? [],
         }) as unknown as TableContext,
     ),
     views: views.map(

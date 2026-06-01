@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { buildResourceLookup } from '../src/schema-lookup.js';
-import { schemaOf, col } from './helpers.js';
+import { schemaOf, col, relation } from './helpers.js';
 
 describe('buildResourceLookup', () => {
   it('resolves tables and views by bare name and by qualified name', () => {
@@ -33,5 +33,23 @@ describe('buildResourceLookup', () => {
     expect(lookup.resolve('items')).toBeUndefined();
     expect(lookup.resolve('s1.items')?.schema).toBe('s1');
     expect(lookup.resolve('s2.items')?.schema).toBe('s2');
+  });
+
+  it('carries forward relations on tables and none on views', () => {
+    const lookup = buildResourceLookup(
+      schemaOf(
+        [
+          {
+            name: 'books',
+            columns: [col('id', 'uuid'), col('author_id', 'uuid')],
+            relations: [relation('author_id', 'authors')],
+          },
+        ],
+        [{ name: 'vw_active', columns: [col('id', 'uuid')] }],
+      ),
+    );
+    expect(lookup.resolve('books')?.relations).toHaveLength(1);
+    expect(lookup.resolve('books')?.relations[0].field).toBe('author_id');
+    expect(lookup.resolve('vw_active')?.relations).toEqual([]);
   });
 });

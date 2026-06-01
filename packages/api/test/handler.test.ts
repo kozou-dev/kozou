@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { handleApiRequest, parseListParams, type ApiHandlerDeps } from '../src/handler.js';
 import type { ResourceLookup, Resource } from '../src/schema-lookup.js';
-import { col, tableResource, viewResource, recordingDb, type RowSet } from './helpers.js';
+import { col, tableResource, viewResource, recordingDb, relation, type RowSet } from './helpers.js';
 
 function lookupOf(resources: Resource[]): ResourceLookup {
   const m = new Map<string, Resource>();
@@ -256,5 +256,75 @@ describe('parseListParams', () => {
     const p = parseListParams(new URLSearchParams(''));
     expect(p.filters).toBeUndefined();
     expect(p.sort).toBeUndefined();
+  });
+});
+
+describe('handleApiRequest — embed', () => {
+  const authorsT = tableResource('authors', [
+    col('id', 'uuid', { isPrimaryKey: true }),
+    col('display_name', 'text'),
+  ]);
+  const booksT = tableResource(
+    'books',
+    [col('id', 'uuid', { isPrimaryKey: true }), col('author_id', 'uuid'), col('title', 'text')],
+    ['id'],
+    'public',
+    [relation('author_id', 'authors')],
+  );
+  const embedLookup = lookupOf([authorsT, booksT]);
+
+  function embedDeps(respond: (text: string, values: unknown[]) => RowSet): {
+    deps: ApiHandlerDeps;
+    calls: { text: string; values: unknown[] }[];
+  } {
+    const { db, calls } = recordingDb(respond);
+    return { deps: { db, lookup: embedLookup }, calls };
+  }
+
+  it('GET /books?embed=authors issues a data query carrying the embed fragment', async () => {
+    const { deps, calls } = embedDeps((text) =>
+      text.includes('count(*)')
+        ? { rows: [{ total: 1 }], rowCount: 1 }
+        : {
+            rows: [
+              { id: 'b1', author_id: 'a1', title: 'T', authors: { id: 'a1', display_name: 'Ada' } },
+            ],
+            rowCount: 1,
+          },
+    );
+    const r = await handleApiRequest(deps, reqOf('GET', '/books', 'embed=authors'));
+    expect(r.status).toBe(200);
+    expect(calls[0].text).toContain('AS "authors"');
+    expect(calls).toHaveLength(2);
+    expect((r.body as { rows: { authors: unknown }[] }).rows[0].authors).toEqual({
+      id: 'a1',
+      display_name: 'Ada',
+    });
+  });
+
+  it('does not treat embed as a column-equality filter', async () => {
+    const { deps, calls } = embedDeps((text) =>
+      text.includes('count(*)') ? { rows: [{ total: 0 }], rowCount: 1 } : { rows: [], rowCount: 0 },
+    );
+    await handleApiRequest(deps, reqOf('GET', '/books', 'embed=authors'));
+    expect(calls[0].text).not.toContain('"embed"');
+  });
+
+  it('GET /books/<id>?embed=authors splices the fragment into the by-id query', async () => {
+    const { deps, calls } = embedDeps(() => ({
+      rows: [{ id: 'b1', authors: { id: 'a1' } }],
+      rowCount: 1,
+    }));
+    const r = await handleApiRequest(deps, reqOf('GET', '/books/b1', 'embed=authors'));
+    expect(r.status).toBe(200);
+    expect(calls[0].text).toContain('AS "authors"');
+    expect(calls[0].text).toContain('WHERE "id" = $1');
+  });
+
+  it('returns 400 for an unknown embed relation', async () => {
+    const { deps } = embedDeps(() => ({ rows: [], rowCount: 0 }));
+    const r = await handleApiRequest(deps, reqOf('GET', '/books', 'embed=nope'));
+    expect(r.status).toBe(400);
+    expect(errorOf(r.body).code).toBe('bad_request');
   });
 });
