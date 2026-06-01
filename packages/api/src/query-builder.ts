@@ -10,7 +10,11 @@
 //     value is interpolated into the SQL string.
 
 import { badRequest } from './errors.js';
+import { quoteIdent, qualified } from './ident.js';
+import { buildEmbedSelectFragment, type EmbedNode } from './embed.js';
 import type { Resource } from './schema-lookup.js';
+
+export { quoteIdent };
 
 export const DEFAULT_PAGE_SIZE = 50;
 export const MAX_PAGE_SIZE = 200;
@@ -24,6 +28,8 @@ export type ListQueryParams = {
   search?: string;
   /** Column-equality filters. Keys must be declared columns of the resource. */
   filters?: Record<string, string>;
+  /** Resolved forward to-one relations to inline as nested JSON objects. */
+  embed?: EmbedNode[];
 };
 
 export type BuiltListQuery = {
@@ -40,15 +46,6 @@ export type BuiltGetQuery = {
   text: string;
   values: unknown[];
 };
-
-/** Quote an identifier for safe inlining (defense in depth on top of the allowlist). */
-export function quoteIdent(id: string): string {
-  return '"' + id.replace(/"/g, '""') + '"';
-}
-
-function qualified(resource: Resource): string {
-  return `${quoteIdent(resource.schema)}.${quoteIdent(resource.name)}`;
-}
 
 function selectColumns(resource: Resource): string {
   if (resource.columns.length === 0) return '*';
@@ -132,11 +129,17 @@ export function buildListQuery(
 
   const cols = selectColumns(resource);
   const table = qualified(resource);
+  // Embeds append correlated subqueries to the SELECT list only — they add no
+  // bound parameters, so the $n numbering above is unaffected.
+  const embedSql =
+    params.embed && params.embed.length > 0
+      ? buildEmbedSelectFragment(params.embed, table, { n: 0 })
+      : '';
 
   const dataValues = [...whereValues, pageSize, offset];
   const limitParam = `$${whereValues.length + 1}`;
   const offsetParam = `$${whereValues.length + 2}`;
-  const dataText = `SELECT ${cols} FROM ${table}${whereClause}${orderClause} LIMIT ${limitParam} OFFSET ${offsetParam}`;
+  const dataText = `SELECT ${cols}${embedSql} FROM ${table}${whereClause}${orderClause} LIMIT ${limitParam} OFFSET ${offsetParam}`;
 
   const countText = `SELECT count(*) AS total FROM ${table}${whereClause}`;
 
@@ -150,14 +153,21 @@ export function buildListQuery(
   };
 }
 
-export function buildGetQuery(resource: Resource, id: string): BuiltGetQuery {
+export function buildGetQuery(
+  resource: Resource,
+  id: string,
+  embed?: EmbedNode[],
+): BuiltGetQuery {
   if (resource.primaryKey.length !== 1) {
     throw badRequest(
       `Resource "${resource.name}" does not have a single-column primary key; fetch-by-id is unavailable.`,
     );
   }
   const pk = resource.primaryKey[0];
-  const text = `SELECT ${selectColumns(resource)} FROM ${qualified(resource)} WHERE ${quoteIdent(pk)} = $1 LIMIT 1`;
+  const table = qualified(resource);
+  const embedSql =
+    embed && embed.length > 0 ? buildEmbedSelectFragment(embed, table, { n: 0 }) : '';
+  const text = `SELECT ${selectColumns(resource)}${embedSql} FROM ${table} WHERE ${quoteIdent(pk)} = $1 LIMIT 1`;
   return { text, values: [id] };
 }
 

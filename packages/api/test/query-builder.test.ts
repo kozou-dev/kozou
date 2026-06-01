@@ -13,7 +13,8 @@ import {
   MAX_RELATION_LIMIT,
 } from '../src/query-builder.js';
 import { KozouApiError } from '../src/errors.js';
-import { col, tableResource, viewResource } from './helpers.js';
+import type { EmbedNode } from '../src/embed.js';
+import { col, tableResource, viewResource, relation } from './helpers.js';
 
 const authors = tableResource('authors', [
   col('id', 'uuid', { isPrimaryKey: true, nullable: false }),
@@ -234,5 +235,51 @@ describe('buildRelationOptionsQuery', () => {
     expect(() =>
       buildRelationOptionsQuery(authors, { labelField: 'bogus', searchFields: [] }),
     ).toThrow(/Unknown column "bogus"/);
+  });
+});
+
+describe('embed in read queries', () => {
+  const books = tableResource('books', [
+    col('id', 'uuid', { isPrimaryKey: true }),
+    col('author_id', 'uuid'),
+    col('title', 'text'),
+  ]);
+  const authorsTarget = tableResource('authors', [
+    col('id', 'uuid', { isPrimaryKey: true }),
+    col('display_name', 'text'),
+  ]);
+  const embedAuthors: EmbedNode[] = [
+    { relation: relation('author_id', 'authors'), target: authorsTarget, key: 'authors', children: [] },
+  ];
+
+  it('splices an embed fragment into the list SELECT and keeps limit/offset params', () => {
+    const q = buildListQuery(books, { embed: embedAuthors });
+    expect(q.dataText).toContain('AS "authors"');
+    expect(q.dataText).toContain('to_jsonb(e1)');
+    expect(q.dataText).toContain('LIMIT $1 OFFSET $2');
+  });
+
+  it('keeps $n numbering when embed combines with a filter and search', () => {
+    const q = buildListQuery(books, {
+      filters: { author_id: 'x' },
+      search: 'foo',
+      embed: embedAuthors,
+    });
+    expect(q.dataText).toContain('WHERE "author_id" = $1 AND ("title" ILIKE $2)');
+    expect(q.dataText).toContain('LIMIT $3 OFFSET $4');
+    expect(q.dataValues).toEqual(['x', '%foo%', DEFAULT_PAGE_SIZE, 0]);
+  });
+
+  it('leaves the count query untouched when embedding', () => {
+    const q = buildListQuery(books, { embed: embedAuthors });
+    expect(q.countText).toBe('SELECT count(*) AS total FROM "public"."books"');
+    expect(q.countValues).toEqual([]);
+  });
+
+  it('splices an embed fragment into the by-id query and keeps $1', () => {
+    const q = buildGetQuery(books, 'abc', embedAuthors);
+    expect(q.text).toContain('AS "authors"');
+    expect(q.text).toContain('WHERE "id" = $1 LIMIT 1');
+    expect(q.values).toEqual(['abc']);
   });
 });

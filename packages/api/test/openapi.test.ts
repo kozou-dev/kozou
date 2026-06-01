@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import type { WidgetType } from '@kozou/core';
 import { buildOpenApiDocument } from '../src/openapi.js';
-import { schemaOf, col } from './helpers.js';
+import { schemaOf, col, relation } from './helpers.js';
 
 type SchemaObj = {
   type?: unknown;
@@ -137,5 +137,43 @@ describe('buildOpenApiDocument', () => {
     expect(props.c_image_url).toMatchObject({ type: 'string', format: 'uri' });
     expect(props.c_json.type).toBe('object');
     expect(props.c_relation_select.type).toBe('string');
+  });
+
+  it('exposes an embed query parameter on the collection and item GETs', () => {
+    const doc = build();
+    const names = (get: unknown): string[] =>
+      ((get as { parameters?: { name: string }[] }).parameters ?? []).map((p) => p.name);
+    expect(names(doc.paths['/authors'].get)).toContain('embed');
+    expect(names(doc.paths['/authors/{id}'].get)).toContain('embed');
+  });
+
+  it('lists embeddable relations as x-kozou-embeds with a $ref target', () => {
+    const schema = schemaOf([
+      {
+        name: 'books',
+        description: 'Books.',
+        columns: [col('id', 'uuid', { isPrimaryKey: true }), col('author_id', 'uuid')],
+        primaryKey: ['id'],
+        relations: [relation('author_id', 'authors')],
+      },
+      {
+        name: 'authors',
+        columns: [col('id', 'uuid', { isPrimaryKey: true }), col('display_name', 'text')],
+        primaryKey: ['id'],
+      },
+    ]);
+    const books = (buildOpenApiDocument(schema) as unknown as Doc).components.schemas[
+      'public.books'
+    ] as SchemaObj & { 'x-kozou-embeds'?: unknown[] };
+    expect(books['x-kozou-embeds']).toEqual([
+      { field: 'author_id', key: 'authors', target: '#/components/schemas/public.authors' },
+    ]);
+  });
+
+  it('omits x-kozou-embeds when a resource has no exposed relation targets', () => {
+    const vw = build().components.schemas['public.vw_active'] as SchemaObj & {
+      'x-kozou-embeds'?: unknown;
+    };
+    expect(vw['x-kozou-embeds']).toBeUndefined();
   });
 });

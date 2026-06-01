@@ -49,4 +49,14 @@ export {
 
 export { buildOpenApiDocument, type OpenApiOptions } from './openapi.js';
 
+export {
+  parseEmbedParam,
+  resolveEmbedSpec,
+  buildEmbedSelectFragment,
+  MAX_EMBED_DEPTH,
+  MAX_EMBED_RELATIONS,
+  type EmbedNode,
+  type EmbedSpec,
+} from './embed.js';
+
 export { KozouApiError, type ApiErrorBody } from './errors.js';
