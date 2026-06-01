@@ -164,6 +164,37 @@ describe('authenticate — role resolution', () => {
   });
 });
 
+describe('authenticate — anonymous role', () => {
+  it('assumes anonRole with empty claims when the header is absent', async () => {
+    const a = createAuthenticator(hs({ anonRole: 'web_anon' }));
+    const ctx = await a.authenticate(undefined);
+    expect(ctx.role).toBe('web_anon');
+    expect(ctx.claims).toEqual({});
+  });
+
+  it('still rejects an absent header with 401 when no anonRole is set', async () => {
+    const a = createAuthenticator(hs());
+    await expectError(() => a.authenticate(undefined), 401, /unauthorized/);
+  });
+
+  it('does not downgrade a malformed header to anonymous (401)', async () => {
+    const a = createAuthenticator(hs({ anonRole: 'web_anon' }));
+    await expectError(() => a.authenticate('Basic abc'), 401, /unauthorized/);
+    await expectError(() => a.authenticate('Bearer '), 401, /unauthorized/);
+  });
+
+  it('does not downgrade an invalid token to anonymous (401)', async () => {
+    const a = createAuthenticator(hs({ anonRole: 'web_anon' }));
+    await expectError(() => a.authenticate('Bearer not-a-jwt'), 401, /unauthorized/);
+  });
+
+  it('does not apply allowedRoles to the anonymous role', async () => {
+    const a = createAuthenticator(hs({ anonRole: 'web_anon', allowedRoles: ['app_reader'] }));
+    const ctx = await a.authenticate(undefined);
+    expect(ctx.role).toBe('web_anon');
+  });
+});
+
 describe('signServiceToken', () => {
   it('mints a token the matching authenticator accepts, carrying the role', async () => {
     const token = await signServiceToken({ secret: SECRET, role: 'app_admin' });

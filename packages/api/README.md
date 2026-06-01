@@ -64,12 +64,18 @@ policies** decide what each request can read and write. Kozou authenticates
 and switches role; it does not generate policies. A missing or invalid token
 gets `401`; a token whose role is not permitted gets `403`.
 
+Set `auth.anonRole` to allow **anonymous access**: a request that carries no
+`Authorization` header runs under that role (with empty claims) so your RLS
+policies decide what an anonymous caller sees, instead of a `401`. Only a
+fully absent header is anonymous — a present but invalid/expired token is
+still `401`, never silently downgraded. The login role must be `GRANT`ed
+membership in the anonymous role.
+
 For a trusted same-host caller that has no end user to obtain a token from
 (the bundled Admin UI under `kozou dev`), `signServiceToken` mints an HS256
 token claiming a given role, signed with the same secret the server verifies.
 
-Not yet covered (follow-ups): an anonymous role for unauthenticated access,
-and fetching verification keys from a remote JWKS URL.
+Not yet covered (follow-up): fetching verification keys from a remote JWKS URL.
 
 ## Safety
 

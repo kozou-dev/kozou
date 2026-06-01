@@ -125,6 +125,7 @@ auth:
   roleClaim: role                      # claim naming the DB role (default: role)
   allowedRoles: [app_reader, app_admin] # only these roles may be assumed
   defaultRole: app_reader              # role when the token omits roleClaim
+  anonRole: web_anon                   # role for requests with no token (else 401)
   ui:
     role: app_admin                    # role the bundled Admin UI runs as (HS256)
     # token: ${KOZOU_ADAPTER_TOKEN}    # RS256 / external IdP: supply a token instead
@@ -133,11 +134,13 @@ auth:
 With no `auth:` block, the section is built instead from
 `KOZOU_JWT_SECRET` / `KOZOU_JWT_PUBLIC_KEY` / `KOZOU_JWT_ALGORITHMS` /
 `KOZOU_JWT_ISSUER` / `KOZOU_JWT_AUDIENCE` / `KOZOU_JWT_ROLE_CLAIM` /
-`KOZOU_JWT_ALLOWED_ROLES` / `KOZOU_JWT_DEFAULT_ROLE` / `KOZOU_UI_ROLE` /
-`KOZOU_ADAPTER_TOKEN` (algorithms and roles are comma-separated). A
-missing or invalid token gets `401`; a role outside `allowedRoles` gets
-`403`. The login role of `database.url` must be `GRANT`ed membership in
-every allowed role.
+`KOZOU_JWT_ALLOWED_ROLES` / `KOZOU_JWT_DEFAULT_ROLE` / `KOZOU_JWT_ANON_ROLE` /
+`KOZOU_UI_ROLE` / `KOZOU_ADAPTER_TOKEN` (algorithms and roles are
+comma-separated). A role outside `allowedRoles` gets `403`. A request with
+no token gets `401` unless `anonRole` is set, in which case it runs under
+that role and your RLS policies decide what it sees (a present but invalid
+token is always `401`). The login role of `database.url` must be `GRANT`ed
+membership in every allowed role, and in `anonRole` when set.
 
 #### The bundled Admin UI
 

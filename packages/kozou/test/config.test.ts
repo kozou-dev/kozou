@@ -316,6 +316,34 @@ auth:
     expect(config.auth?.jwt.secret).toBe('a${NOT_EXPANDED}b');
   });
 
+  it('parses auth.anonRole from the config file', async () => {
+    const dir = await makeTempDir();
+    const file = await writeYaml(
+      dir,
+      `database:
+  url: postgres://u:p@h:5432/db
+auth:
+  jwt:
+    secret: shhh
+  anonRole: web_anon
+`,
+    );
+    const config = await loadConfig({ path: file, env: {} });
+    expect(config.auth?.anonRole).toBe('web_anon');
+  });
+
+  it('builds auth.anonRole from KOZOU_JWT_ANON_ROLE env', async () => {
+    const config = await loadConfig({
+      skipFile: true,
+      env: {
+        DATABASE_URL: 'postgres://u:p@h:5432/db',
+        KOZOU_JWT_SECRET: 'env-secret',
+        KOZOU_JWT_ANON_ROLE: 'web_anon',
+      },
+    });
+    expect(config.auth?.anonRole).toBe('web_anon');
+  });
+
   it('parses an auth.ui section from the config file', async () => {
     const dir = await makeTempDir();
     const file = await writeYaml(
