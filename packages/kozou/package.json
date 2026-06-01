@@ -39,7 +39,8 @@
     "prepublishOnly": "pnpm run build",
     "test": "vitest run --coverage",
     "test:e2e": "playwright test",
-    "test:e2e:api": "playwright test --config playwright.kozou-api.config.ts"
+    "test:e2e:api": "playwright test --config playwright.kozou-api.config.ts",
+    "test:e2e:api:auth": "playwright test --config playwright.kozou-api-auth.config.ts"
   },
   "dependencies": {
     "@kozou/core": "workspace:*",

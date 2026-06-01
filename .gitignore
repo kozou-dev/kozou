@@ -27,8 +27,10 @@ coverage/
 # Playwright (svelte-ui e2e suites)
 playwright-report/
 playwright-report-api/
+playwright-report-api-auth/
 test-results/
 test-results-api/
+test-results-api-auth/
 .playwright-cache/
 
 # IDE / editor
