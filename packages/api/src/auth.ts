@@ -52,8 +52,6 @@ export type Authenticator = {
   authenticate(authorizationHeader: string | undefined): Promise<AuthContext>;
 };
 
-const BEARER = /^Bearer[ ]+(.+)$/i;
-
 /** Validate config (throws a plain Error at startup on misconfiguration),
  *  import the key once, and return a verifier closure. */
 export function createAuthenticator(config: AuthConfig): Authenticator {
@@ -105,10 +103,14 @@ export function createAuthenticator(config: AuthConfig): Authenticator {
 }
 
 function extractBearer(header: string | undefined): string | undefined {
+  // Linear parse (no regex) to avoid backtracking on adversarial input:
+  // split on the first space into "<scheme> <token>".
   if (header === undefined) return undefined;
-  const match = BEARER.exec(header.trim());
-  if (match === null) return undefined;
-  const token = match[1].trim();
+  const trimmed = header.trim();
+  const space = trimmed.indexOf(' ');
+  if (space === -1) return undefined;
+  if (trimmed.slice(0, space).toLowerCase() !== 'bearer') return undefined;
+  const token = trimmed.slice(space + 1).trim();
   return token.length > 0 ? token : undefined;
 }
 

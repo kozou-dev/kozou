@@ -192,8 +192,11 @@ function respondError(res: ServerResponse, err: unknown): void {
     respondJson(res, err.status, errorBody(err.code, err.message));
     return;
   }
-  const message = err instanceof Error ? err.message : String(err);
-  respondJson(res, 500, errorBody('internal', message));
+  // Never expose internal error detail (which can carry stack or database
+  // information) to the client: log it server-side, return a generic message.
+  const detail = err instanceof Error ? err.message : String(err);
+  process.stderr.write(`[@kozou/api] request failed: ${detail}\n`);
+  respondJson(res, 500, errorBody('internal', 'Internal server error.'));
 }
 
 async function readJsonBody(req: IncomingMessage): Promise<unknown> {
