@@ -78,12 +78,33 @@ const databaseSchema = z.object({
   schemas: z.array(z.string().min(1)).default(['public']),
 });
 
+// Opt-in JWT auth for the in-house @kozou/api backend (`kozou dev --adapter
+// api`). Absent -> the API stays unauthenticated and loopback-only. The
+// "exactly one of secret / publicKey" rule is enforced by @kozou/api at
+// server start, so it is intentionally not duplicated here.
+const jwtAuthSchema = z.object({
+  secret: z.string().min(1).optional(),
+  publicKey: z.string().min(1).optional(),
+  algorithms: z.array(z.enum(['HS256', 'RS256'])).optional(),
+  issuer: z.string().min(1).optional(),
+  audience: z.union([z.string().min(1), z.array(z.string().min(1))]).optional(),
+});
+
+const authSchema = z.object({
+  jwt: jwtAuthSchema,
+  roleClaim: z.string().min(1).optional(),
+  allowedRoles: z.array(z.string().min(1)).optional(),
+  defaultRole: z.string().min(1).optional(),
+  claimsGuc: z.string().min(1).optional(),
+});
+
 const configSchema = z.object({
   database: databaseSchema,
   server: serverSchema,
   adapter: adapterSchema,
   uiHints: uiHintsSchema,
   cache: cacheSchema,
+  auth: authSchema.optional(),
 });
 
 export type KozouConfig = z.infer<typeof configSchema>;
@@ -176,6 +197,44 @@ function injectDatabaseUrlFromEnv(raw: unknown, env: NodeJS.ProcessEnv): unknown
   return obj;
 }
 
+function splitList(value: string | undefined): string[] | undefined {
+  if (value === undefined) return undefined;
+  const items = value
+    .split(',')
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+  return items.length > 0 ? items : undefined;
+}
+
+// Build the optional `auth` section from KOZOU_JWT_* env vars when the config
+// file did not declare one. Runs AFTER ${VAR} expansion so an env-provided
+// secret / key is taken verbatim and is never re-scanned for placeholders.
+function injectAuthFromEnv(raw: unknown, env: NodeJS.ProcessEnv): unknown {
+  if (raw === null || typeof raw !== 'object') return raw;
+  const obj = raw as Record<string, unknown>;
+  if (obj.auth !== undefined) return obj; // an explicit config section wins
+
+  const secret = env.KOZOU_JWT_SECRET;
+  const publicKey = env.KOZOU_JWT_PUBLIC_KEY;
+  if (!secret && !publicKey) return obj; // no auth env -> stay unauthenticated
+
+  const jwt: Record<string, unknown> = {};
+  if (secret) jwt.secret = secret;
+  if (publicKey) jwt.publicKey = publicKey;
+  const algorithms = splitList(env.KOZOU_JWT_ALGORITHMS);
+  if (algorithms) jwt.algorithms = algorithms;
+  if (env.KOZOU_JWT_ISSUER) jwt.issuer = env.KOZOU_JWT_ISSUER;
+  if (env.KOZOU_JWT_AUDIENCE) jwt.audience = env.KOZOU_JWT_AUDIENCE;
+
+  const auth: Record<string, unknown> = { jwt };
+  if (env.KOZOU_JWT_ROLE_CLAIM) auth.roleClaim = env.KOZOU_JWT_ROLE_CLAIM;
+  const allowedRoles = splitList(env.KOZOU_JWT_ALLOWED_ROLES);
+  if (allowedRoles) auth.allowedRoles = allowedRoles;
+  if (env.KOZOU_JWT_DEFAULT_ROLE) auth.defaultRole = env.KOZOU_JWT_DEFAULT_ROLE;
+  if (env.KOZOU_JWT_CLAIMS_GUC) auth.claimsGuc = env.KOZOU_JWT_CLAIMS_GUC;
+  return { ...obj, auth };
+}
+
 export async function loadConfig(opts: LoadConfigOptions = {}): Promise<KozouConfig> {
   const env = opts.env ?? process.env;
   const requestedPath = opts.path ?? DEFAULT_CONFIG_PATH;
@@ -203,9 +262,11 @@ export async function loadConfig(opts: LoadConfigOptions = {}): Promise<KozouCon
   // Fall back to DATABASE_URL env if database.url is not set in the file.
   const withDbDefault = injectDatabaseUrlFromEnv(raw, env);
   const expanded = expandEnvVars(withDbDefault, env);
+  // Build `auth` from KOZOU_JWT_* env after expansion (env secrets verbatim).
+  const withAuth = injectAuthFromEnv(expanded, env);
 
   try {
-    return configSchema.parse(expanded);
+    return configSchema.parse(withAuth);
   } catch (err) {
     if (err instanceof z.ZodError) {
       throw new KozouConfigError(
