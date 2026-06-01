@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import { SignJWT, generateKeyPair, exportSPKI } from 'jose';
+import { createServer } from 'node:http';
+import type { AddressInfo } from 'node:net';
+import { SignJWT, generateKeyPair, exportSPKI, exportJWK } from 'jose';
 import { createAuthenticator, signServiceToken, type AuthConfig } from '../src/auth.js';
 import { KozouApiError } from '../src/errors.js';
 
@@ -45,6 +47,16 @@ describe('createAuthenticator — config validation', () => {
   });
   it('throws when neither secret nor publicKey is set', () => {
     expect(() => createAuthenticator({ jwt: {} })).toThrow(/exactly one/);
+  });
+  it('throws when secret and jwksUri are both set', () => {
+    expect(() =>
+      createAuthenticator({ jwt: { secret: 's', jwksUri: 'https://idp.example/jwks' } }),
+    ).toThrow(/exactly one/);
+  });
+  it('accepts jwksUri as the sole key source', () => {
+    expect(() =>
+      createAuthenticator({ jwt: { jwksUri: 'https://idp.example/jwks' } }),
+    ).not.toThrow();
   });
   it('defaults roleClaim and claimsGuc', () => {
     const a = createAuthenticator(hs());
@@ -123,6 +135,66 @@ describe('authenticate — RS256 (static public key)', () => {
     const a = createAuthenticator({ jwt: { publicKey: spki } });
     const token = await sign({ role: 'app_reader' }, { alg: 'RS256', key: other.privateKey });
     await expectError(() => a.authenticate(`Bearer ${token}`), 401);
+  });
+});
+
+describe('authenticate — remote JWKS', () => {
+  // Serve a JWKS over loopback so the createRemoteJWKSet path is exercised
+  // end to end without an external network.
+  async function withJwksServer(
+    jwks: unknown,
+    run: (jwksUri: string) => Promise<void>,
+  ): Promise<void> {
+    const server = createServer((_req, res) => {
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify(jwks));
+    });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const { port } = server.address() as AddressInfo;
+    try {
+      await run(`http://127.0.0.1:${port}/.well-known/jwks.json`);
+    } finally {
+      await new Promise<void>((resolve, reject) =>
+        server.close((err) => (err ? reject(err) : resolve())),
+      );
+    }
+  }
+
+  async function rsJwk(): Promise<{ jwk: Record<string, unknown>; privateKey: CryptoKey }> {
+    const { publicKey, privateKey } = await generateKeyPair('RS256');
+    const jwk = (await exportJWK(publicKey)) as Record<string, unknown>;
+    jwk.kid = 'test-key';
+    jwk.alg = 'RS256';
+    jwk.use = 'sig';
+    return { jwk, privateKey };
+  }
+
+  it('verifies a token against the published JWKS', async () => {
+    const { jwk, privateKey } = await rsJwk();
+    await withJwksServer({ keys: [jwk] }, async (jwksUri) => {
+      const a = createAuthenticator({ jwt: { jwksUri } });
+      const token = await new SignJWT({ role: 'app_reader' })
+        .setProtectedHeader({ alg: 'RS256', kid: 'test-key' })
+        .setIssuedAt()
+        .setExpirationTime('5m')
+        .sign(privateKey);
+      const ctx = await a.authenticate(`Bearer ${token}`);
+      expect(ctx.role).toBe('app_reader');
+    });
+  });
+
+  it('rejects a token whose kid is absent from the JWKS (401)', async () => {
+    const { jwk } = await rsJwk();
+    const other = await generateKeyPair('RS256');
+    await withJwksServer({ keys: [jwk] }, async (jwksUri) => {
+      const a = createAuthenticator({ jwt: { jwksUri } });
+      const token = await new SignJWT({ role: 'app_reader' })
+        .setProtectedHeader({ alg: 'RS256', kid: 'other-key' })
+        .setIssuedAt()
+        .setExpirationTime('5m')
+        .sign(other.privateKey);
+      await expectError(() => a.authenticate(`Bearer ${token}`), 401, /unauthorized/);
+    });
   });
 });
 
