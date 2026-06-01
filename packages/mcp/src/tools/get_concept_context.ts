@@ -21,6 +21,7 @@ export function getConceptContext(
     label: concept.label,
     description: concept.description,
     aiNotes: concept.aiNotes,
+    policies: concept.policies ?? [],
     preferredQuerySource: `FROM ${concept.name}`,
     joinSuggestions: concept.joinSuggestions.map((j) => ({
       table: j.table,

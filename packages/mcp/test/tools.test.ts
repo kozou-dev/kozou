@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import pkg from 'pg';
+import { buildSchemaContext, type RawIntrospection } from '@kozou/core';
 import {
   setupDatabase,
   type DatabaseHandle,
@@ -214,5 +215,116 @@ describe('MCP tools (generic English fixture, Kozou v0.1 spec §13.2)', () => {
 
     const concept = getConceptContext({ name: 'vw_inventory_for_sale' }, ctx);
     expect(concept.aiNotes.some((n) => /start from this VIEW/i.test(n))).toBe(true);
+  });
+});
+
+describe('MCP tools: @policy is surfaced to the AI agent (no DB)', () => {
+  // buildSchemaContext is pure, so this needs no container. `@policy:` tags
+  // are advisory business rules for the agent (never enforced by kozou — hard
+  // access control is the schema author's Postgres row-level security). These
+  // tests prove the tags flow through to the tool output, including the
+  // empty-array case for an object that carries none.
+  const raw: RawIntrospection = {
+    serverVersion: '16.2',
+    introspectedAt: '2026-01-01T00:00:00.000Z',
+    schemas: ['public'],
+    enums: [],
+    functions: [],
+    tables: [
+      {
+        schema: 'public',
+        name: 'orders',
+        comment: 'Order records.\n@policy: status may not change in production',
+        primaryKey: ['id'],
+        foreignKeys: [],
+        checks: [],
+        indexes: [],
+        rowCountEstimate: null,
+        columns: [
+          {
+            name: 'id',
+            dataType: 'uuid',
+            udtName: 'uuid',
+            nullable: false,
+            defaultExpr: null,
+            comment: null,
+            position: 1,
+          },
+          {
+            name: 'status',
+            dataType: 'text',
+            udtName: 'text',
+            nullable: false,
+            defaultExpr: null,
+            comment: 'Order status.\n@policy: only support may set it to refunded',
+            position: 2,
+          },
+        ],
+      },
+    ],
+    views: [
+      {
+        schema: 'public',
+        name: 'vw_orders',
+        comment: 'Order listing.\n@policy: internal use only',
+        columns: [
+          {
+            name: 'id',
+            dataType: 'uuid',
+            udtName: 'uuid',
+            nullable: false,
+            defaultExpr: null,
+            comment: null,
+            position: 1,
+          },
+        ],
+        underlyingTables: [{ schema: 'public', name: 'orders' }],
+        definition: 'SELECT id FROM orders',
+      },
+    ],
+  };
+
+  it('describe_table surfaces table- and column-level @policy', async () => {
+    const ctx = await buildSchemaContext({ raw });
+    const r = describeTable({ qualifiedName: 'public.orders' }, ctx);
+    expect(r.policy).toEqual(['status may not change in production']);
+    expect(r.columns.find((c) => c.name === 'status')!.policy).toEqual([
+      'only support may set it to refunded',
+    ]);
+    // A column with no @policy: surfaces an empty array.
+    expect(r.columns.find((c) => c.name === 'id')!.policy).toEqual([]);
+  });
+
+  it('describe_view surfaces view-level @policy', async () => {
+    const ctx = await buildSchemaContext({ raw });
+    const r = describeView({ qualifiedName: 'public.vw_orders' }, ctx);
+    expect(r.policy).toEqual(['internal use only']);
+  });
+
+  it('get_concept_context surfaces the VIEW @policy as policies', async () => {
+    const ctx = await buildSchemaContext({ raw });
+    const r = getConceptContext({ name: 'vw_orders' }, ctx);
+    expect(r.policies).toEqual(['internal use only']);
+  });
+
+  it('tolerates a context built before the policy field existed', async () => {
+    const ctx = await buildSchemaContext({ raw });
+    // `policy` is optional on the context types, so a context produced by an
+    // older @kozou/core may omit it entirely. Strip it and confirm the tools
+    // fall back to empty arrays rather than emitting `undefined`.
+    type MaybePolicy = { policy?: string[]; policies?: string[] };
+    for (const t of ctx.tables) {
+      delete (t as MaybePolicy).policy;
+      for (const c of t.columns) delete (c as MaybePolicy).policy;
+    }
+    for (const v of ctx.views) {
+      delete (v as MaybePolicy).policy;
+      for (const c of v.columns) delete (c as MaybePolicy).policy;
+    }
+    for (const c of ctx.concepts) delete (c as MaybePolicy).policies;
+
+    expect(describeTable({ qualifiedName: 'public.orders' }, ctx).policy).toEqual([]);
+    expect(describeView({ qualifiedName: 'public.vw_orders' }, ctx).policy).toEqual([]);
+    expect(getConceptContext({ name: 'vw_orders' }, ctx).policies).toEqual([]);
   });
 });

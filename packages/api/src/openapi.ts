@@ -1,8 +1,13 @@
 // OpenAPI 3.1 document generation from a SchemaContext (Kozou v0.2 spec
 // §3.2). The differentiator over a generic auto-API is that COMMENT-derived
 // metadata is baked into the document: table/view/column descriptions, the
-// `@ai:` notes (as `x-kozou-ai`), CHECK / ENUM members (as `enum`), and the
-// resolved widget (as `x-kozou-widget`).
+// `@ai:` notes (as `x-kozou-ai`), `@policy:` rules (as `x-kozou-policy`),
+// CHECK / ENUM members (as `enum`), and the resolved widget (as
+// `x-kozou-widget`).
+//
+// `@policy:` rules are advisory metadata for AI agents and clients; they are
+// not enforced here. Hard access control is the schema author's Postgres
+// row-level security (see auth.ts).
 //
 // Pure function — no I/O. The server builds the document once at start and
 // serves it at `GET /openapi.json`.
@@ -98,6 +103,7 @@ function resourceSchema(
   const schema: JsonObject = { type: 'object', properties };
   if (resource.description) schema.description = resource.description;
   if (resource.aiDescription) schema['x-kozou-ai'] = resource.aiDescription;
+  if (resource.policy && resource.policy.length > 0) schema['x-kozou-policy'] = resource.policy;
   if (required.length > 0) schema.required = required;
 
   // Embeddable relations, as a hint for clients building `?embed=`: forward
@@ -150,6 +156,7 @@ function columnSchema(column: ColumnContext): JsonObject {
   }
   if (column.description) schema.description = column.description;
   if (column.aiDescription) schema['x-kozou-ai'] = column.aiDescription;
+  if (column.policy && column.policy.length > 0) schema['x-kozou-policy'] = column.policy;
   schema['x-kozou-widget'] = column.widget;
   return schema;
 }

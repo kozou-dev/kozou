@@ -28,6 +28,7 @@ export function describeTable(input: DescribeTableInput, ctx: SchemaContext): De
     defaultExpr: c.defaultExpr,
     description: c.description,
     aiDescription: c.aiDescription,
+    policy: c.policy ?? [],
     enumValues: c.enumValues,
     isForeignKey: c.isForeignKey,
     references: referencesByField.get(c.name) ?? null,
@@ -38,6 +39,7 @@ export function describeTable(input: DescribeTableInput, ctx: SchemaContext): De
     label: table.label,
     description: table.description,
     aiDescription: table.aiDescription,
+    policy: table.policy ?? [],
     primaryKey: table.primaryKey,
     columns,
     relations: table.relations.map((r) => ({

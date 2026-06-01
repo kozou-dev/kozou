@@ -11,6 +11,8 @@ const columnSchema = z.object({
   defaultExpr: z.string().nullable(),
   description: z.string().nullable(),
   aiDescription: z.string().nullable(),
+  /** `@policy:` lines — advisory business rules for the AI agent. */
+  policy: z.array(z.string()),
   enumValues: z.array(z.string()).nullable(),
   isForeignKey: z.boolean(),
   references: z
@@ -38,6 +40,8 @@ export const describeTableOutputSchema = z.object({
   label: z.string(),
   description: z.string().nullable(),
   aiDescription: z.string().nullable(),
+  /** `@policy:` lines on the table COMMENT — advisory, surfaced to the AI agent. */
+  policy: z.array(z.string()),
   primaryKey: z.array(z.string()),
   columns: z.array(columnSchema),
   relations: z.array(relationSchema),

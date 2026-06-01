@@ -319,6 +319,40 @@ describe('buildSchemaContext', () => {
     ]);
   });
 
+  it('threads @policy: into table / column / view / concept', async () => {
+    const table = makeTable('orders', {
+      comment: 'Order records.\n@policy: status may not change in production',
+      columns: [
+        makeCol('id', 'uuid'),
+        makeCol('status', 'text', {
+          comment: 'Order status.\n@policy: only support may set it to refunded',
+        }),
+      ],
+      primaryKey: ['id'],
+    });
+    const view: RawView = {
+      schema: 'public',
+      name: 'vw_orders',
+      comment: 'Order listing.\n@policy: internal use only',
+      columns: [makeCol('id', 'uuid')],
+      underlyingTables: [{ schema: 'public', name: 'orders' }],
+      definition: 'SELECT 1',
+    };
+    const raw = makeRaw({ tables: [table], views: [view] });
+    const ctx = await buildSchemaContext({ raw });
+
+    const t = ctx.tables[0]!;
+    expect(t.policy).toEqual(['status may not change in production']);
+    expect(t.columns.find((c) => c.name === 'status')!.policy).toEqual([
+      'only support may set it to refunded',
+    ]);
+    // A column with no @policy: gets an empty array, not undefined.
+    expect(t.columns.find((c) => c.name === 'id')!.policy).toEqual([]);
+
+    expect(ctx.views[0]!.policy).toEqual(['internal use only']);
+    expect(ctx.concepts[0]!.policies).toEqual(['internal use only']);
+  });
+
   it('VIEW.label / description / purpose extraction', async () => {
     const view: RawView = {
       schema: 'public',
