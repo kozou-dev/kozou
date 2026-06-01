@@ -20,6 +20,8 @@ export const getConceptContextOutputSchema = z.object({
   label: z.string(),
   description: z.string().nullable(),
   aiNotes: z.array(z.string()),
+  /** `@policy:` lines on the concept's VIEW COMMENT — advisory, surfaced to the AI agent. */
+  policies: z.array(z.string()),
   preferredQuerySource: z.string(),
   joinSuggestions: z.array(joinSuggestionSchema),
   relatedTables: z.array(z.string()),

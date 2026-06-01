@@ -11,6 +11,7 @@ type SchemaObj = {
   required?: string[];
   properties?: Record<string, SchemaObj>;
   'x-kozou-ai'?: string;
+  'x-kozou-policy'?: string[];
   'x-kozou-widget'?: string;
 };
 type Doc = {
@@ -26,10 +27,15 @@ function build(): Doc {
       {
         name: 'authors',
         description: 'Authors of books.',
+        policy: ['only owners may delete an author'],
         columns: [
           col('id', 'uuid', { isPrimaryKey: true, nullable: false }),
           col('display_name', 'text', { nullable: false, description: 'Display name.' }),
-          col('status', 'enum-select', { nullable: false, enumValues: ['a', 'b'] }),
+          col('status', 'enum-select', {
+            nullable: false,
+            enumValues: ['a', 'b'],
+            policy: ['only support may set it to b'],
+          }),
           col('bio', 'textarea', { nullable: true, aiDescription: 'free text' }),
           col('price', 'currency', { nullable: true }),
         ],
@@ -41,6 +47,7 @@ function build(): Doc {
         name: 'vw_active',
         description: 'Active authors.',
         aiDescription: 'start here for active authors',
+        policy: ['internal use only'],
         columns: [col('id', 'uuid'), col('label', 'text')],
       },
     ],
@@ -98,6 +105,19 @@ describe('buildOpenApiDocument', () => {
   it('carries the view @ai note as x-kozou-ai', () => {
     const vw = build().components.schemas['public.vw_active'];
     expect(vw['x-kozou-ai']).toBe('start here for active authors');
+  });
+
+  it('reflects @policy: rules as x-kozou-policy on tables, columns, and views', () => {
+    const doc = build();
+    const authors = doc.components.schemas['public.authors'];
+    expect(authors['x-kozou-policy']).toEqual(['only owners may delete an author']);
+    expect(authors.properties!.status['x-kozou-policy']).toEqual(['only support may set it to b']);
+    // A column with no @policy: carries no x-kozou-policy key.
+    expect(authors.properties!.display_name['x-kozou-policy']).toBeUndefined();
+
+    expect(doc.components.schemas['public.vw_active']['x-kozou-policy']).toEqual([
+      'internal use only',
+    ]);
   });
 
   it('wires list responses to the row component via $ref', () => {

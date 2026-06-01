@@ -27,10 +27,16 @@ export type TableContext = {
   qualifiedName: string;
   /** Order: UI Hints > first line of COMMENT > name */
   label: string;
-  /** Full COMMENT body (plain, with @ai/@widget/@policy tags stripped) */
+  /** Full COMMENT body (plain text; `@widget:`/`@example:` are lifted out,
+   *  while `@ai:`/`@policy:` lines are retained here for readability). */
   description: string | null;
   /** Lines from the COMMENT that start with `@ai:` */
   aiDescription: string | null;
+  /** `@policy:` lines from the COMMENT — advisory business rules surfaced to
+   *  AI agents (e.g. "status may not change in production"). Kozou does not
+   *  enforce these; hard access control is the schema author's Postgres
+   *  row-level security. Also retained inline in `description`. */
+  policy?: string[];
   primaryKey: string[];
   /** From UI Hints; otherwise a heuristic (Kozou v0.1 spec §6.5) */
   displayField: string | null;
@@ -50,6 +56,9 @@ export type ColumnContext = {
   label: string;
   description: string | null;
   aiDescription: string | null;
+  /** `@policy:` lines from the column COMMENT — advisory business rules
+   *  surfaced to AI agents, never enforced by kozou (see TableContext.policy). */
+  policy?: string[];
   /** Order: UI Hints > @widget: tag > heuristic (Kozou v0.1 spec §6.4) */
   widget: WidgetType;
   /** Values extracted from CHECK constraints, or PostgreSQL ENUM members */
@@ -94,6 +103,9 @@ export type ViewContext = {
   label: string;
   description: string | null;
   aiDescription: string | null;
+  /** `@policy:` lines from the view COMMENT — advisory, surfaced to AI agents
+   *  and never enforced by kozou (see TableContext.policy). */
+  policy?: string[];
   /** First paragraph of the COMMENT */
   purpose: string | null;
   columns: ColumnContext[];
@@ -121,6 +133,9 @@ export type ConceptContext = {
   joinSuggestions: { table: string; on: string }[];
   /** @ai: lines from the COMMENT */
   aiNotes: string[];
+  /** `@policy:` lines from the COMMENT — advisory business rules surfaced to
+   *  AI agents, never enforced by kozou (see TableContext.policy). */
+  policies?: string[];
   /** @example: blocks from the COMMENT (Kozou v0.1 spec §7.3.6). Each
    *  entry is `{ description, sql }`: the text on the `@example:`
    *  line and the indented continuation block. */

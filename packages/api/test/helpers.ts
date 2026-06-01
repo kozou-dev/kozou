@@ -85,6 +85,7 @@ type TableSpec = {
   label?: string;
   description?: string | null;
   aiDescription?: string | null;
+  policy?: string[];
   relations?: RelationContext[];
 };
 type ViewSpec = Omit<TableSpec, 'primaryKey'>;
@@ -102,6 +103,7 @@ export function schemaOf(tables: TableSpec[], views: ViewSpec[] = []): SchemaCon
           label: t.label ?? t.name,
           description: t.description ?? null,
           aiDescription: t.aiDescription ?? null,
+          policy: t.policy,
           columns: t.columns ?? [],
           primaryKey: t.primaryKey ?? ['id'],
           relations: t.relations ?? [],
@@ -116,6 +118,7 @@ export function schemaOf(tables: TableSpec[], views: ViewSpec[] = []): SchemaCon
           label: v.label ?? v.name,
           description: v.description ?? null,
           aiDescription: v.aiDescription ?? null,
+          policy: v.policy,
           columns: v.columns ?? [],
         }) as unknown as ViewContext,
     ),

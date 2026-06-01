@@ -16,6 +16,7 @@ export function describeView(input: DescribeViewInput, ctx: SchemaContext): Desc
     label: view.label,
     description: view.description,
     aiDescription: view.aiDescription,
+    policy: view.policy ?? [],
     columns: view.columns.map((c) => ({
       name: c.name,
       dataType: c.dataType,
@@ -23,6 +24,7 @@ export function describeView(input: DescribeViewInput, ctx: SchemaContext): Desc
       defaultExpr: c.defaultExpr,
       description: c.description,
       aiDescription: c.aiDescription,
+      policy: c.policy ?? [],
       enumValues: c.enumValues,
       isForeignKey: c.isForeignKey,
       references: null,

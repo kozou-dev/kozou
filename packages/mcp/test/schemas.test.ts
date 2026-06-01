@@ -66,6 +66,7 @@ describe('describe_table schemas', () => {
         label: 'A',
         description: null,
         aiDescription: null,
+        policy: [],
         primaryKey: ['id'],
         columns: [],
         relations: [],
@@ -80,6 +81,7 @@ describe('describe_table schemas', () => {
         label: 'A',
         description: 'desc',
         aiDescription: 'ai',
+        policy: ['status may not change in production'],
         primaryKey: ['id'],
         columns: [
           {
@@ -89,6 +91,7 @@ describe('describe_table schemas', () => {
             defaultExpr: null,
             description: null,
             aiDescription: null,
+            policy: [],
             enumValues: null,
             isForeignKey: false,
             references: null,
@@ -100,6 +103,7 @@ describe('describe_table schemas', () => {
             defaultExpr: null,
             description: 'parent',
             aiDescription: null,
+            policy: ['only support may reassign the parent'],
             enumValues: null,
             isForeignKey: true,
             references: { table: 'public.parents', column: 'id' },
@@ -158,11 +162,25 @@ describe('describe_view schemas', () => {
         label: 'V',
         description: null,
         aiDescription: null,
+        policy: [],
         columns: [],
         underlyingTables: ['public.a', 'public.b'],
         definition: 'SELECT 1',
       }),
     ).not.toThrow();
+  });
+  it('output: missing policy throws (field is required)', () => {
+    expect(() =>
+      describeViewOutputSchema.parse({
+        qualifiedName: 'public.v',
+        label: 'V',
+        description: null,
+        aiDescription: null,
+        columns: [],
+        underlyingTables: [],
+        definition: 'SELECT 1',
+      }),
+    ).toThrow();
   });
 });
 
@@ -210,6 +228,7 @@ describe('get_concept_context schemas', () => {
         label: 'X',
         description: 'desc',
         aiNotes: ['n1', 'n2'],
+        policies: ['internal use only'],
         preferredQuerySource: 'FROM vw_x',
         joinSuggestions: [
           { table: 'public.a', on: 'vw_x.a_id = a.id', purpose: 'p' },
@@ -226,6 +245,7 @@ describe('get_concept_context schemas', () => {
         label: 'X',
         description: null,
         aiNotes: [],
+        policies: [],
         preferredQuerySource: 'FROM x',
         joinSuggestions: [],
         relatedTables: [],
