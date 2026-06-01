@@ -38,3 +38,11 @@ export function badRequest(message: string): KozouApiError {
 export function methodNotAllowed(message: string): KozouApiError {
   return new KozouApiError(405, 'method_not_allowed', message);
 }
+
+export function unauthorized(message: string): KozouApiError {
+  return new KozouApiError(401, 'unauthorized', message);
+}
+
+export function forbidden(message: string): KozouApiError {
+  return new KozouApiError(403, 'forbidden', message);
+}

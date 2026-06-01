@@ -51,6 +51,9 @@ importers:
       '@kozou/core':
         specifier: workspace:*
         version: link:../core
+      jose:
+        specifier: ^6.2.3
+        version: 6.2.3
       pg:
         specifier: ^8.13.0
         version: 8.21.0

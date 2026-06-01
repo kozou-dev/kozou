@@ -40,6 +40,9 @@ export type ApiHttpRequest = {
   query: URLSearchParams;
   /** Parsed JSON request body (create / update). Undefined when absent. */
   body?: unknown;
+  /** Raw request headers (node lower-cases the keys). Used for auth; absent on
+   *  the zero-auth path. */
+  headers?: Record<string, string | string[] | undefined>;
 };
 
 export type ApiHttpResult = {

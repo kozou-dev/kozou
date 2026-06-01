@@ -33,6 +33,7 @@
   },
   "dependencies": {
     "@kozou/core": "workspace:*",
+    "jose": "^6.2.3",
     "pg": "^8.13.0"
   },
   "devDependencies": {
