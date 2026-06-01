@@ -166,7 +166,35 @@ describe('buildOpenApiDocument', () => {
       'public.books'
     ] as SchemaObj & { 'x-kozou-embeds'?: unknown[] };
     expect(books['x-kozou-embeds']).toEqual([
-      { field: 'author_id', key: 'authors', target: '#/components/schemas/public.authors' },
+      {
+        field: 'author_id',
+        key: 'authors',
+        target: '#/components/schemas/public.authors',
+        cardinality: 'to-one',
+      },
+    ]);
+  });
+
+  it('lists reverse (to-many) relations as x-kozou-embeds', () => {
+    const schema = schemaOf([
+      { name: 'authors', columns: [col('id', 'uuid', { isPrimaryKey: true })], primaryKey: ['id'] },
+      {
+        name: 'books',
+        columns: [col('id', 'uuid', { isPrimaryKey: true }), col('author_id', 'uuid')],
+        primaryKey: ['id'],
+        relations: [relation('author_id', 'authors')],
+      },
+    ]);
+    const authors = (buildOpenApiDocument(schema) as unknown as Doc).components.schemas[
+      'public.authors'
+    ] as SchemaObj & { 'x-kozou-embeds'?: unknown[] };
+    expect(authors['x-kozou-embeds']).toEqual([
+      {
+        field: 'author_id',
+        key: 'books',
+        target: '#/components/schemas/public.books',
+        cardinality: 'to-many',
+      },
     ]);
   });
 

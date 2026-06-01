@@ -46,13 +46,26 @@ export function buildOpenApiDocument(
 
   const knownQNames = new Set(resources.map(({ resource }) => resource.qualifiedName));
 
+  // Reverse index for one-to-many embed hints: parent qualifiedName -> children.
+  const reverseByParent = new Map<string, ReverseEntry[]>();
+  for (const t of schema.tables) {
+    for (const rel of t.relations ?? []) {
+      const parentQN = `${rel.references.schema}.${rel.references.table}`;
+      const entry: ReverseEntry = { childName: t.name, childQN: t.qualifiedName, field: rel.field };
+      const list = reverseByParent.get(parentQN);
+      if (list) list.push(entry);
+      else reverseByParent.set(parentQN, [entry]);
+    }
+  }
+
   const paths: JsonObject = {};
   const schemas: JsonObject = {};
 
   for (const { resource, writable } of resources) {
     const ref = `#/components/schemas/${resource.qualifiedName}`;
     const relations: RelationContext[] = 'relations' in resource ? resource.relations : [];
-    schemas[resource.qualifiedName] = resourceSchema(resource, relations, knownQNames);
+    const reverse = reverseByParent.get(resource.qualifiedName) ?? [];
+    schemas[resource.qualifiedName] = resourceSchema(resource, relations, reverse, knownQNames);
     Object.assign(paths, resourcePaths(resource, segmentFor(resource), ref, writable));
   }
 
@@ -72,6 +85,7 @@ export function buildOpenApiDocument(
 function resourceSchema(
   resource: ResourceLike,
   relations: RelationContext[],
+  reverse: ReverseEntry[],
   knownQNames: Set<string>,
 ): JsonObject {
   const properties: JsonObject = {};
@@ -86,19 +100,40 @@ function resourceSchema(
   if (resource.aiDescription) schema['x-kozou-ai'] = resource.aiDescription;
   if (required.length > 0) schema.required = required;
 
-  // Embeddable forward relations, as a hint for clients building `?embed=`.
-  // Only relations whose target is itself an exposed resource are listed.
-  const embeds = embedHints(relations, knownQNames);
+  // Embeddable relations, as a hint for clients building `?embed=`: forward
+  // (to-one) plus reverse (to-many). Only targets that are themselves exposed
+  // resources are listed.
+  const embeds = embedHints(relations, reverse, knownQNames);
   if (embeds.length > 0) schema['x-kozou-embeds'] = embeds;
   return schema;
 }
 
-function embedHints(relations: RelationContext[], knownQNames: Set<string>): JsonObject[] {
+type ReverseEntry = { childName: string; childQN: string; field: string };
+
+function embedHints(
+  forward: RelationContext[],
+  reverse: ReverseEntry[],
+  knownQNames: Set<string>,
+): JsonObject[] {
   const hints: JsonObject[] = [];
-  for (const r of relations) {
+  for (const r of forward) {
     const qn = `${r.references.schema}.${r.references.table}`;
     if (!knownQNames.has(qn)) continue;
-    hints.push({ field: r.field, key: r.references.table, target: `#/components/schemas/${qn}` });
+    hints.push({
+      field: r.field,
+      key: r.references.table,
+      target: `#/components/schemas/${qn}`,
+      cardinality: 'to-one',
+    });
+  }
+  for (const e of reverse) {
+    if (!knownQNames.has(e.childQN)) continue;
+    hints.push({
+      field: e.field,
+      key: e.childName,
+      target: `#/components/schemas/${e.childQN}`,
+      cardinality: 'to-many',
+    });
   }
   return hints;
 }

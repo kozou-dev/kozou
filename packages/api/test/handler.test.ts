@@ -1,15 +1,26 @@
 import { describe, it, expect } from 'vitest';
 import { handleApiRequest, parseListParams, type ApiHandlerDeps } from '../src/handler.js';
-import type { ResourceLookup, Resource } from '../src/schema-lookup.js';
+import type { ResourceLookup, Resource, ReverseRelation } from '../src/schema-lookup.js';
 import { col, tableResource, viewResource, recordingDb, relation, type RowSet } from './helpers.js';
 
 function lookupOf(resources: Resource[]): ResourceLookup {
   const m = new Map<string, Resource>();
+  const rev = new Map<string, ReverseRelation[]>();
   for (const r of resources) {
     m.set(r.name, r);
     m.set(r.qualifiedName, r);
+    for (const rel of r.relations) {
+      const qn = `${rel.references.schema}.${rel.references.table}`;
+      const list = rev.get(qn) ?? [];
+      list.push({ child: r, relation: rel });
+      rev.set(qn, list);
+    }
   }
-  return { resolve: (n) => m.get(n), list: () => resources.map((r) => r.qualifiedName).sort() };
+  return {
+    resolve: (n) => m.get(n),
+    list: () => resources.map((r) => r.qualifiedName).sort(),
+    reverse: (qn) => rev.get(qn) ?? [],
+  };
 }
 
 const authors = tableResource('authors', [
@@ -326,5 +337,18 @@ describe('handleApiRequest — embed', () => {
     const r = await handleApiRequest(deps, reqOf('GET', '/books', 'embed=nope'));
     expect(r.status).toBe(400);
     expect(errorOf(r.body).code).toBe('bad_request');
+  });
+
+  it('GET /authors?embed=books renders a reverse to-many aggregate', async () => {
+    const { deps, calls } = embedDeps((text) =>
+      text.includes('count(*)')
+        ? { rows: [{ total: 1 }], rowCount: 1 }
+        : { rows: [{ id: 'a1', display_name: 'Ada', books: [{ id: 'b1' }] }], rowCount: 1 },
+    );
+    const r = await handleApiRequest(deps, reqOf('GET', '/authors', 'embed=books'));
+    expect(r.status).toBe(200);
+    expect(calls[0].text).toContain('jsonb_agg');
+    expect(calls[0].text).toContain('AS "books"');
+    expect((r.body as { rows: { books: unknown[] }[] }).rows[0].books).toEqual([{ id: 'b1' }]);
   });
 });
