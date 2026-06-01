@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { SignJWT, generateKeyPair, exportSPKI } from 'jose';
-import { createAuthenticator, type AuthConfig } from '../src/auth.js';
+import { createAuthenticator, signServiceToken, type AuthConfig } from '../src/auth.js';
 import { KozouApiError } from '../src/errors.js';
 
 const SECRET = 'test-secret-do-not-use';
@@ -161,5 +161,59 @@ describe('authenticate — role resolution', () => {
     const a = createAuthenticator(hs({ roleClaim: 'kozou_role' }));
     const ctx = await a.authenticate(`Bearer ${await sign({ kozou_role: 'custom' })}`);
     expect(ctx.role).toBe('custom');
+  });
+});
+
+describe('signServiceToken', () => {
+  it('mints a token the matching authenticator accepts, carrying the role', async () => {
+    const token = await signServiceToken({ secret: SECRET, role: 'app_admin' });
+    const ctx = await createAuthenticator(hs()).authenticate(`Bearer ${token}`);
+    expect(ctx.role).toBe('app_admin');
+  });
+
+  it('omits the role claim when no role is given, falling back to defaultRole', async () => {
+    const token = await signServiceToken({ secret: SECRET });
+    const a = createAuthenticator(hs({ defaultRole: 'app_reader' }));
+    const ctx = await a.authenticate(`Bearer ${token}`);
+    expect(ctx.role).toBe('app_reader');
+    expect(ctx.claims.role).toBeUndefined();
+  });
+
+  it('writes the role under a custom roleClaim', async () => {
+    const token = await signServiceToken({
+      secret: SECRET,
+      roleClaim: 'kozou_role',
+      role: 'custom',
+    });
+    const a = createAuthenticator(hs({ roleClaim: 'kozou_role' }));
+    expect((await a.authenticate(`Bearer ${token}`)).role).toBe('custom');
+  });
+
+  it('sets issuer / audience so an authenticator that checks them accepts it', async () => {
+    const token = await signServiceToken({
+      secret: SECRET,
+      role: 'app_reader',
+      issuer: 'kozou',
+      audience: 'kozou-api',
+    });
+    const a = createAuthenticator(hs({ jwt: { secret: SECRET, issuer: 'kozou', audience: 'kozou-api' } }));
+    expect((await a.authenticate(`Bearer ${token}`)).role).toBe('app_reader');
+  });
+
+  it('is rejected by an authenticator expecting a different issuer', async () => {
+    const token = await signServiceToken({ secret: SECRET, role: 'app_reader' });
+    const a = createAuthenticator(hs({ jwt: { secret: SECRET, issuer: 'kozou' } }));
+    await expectError(() => a.authenticate(`Bearer ${token}`), 401, /unauthorized/);
+  });
+
+  it('does not set an expiry (no exp claim)', async () => {
+    const token = await signServiceToken({ secret: SECRET, role: 'app_reader' });
+    const ctx = await createAuthenticator(hs()).authenticate(`Bearer ${token}`);
+    expect(ctx.claims.exp).toBeUndefined();
+    expect(ctx.claims.iat).toBeTypeOf('number');
+  });
+
+  it('throws on an empty secret', async () => {
+    await expect(signServiceToken({ secret: '', role: 'r' })).rejects.toThrow(/secret/);
   });
 });

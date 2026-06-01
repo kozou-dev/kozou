@@ -315,4 +315,45 @@ auth:
     });
     expect(config.auth?.jwt.secret).toBe('a${NOT_EXPANDED}b');
   });
+
+  it('parses an auth.ui section from the config file', async () => {
+    const dir = await makeTempDir();
+    const file = await writeYaml(
+      dir,
+      `database:
+  url: postgres://u:p@h:5432/db
+auth:
+  jwt:
+    secret: shhh
+  ui:
+    role: app_admin
+    token: ready-made-token
+`,
+    );
+    const config = await loadConfig({ path: file, env: {} });
+    expect(config.auth?.ui?.role).toBe('app_admin');
+    expect(config.auth?.ui?.token).toBe('ready-made-token');
+  });
+
+  it('builds auth.ui from KOZOU_UI_ROLE / KOZOU_ADAPTER_TOKEN env', async () => {
+    const config = await loadConfig({
+      skipFile: true,
+      env: {
+        DATABASE_URL: 'postgres://u:p@h:5432/db',
+        KOZOU_JWT_SECRET: 'env-secret',
+        KOZOU_UI_ROLE: 'app_admin',
+        KOZOU_ADAPTER_TOKEN: 'env-token',
+      },
+    });
+    expect(config.auth?.ui?.role).toBe('app_admin');
+    expect(config.auth?.ui?.token).toBe('env-token');
+  });
+
+  it('omits auth.ui when no UI role / token env is present', async () => {
+    const config = await loadConfig({
+      skipFile: true,
+      env: { DATABASE_URL: 'postgres://u:p@h:5432/db', KOZOU_JWT_SECRET: 'env-secret' },
+    });
+    expect(config.auth?.ui).toBeUndefined();
+  });
 });

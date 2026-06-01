@@ -64,6 +64,10 @@ policies** decide what each request can read and write. Kozou authenticates
 and switches role; it does not generate policies. A missing or invalid token
 gets `401`; a token whose role is not permitted gets `403`.
 
+For a trusted same-host caller that has no end user to obtain a token from
+(the bundled Admin UI under `kozou dev`), `signServiceToken` mints an HS256
+token claiming a given role, signed with the same secret the server verifies.
+
 Not yet covered (follow-ups): an anonymous role for unauthenticated access,
 and fetching verification keys from a remote JWKS URL.
 

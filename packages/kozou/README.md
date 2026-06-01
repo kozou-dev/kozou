@@ -123,21 +123,32 @@ auth:
     issuer: my-issuer                  # optional
     audience: my-api                   # optional
   roleClaim: role                      # claim naming the DB role (default: role)
-  allowedRoles: [app_reader]           # only these roles may be assumed
+  allowedRoles: [app_reader, app_admin] # only these roles may be assumed
   defaultRole: app_reader              # role when the token omits roleClaim
+  ui:
+    role: app_admin                    # role the bundled Admin UI runs as (HS256)
+    # token: ${KOZOU_ADAPTER_TOKEN}    # RS256 / external IdP: supply a token instead
 ```
 
 With no `auth:` block, the section is built instead from
 `KOZOU_JWT_SECRET` / `KOZOU_JWT_PUBLIC_KEY` / `KOZOU_JWT_ALGORITHMS` /
 `KOZOU_JWT_ISSUER` / `KOZOU_JWT_AUDIENCE` / `KOZOU_JWT_ROLE_CLAIM` /
-`KOZOU_JWT_ALLOWED_ROLES` / `KOZOU_JWT_DEFAULT_ROLE` (algorithms and roles
-are comma-separated). A missing or invalid token gets `401`; a role
-outside `allowedRoles` gets `403`. The login role of `database.url` must
-be `GRANT`ed membership in every allowed role.
+`KOZOU_JWT_ALLOWED_ROLES` / `KOZOU_JWT_DEFAULT_ROLE` / `KOZOU_UI_ROLE` /
+`KOZOU_ADAPTER_TOKEN` (algorithms and roles are comma-separated). A
+missing or invalid token gets `401`; a role outside `allowedRoles` gets
+`403`. The login role of `database.url` must be `GRANT`ed membership in
+every allowed role.
 
-> The bundled Admin UI does not yet attach a token, so enabling `auth`
-> secures `@kozou/api` for **direct API clients** — the bundled UI in the
-> same `kozou dev` will be rejected until UI token wiring lands.
+#### The bundled Admin UI
+
+The Admin UI calls `@kozou/api` server-side, so when `auth` is on it must
+send a token too. Under **HS256** the CLI mints one for the UI claiming
+`auth.ui.role` (or, if unset, no role — the API then applies `defaultRole`);
+set `auth.ui.role` to the role the console should run as. Under **RS256**
+or an external identity provider the CLI cannot mint, so supply a
+ready-made token via `auth.ui.token` (or the `KOZOU_ADAPTER_TOKEN` env);
+without it the UI is rejected with `401` and the CLI logs how to fix it.
+The minted role must satisfy `allowedRoles` or the UI gets `403`.
 
 ## License
 

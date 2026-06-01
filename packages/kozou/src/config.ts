@@ -90,12 +90,22 @@ const jwtAuthSchema = z.object({
   audience: z.union([z.string().min(1), z.array(z.string().min(1))]).optional(),
 });
 
+// How the bundled Admin UI authenticates to @kozou/api when auth is on. This
+// is a CLI-only concern (not part of @kozou/api's AuthConfig): under HS256 the
+// CLI mints a token claiming `role`; for RS256 / an external IdP it cannot
+// mint, so `token` carries a ready-made one through to the UI instead.
+const authUiSchema = z.object({
+  role: z.string().min(1).optional(),
+  token: z.string().min(1).optional(),
+});
+
 const authSchema = z.object({
   jwt: jwtAuthSchema,
   roleClaim: z.string().min(1).optional(),
   allowedRoles: z.array(z.string().min(1)).optional(),
   defaultRole: z.string().min(1).optional(),
   claimsGuc: z.string().min(1).optional(),
+  ui: authUiSchema.optional(),
 });
 
 const configSchema = z.object({
@@ -232,6 +242,14 @@ function injectAuthFromEnv(raw: unknown, env: NodeJS.ProcessEnv): unknown {
   if (allowedRoles) auth.allowedRoles = allowedRoles;
   if (env.KOZOU_JWT_DEFAULT_ROLE) auth.defaultRole = env.KOZOU_JWT_DEFAULT_ROLE;
   if (env.KOZOU_JWT_CLAIMS_GUC) auth.claimsGuc = env.KOZOU_JWT_CLAIMS_GUC;
+
+  // How the bundled Admin UI authenticates: KOZOU_UI_ROLE names the role the
+  // CLI mints an HS256 token for; KOZOU_ADAPTER_TOKEN supplies a ready-made
+  // token (RS256 / external IdP, where the CLI cannot mint).
+  const ui: Record<string, unknown> = {};
+  if (env.KOZOU_UI_ROLE) ui.role = env.KOZOU_UI_ROLE;
+  if (env.KOZOU_ADAPTER_TOKEN) ui.token = env.KOZOU_ADAPTER_TOKEN;
+  if (Object.keys(ui).length > 0) auth.ui = ui;
   return { ...obj, auth };
 }
 

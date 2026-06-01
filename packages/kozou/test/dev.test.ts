@@ -6,6 +6,8 @@ import {
   buildAdminUiEnv,
   resolveOrigin,
   resolveAdminUiEntry,
+  resolveAdminUiToken,
+  type ServiceTokenMinter,
 } from '../src/commands/dev-runtime.js';
 
 async function makeConfig(
@@ -101,6 +103,132 @@ describe('buildAdminUiEnv', () => {
     );
     expect(env.KOZOU_ADAPTER_KIND).toBe('api');
     expect(env.KOZOU_ADAPTER_URL).toBe('http://127.0.0.1:3335');
+  });
+
+  it('exposes the api token as KOZOU_ADAPTER_TOKEN on the api path', async () => {
+    const config = await makeConfig();
+    const env = buildAdminUiEnv(config, 'http://localhost:3333', {}, 'http://127.0.0.1:3335', 'tok');
+    expect(env.KOZOU_ADAPTER_TOKEN).toBe('tok');
+  });
+
+  it('clears an inherited KOZOU_ADAPTER_TOKEN when no api token is resolved', async () => {
+    const config = await makeConfig();
+    const env = buildAdminUiEnv(
+      config,
+      'http://localhost:3333',
+      { KOZOU_ADAPTER_TOKEN: 'stale' },
+      'http://127.0.0.1:3335',
+    );
+    expect(env.KOZOU_ADAPTER_TOKEN).toBeUndefined();
+  });
+
+  it('does not touch KOZOU_ADAPTER_TOKEN on the default (non-api) path', async () => {
+    const config = await makeConfig();
+    const env = buildAdminUiEnv(config, 'http://localhost:3333', { KOZOU_ADAPTER_TOKEN: 'x' });
+    expect(env.KOZOU_ADAPTER_TOKEN).toBe('x');
+  });
+});
+
+describe('resolveAdminUiToken', () => {
+  function spyMinter(): {
+    calls: Array<Parameters<ServiceTokenMinter['signServiceToken']>[0]>;
+    minter: ServiceTokenMinter;
+  } {
+    const calls: Array<Parameters<ServiceTokenMinter['signServiceToken']>[0]> = [];
+    return {
+      calls,
+      minter: {
+        signServiceToken: (opts) => {
+          calls.push(opts);
+          return Promise.resolve('minted-token');
+        },
+      },
+    };
+  }
+
+  async function configWithAuth(auth: KozouConfig['auth']): Promise<KozouConfig> {
+    return { ...(await makeConfig()), auth };
+  }
+
+  it('returns no token and no warning when auth is absent', async () => {
+    const { minter, calls } = spyMinter();
+    const result = await resolveAdminUiToken(await makeConfig(), minter, {});
+    expect(result).toEqual({});
+    expect(calls).toHaveLength(0);
+  });
+
+  it('passes a supplied auth.ui.token through without minting', async () => {
+    const { minter, calls } = spyMinter();
+    const config = await configWithAuth({ jwt: { secret: 's' }, ui: { token: 'supplied' } });
+    const result = await resolveAdminUiToken(config, minter, {});
+    expect(result.token).toBe('supplied');
+    expect(calls).toHaveLength(0);
+  });
+
+  it('passes a KOZOU_ADAPTER_TOKEN env token through without minting', async () => {
+    const { minter, calls } = spyMinter();
+    const config = await configWithAuth({ jwt: { publicKey: '-----BEGIN PUBLIC KEY-----' } });
+    const result = await resolveAdminUiToken(config, minter, { KOZOU_ADAPTER_TOKEN: 'env-tok' });
+    expect(result.token).toBe('env-tok');
+    expect(calls).toHaveLength(0);
+  });
+
+  it('mints an HS256 token claiming auth.ui.role, passing roleClaim/iss/aud', async () => {
+    const { minter, calls } = spyMinter();
+    const config = await configWithAuth({
+      jwt: { secret: 's', issuer: 'kozou', audience: 'api' },
+      roleClaim: 'kozou_role',
+      allowedRoles: ['app_admin'],
+      ui: { role: 'app_admin' },
+    });
+    const result = await resolveAdminUiToken(config, minter, {});
+    expect(result.token).toBe('minted-token');
+    expect(result.warning).toBeUndefined();
+    expect(calls[0]).toEqual({
+      secret: 's',
+      roleClaim: 'kozou_role',
+      role: 'app_admin',
+      issuer: 'kozou',
+      audience: 'api',
+    });
+  });
+
+  it('mints without a role (defaultRole applies) and warns on neither role nor default', async () => {
+    const { minter, calls } = spyMinter();
+    const config = await configWithAuth({ jwt: { secret: 's' } });
+    const result = await resolveAdminUiToken(config, minter, {});
+    expect(result.token).toBe('minted-token');
+    expect(calls[0].role).toBeUndefined();
+    expect(result.warning).toMatch(/auth\.ui\.role/);
+  });
+
+  it('mints with no warning when no ui.role but a defaultRole is set', async () => {
+    const { minter } = spyMinter();
+    const config = await configWithAuth({ jwt: { secret: 's' }, defaultRole: 'app_reader' });
+    const result = await resolveAdminUiToken(config, minter, {});
+    expect(result.token).toBe('minted-token');
+    expect(result.warning).toBeUndefined();
+  });
+
+  it('warns when the minted role is not in allowedRoles', async () => {
+    const { minter } = spyMinter();
+    const config = await configWithAuth({
+      jwt: { secret: 's' },
+      allowedRoles: ['app_reader'],
+      ui: { role: 'app_admin' },
+    });
+    const result = await resolveAdminUiToken(config, minter, {});
+    expect(result.token).toBe('minted-token');
+    expect(result.warning).toMatch(/allowedRoles/);
+  });
+
+  it('returns a warning and no token for RS256 with no supplied token', async () => {
+    const { minter, calls } = spyMinter();
+    const config = await configWithAuth({ jwt: { publicKey: '-----BEGIN PUBLIC KEY-----' } });
+    const result = await resolveAdminUiToken(config, minter, {});
+    expect(result.token).toBeUndefined();
+    expect(result.warning).toMatch(/RS256/);
+    expect(calls).toHaveLength(0);
   });
 });
 
