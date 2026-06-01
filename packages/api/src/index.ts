@@ -8,7 +8,17 @@ export {
   isLoopbackHost,
   type StartApiServerOptions,
   type ApiServerHandle,
+  type PoolClient,
+  type ConnectionPool,
 } from './startApiServer.js';
+
+export {
+  createAuthenticator,
+  type AuthConfig,
+  type AuthContext,
+  type Authenticator,
+  type JwtAlgorithm,
+} from './auth.js';
 
 export {
   handleApiRequest,

@@ -47,13 +47,25 @@ Deferred to later phases (Kozou v0.2 design spec §4):
 - Phase 4: a `KozouApiDataAdapter` so the Admin UI can run against this
   server, plus CLI integration.
 
-## Security boundary (v0.2)
+## Security boundary
 
-Like the MCP HTTP server (Kozou v0.1 spec §18.5), the v0.2 API ships with
-**no authentication** and binds to `127.0.0.1` by default. It prints a
-loud warning when bound to a non-loopback host. Run it only inside a
-trusted boundary (local dev, a docker-compose network) until JWT + RLS
-land in v1.0.
+By default the API ships with **no authentication** and binds to
+`127.0.0.1` (like the MCP HTTP server, Kozou v0.1 spec §18.5); it prints a
+loud warning when bound to a non-loopback host. Run the unauthenticated
+server only inside a trusted boundary (local dev, a docker-compose network).
+
+**Opt-in JWT + row-level security.** Pass an `auth` config (and a `pool`)
+to `startApiServer` to require a signed JWT on every request. Kozou verifies
+the token (HS256 shared secret or RS256 public key), then runs each request
+inside a transaction on a dedicated connection under
+`SET LOCAL ROLE <role-from-claim>`, with the claims published via
+`set_config('request.jwt.claims', …, true)` — so **your own Postgres RLS
+policies** decide what each request can read and write. Kozou authenticates
+and switches role; it does not generate policies. A missing or invalid token
+gets `401`; a token whose role is not permitted gets `403`.
+
+Not yet covered (follow-ups): an anonymous role for unauthenticated access,
+and fetching verification keys from a remote JWKS URL.
 
 ## Safety
 

@@ -13,16 +13,35 @@ import type { AddressInfo } from 'node:net';
 
 import type { SchemaContext } from '@kozou/core';
 
-import { errorBody } from './errors.js';
-import { handleApiRequest, type ApiHandlerDeps, type Queryable } from './handler.js';
+import { errorBody, KozouApiError } from './errors.js';
+import {
+  handleApiRequest,
+  type ApiHandlerDeps,
+  type ApiHttpRequest,
+  type Queryable,
+} from './handler.js';
 import { buildResourceLookup } from './schema-lookup.js';
 import { buildOpenApiDocument } from './openapi.js';
+import { quoteIdent } from './ident.js';
+import { createAuthenticator, type AuthConfig, type Authenticator } from './auth.js';
+
+/** A pooled client: a Queryable that can be returned to its pool. A
+ *  node-postgres `PoolClient` satisfies this. */
+export type PoolClient = Queryable & { release(err?: boolean | Error): void };
+
+/** A connection pool able to hand out dedicated clients. A `pg.Pool` fits. */
+export type ConnectionPool = { connect(): Promise<PoolClient> };
 
 export type StartApiServerOptions = {
   /** Introspected schema that drives routing + the identifier allowlist. */
   schema: SchemaContext;
   /** Open connection (a `pg.Pool` is the expected caller-owned value). */
   db: Queryable;
+  /** Required when `auth` is set: source of dedicated clients for the
+   *  per-request transaction that carries the role + claims. A `pg.Pool` fits. */
+  pool?: ConnectionPool;
+  /** Opt-in JWT verification + RLS enforcement. Omit for zero-auth behavior. */
+  auth?: AuthConfig;
   /** TCP port to listen on. Default: 3335 (3333 = UI, 3334 = MCP HTTP). */
   port?: number;
   /** Host/interface to bind. Default: 127.0.0.1 (loopback only). */
@@ -51,13 +70,19 @@ export function isLoopbackHost(host: string): boolean {
   return LOOPBACK_HOSTS.has(host);
 }
 
-function nonLoopbackWarning(host: string, prefix: string): string {
+function nonLoopbackWarning(host: string, prefix: string, authed: boolean): string {
+  if (authed) {
+    return (
+      `${prefix} NOTE: REST API bound to non-loopback host "${host}".\n` +
+      `${prefix} JWT auth is enabled; terminate TLS in front of it so tokens\n` +
+      `${prefix} are never sent in clear text.\n`
+    );
+  }
   return (
     `${prefix} WARNING: REST API bound to non-loopback host "${host}".\n` +
-    `${prefix} The v0.2 API has NO authentication (Kozou v0.1 spec §18.5).\n` +
-    `${prefix} Anyone who can reach ${host} can read and (in later phases)\n` +
-    `${prefix} write this database. Bind to 127.0.0.1 (the default) unless\n` +
-    `${prefix} you have a trusted network and an external auth layer.\n`
+    `${prefix} This API has NO authentication configured (Kozou v0.1 spec §18.5).\n` +
+    `${prefix} Anyone who can reach ${host} can read and write this database.\n` +
+    `${prefix} Bind to 127.0.0.1 (the default) or configure JWT auth.\n`
   );
 }
 
@@ -77,24 +102,98 @@ export function createApiRequestListener(
   };
 }
 
-async function dispatch(
-  deps: ApiHandlerDeps,
-  req: IncomingMessage,
-  res: ServerResponse,
-): Promise<void> {
+async function buildHttpRequest(req: IncomingMessage): Promise<ApiHttpRequest> {
   const url = new URL(req.url ?? '/', 'http://localhost');
   const segments = url.pathname
     .split('/')
     .filter((s) => s.length > 0)
     .map((s) => safeDecode(s));
   const body = await readJsonBody(req);
-  const result = await handleApiRequest(deps, {
+  return {
     method: req.method ?? 'GET',
     segments,
     query: url.searchParams,
     body,
-  });
+    headers: req.headers,
+  };
+}
+
+async function dispatch(
+  deps: ApiHandlerDeps,
+  req: IncomingMessage,
+  res: ServerResponse,
+): Promise<void> {
+  const result = await handleApiRequest(deps, await buildHttpRequest(req));
   respondJson(res, result.status, result.body);
+}
+
+/**
+ * Authenticated dispatch: verify the JWT, then run the request inside a
+ * transaction on a dedicated client under `SET LOCAL ROLE` with the claims
+ * published so the database's row-level-security policies apply.
+ */
+async function dispatchAuthed(
+  base: ApiHandlerDeps,
+  authenticator: Authenticator,
+  pool: ConnectionPool,
+  req: IncomingMessage,
+  res: ServerResponse,
+): Promise<void> {
+  let auth;
+  try {
+    auth = await authenticator.authenticate(singleHeader(req.headers, 'authorization'));
+  } catch (err) {
+    // Reject before acquiring a connection (no leak on 401 / 403).
+    respondError(res, err);
+    return;
+  }
+
+  const httpReq = await buildHttpRequest(req);
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    try {
+      // Role is an identifier (no bound-parameter form); quote it. The role is
+      // additionally constrained by the auth allowlist.
+      await client.query(`SET LOCAL ROLE ${quoteIdent(auth.role)}`);
+    } catch {
+      throw new Error('Could not assume the requested role.');
+    }
+    // Claims are a value: bound parameter, never interpolated into SQL.
+    await client.query('SELECT set_config($1, $2, true)', [
+      authenticator.claimsGuc,
+      JSON.stringify(auth.claims),
+    ]);
+    // The client is a Queryable; routing runs every query on it, inside this
+    // transaction, so the role + claims apply.
+    const deps: ApiHandlerDeps = { ...base, db: client };
+    const result = await handleApiRequest(deps, httpReq);
+    await client.query('COMMIT');
+    respondJson(res, result.status, result.body);
+  } catch (err) {
+    try {
+      await client.query('ROLLBACK');
+    } catch {
+      // The connection may already be in a failed state; nothing to do.
+    }
+    respondError(res, err);
+  } finally {
+    client.release();
+  }
+}
+
+function singleHeader(headers: IncomingMessage['headers'], name: string): string | undefined {
+  const value = headers[name];
+  return Array.isArray(value) ? value[0] : value;
+}
+
+function respondError(res: ServerResponse, err: unknown): void {
+  if (err instanceof KozouApiError) {
+    respondJson(res, err.status, errorBody(err.code, err.message));
+    return;
+  }
+  const message = err instanceof Error ? err.message : String(err);
+  respondJson(res, 500, errorBody('internal', message));
 }
 
 async function readJsonBody(req: IncomingMessage): Promise<unknown> {
@@ -121,16 +220,33 @@ export async function startApiServer(opts: StartApiServerOptions): Promise<ApiSe
   const host = opts.host ?? DEFAULT_HOST;
   const port = opts.port ?? DEFAULT_PORT;
 
-  if (!isLoopbackHost(host)) {
-    process.stderr.write(nonLoopbackWarning(host, prefix));
+  const authenticator = opts.auth ? createAuthenticator(opts.auth) : undefined;
+  if (authenticator !== undefined && opts.pool === undefined) {
+    throw new Error(
+      `${prefix} auth requires a "pool" (e.g. a pg.Pool) to run each request under SET LOCAL ROLE.`,
+    );
   }
 
-  const listener = createApiRequestListener({
+  if (!isLoopbackHost(host)) {
+    process.stderr.write(nonLoopbackWarning(host, prefix, authenticator !== undefined));
+  }
+
+  const base: ApiHandlerDeps = {
     db: opts.db,
     lookup: buildResourceLookup(opts.schema),
     version: opts.version,
     openapi: buildOpenApiDocument(opts.schema, { version: opts.version }),
-  });
+  };
+
+  const pool = opts.pool;
+  const listener =
+    authenticator !== undefined && pool !== undefined
+      ? (req: IncomingMessage, res: ServerResponse): void => {
+          dispatchAuthed(base, authenticator, pool, req, res).catch((err: unknown) =>
+            respondError(res, err),
+          );
+        }
+      : createApiRequestListener(base);
   const httpServer = createServer(listener);
 
   await new Promise<void>((resolve, reject) => {
