@@ -96,11 +96,11 @@ jobs:
         # so no autobuild/manual build step is needed. node_modules /
         # dist / build are absent here (not installed, gitignored), so
         # the scan stays on first-party source.
-        uses: github/codeql-action/init@051e2f90686233507fe9283ff167d2e709304b30 # v3.36.0
+        uses: github/codeql-action/init@03e4368ac7daa2bd82b3e85262f3bf87ee112f57 # v3.36.0
         with:
           languages: javascript-typescript
 
       - name: Perform CodeQL analysis
-        uses: github/codeql-action/analyze@051e2f90686233507fe9283ff167d2e709304b30 # v3.36.0
+        uses: github/codeql-action/analyze@03e4368ac7daa2bd82b3e85262f3bf87ee112f57 # v3.36.0
         with:
           category: '/language:javascript-typescript'
