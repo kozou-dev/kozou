@@ -224,4 +224,95 @@ adapter:
     });
     expect(config.database.url).toBe('postgres://u:p${SECRET}@h:5432/db');
   });
+
+  it('auth is absent by default', async () => {
+    const config = await loadConfig({
+      skipFile: true,
+      env: { DATABASE_URL: 'postgres://u:p@h:5432/db' },
+    });
+    expect(config.auth).toBeUndefined();
+  });
+
+  it('parses an auth section from the config file', async () => {
+    const dir = await makeTempDir();
+    const file = await writeYaml(
+      dir,
+      `database:
+  url: postgres://u:p@h:5432/db
+auth:
+  jwt:
+    secret: shhh
+    algorithms: [HS256]
+  allowedRoles: [app_reader, app_writer]
+  defaultRole: app_reader
+`,
+    );
+    const config = await loadConfig({ path: file, env: {} });
+    expect(config.auth?.jwt.secret).toBe('shhh');
+    expect(config.auth?.jwt.algorithms).toEqual(['HS256']);
+    expect(config.auth?.allowedRoles).toEqual(['app_reader', 'app_writer']);
+    expect(config.auth?.defaultRole).toBe('app_reader');
+  });
+
+  it('builds auth from KOZOU_JWT_* env when the file declares none', async () => {
+    const config = await loadConfig({
+      skipFile: true,
+      env: {
+        DATABASE_URL: 'postgres://u:p@h:5432/db',
+        KOZOU_JWT_SECRET: 'env-secret',
+        KOZOU_JWT_ALGORITHMS: 'HS256, RS256',
+        KOZOU_JWT_ISSUER: 'kozou',
+        KOZOU_JWT_ALLOWED_ROLES: 'app_reader, app_writer',
+        KOZOU_JWT_DEFAULT_ROLE: 'app_reader',
+      },
+    });
+    expect(config.auth?.jwt.secret).toBe('env-secret');
+    expect(config.auth?.jwt.algorithms).toEqual(['HS256', 'RS256']);
+    expect(config.auth?.jwt.issuer).toBe('kozou');
+    expect(config.auth?.allowedRoles).toEqual(['app_reader', 'app_writer']);
+    expect(config.auth?.defaultRole).toBe('app_reader');
+  });
+
+  it('uses KOZOU_JWT_PUBLIC_KEY for RS256 env config', async () => {
+    const config = await loadConfig({
+      skipFile: true,
+      env: {
+        DATABASE_URL: 'postgres://u:p@h:5432/db',
+        KOZOU_JWT_PUBLIC_KEY: '-----BEGIN PUBLIC KEY-----\nabc\n-----END PUBLIC KEY-----',
+      },
+    });
+    expect(config.auth?.jwt.publicKey).toContain('BEGIN PUBLIC KEY');
+    expect(config.auth?.jwt.secret).toBeUndefined();
+  });
+
+  it('a file auth section wins over KOZOU_JWT_* env', async () => {
+    const dir = await makeTempDir();
+    const file = await writeYaml(
+      dir,
+      `database:
+  url: postgres://u:p@h:5432/db
+auth:
+  jwt:
+    secret: from-file
+`,
+    );
+    const config = await loadConfig({ path: file, env: { KOZOU_JWT_SECRET: 'from-env' } });
+    expect(config.auth?.jwt.secret).toBe('from-file');
+  });
+
+  it('does not build auth when no JWT key env is present', async () => {
+    const config = await loadConfig({
+      skipFile: true,
+      env: { DATABASE_URL: 'postgres://u:p@h:5432/db', KOZOU_JWT_ISSUER: 'kozou' },
+    });
+    expect(config.auth).toBeUndefined();
+  });
+
+  it('takes an env-provided secret verbatim (not re-expanded)', async () => {
+    const config = await loadConfig({
+      skipFile: true,
+      env: { DATABASE_URL: 'postgres://u:p@h:5432/db', KOZOU_JWT_SECRET: 'a${NOT_EXPANDED}b' },
+    });
+    expect(config.auth?.jwt.secret).toBe('a${NOT_EXPANDED}b');
+  });
 });

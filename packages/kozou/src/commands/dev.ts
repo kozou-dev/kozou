@@ -76,6 +76,12 @@ async function startInhouseApi(config: KozouConfig, port: number): Promise<Inhou
   const server = await apiModule.startApiServer({
     schema,
     db: { query: (text: string, values?: unknown[]) => pool.query(text, values) },
+    // When `auth` is configured the API verifies a JWT and runs each request
+    // under SET LOCAL ROLE, which needs a dedicated client per request — pass
+    // the pool. With no `auth`, the pool is unused and the API stays
+    // unauthenticated (loopback-only), exactly as before.
+    pool,
+    auth: config.auth,
     host: API_HOST,
     port,
     logPrefix: `${PREFIX} api`,
