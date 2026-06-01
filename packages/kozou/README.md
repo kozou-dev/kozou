@@ -117,8 +117,9 @@ request can read and write.
 ```yaml
 auth:
   jwt:
-    secret: ${KOZOU_JWT_SECRET}        # HS256 — or set publicKey for RS256
+    secret: ${KOZOU_JWT_SECRET}        # HS256 — or publicKey (RS256), or jwksUri
     # publicKey: ${KOZOU_JWT_PUBLIC_KEY}
+    # jwksUri: https://your-idp/.well-known/jwks.json  # Auth0 / Clerk / Supabase
     algorithms: [HS256]
     issuer: my-issuer                  # optional
     audience: my-api                   # optional
@@ -131,12 +132,16 @@ auth:
     # token: ${KOZOU_ADAPTER_TOKEN}    # RS256 / external IdP: supply a token instead
 ```
 
+Provide exactly one of `jwt.secret` (HS256), `jwt.publicKey` (RS256), or
+`jwt.jwksUri` (a provider's remote JWKS endpoint — keys are selected by `kid`,
+cached, and refreshed on rotation).
+
 With no `auth:` block, the section is built instead from
-`KOZOU_JWT_SECRET` / `KOZOU_JWT_PUBLIC_KEY` / `KOZOU_JWT_ALGORITHMS` /
-`KOZOU_JWT_ISSUER` / `KOZOU_JWT_AUDIENCE` / `KOZOU_JWT_ROLE_CLAIM` /
-`KOZOU_JWT_ALLOWED_ROLES` / `KOZOU_JWT_DEFAULT_ROLE` / `KOZOU_JWT_ANON_ROLE` /
-`KOZOU_UI_ROLE` / `KOZOU_ADAPTER_TOKEN` (algorithms and roles are
-comma-separated). A role outside `allowedRoles` gets `403`. A request with
+`KOZOU_JWT_SECRET` / `KOZOU_JWT_PUBLIC_KEY` / `KOZOU_JWT_JWKS_URI` /
+`KOZOU_JWT_ALGORITHMS` / `KOZOU_JWT_ISSUER` / `KOZOU_JWT_AUDIENCE` /
+`KOZOU_JWT_ROLE_CLAIM` / `KOZOU_JWT_ALLOWED_ROLES` / `KOZOU_JWT_DEFAULT_ROLE` /
+`KOZOU_JWT_ANON_ROLE` / `KOZOU_UI_ROLE` / `KOZOU_ADAPTER_TOKEN` (algorithms
+and roles are comma-separated). A role outside `allowedRoles` gets `403`. A request with
 no token gets `401` unless `anonRole` is set, in which case it runs under
 that role and your RLS policies decide what it sees (a present but invalid
 token is always `401`). The login role of `database.url` must be `GRANT`ed

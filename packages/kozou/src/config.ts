@@ -85,6 +85,7 @@ const databaseSchema = z.object({
 const jwtAuthSchema = z.object({
   secret: z.string().min(1).optional(),
   publicKey: z.string().min(1).optional(),
+  jwksUri: z.string().min(1).optional(),
   algorithms: z.array(z.enum(['HS256', 'RS256'])).optional(),
   issuer: z.string().min(1).optional(),
   audience: z.union([z.string().min(1), z.array(z.string().min(1))]).optional(),
@@ -227,11 +228,13 @@ function injectAuthFromEnv(raw: unknown, env: NodeJS.ProcessEnv): unknown {
 
   const secret = env.KOZOU_JWT_SECRET;
   const publicKey = env.KOZOU_JWT_PUBLIC_KEY;
-  if (!secret && !publicKey) return obj; // no auth env -> stay unauthenticated
+  const jwksUri = env.KOZOU_JWT_JWKS_URI;
+  if (!secret && !publicKey && !jwksUri) return obj; // no auth env -> stay unauthenticated
 
   const jwt: Record<string, unknown> = {};
   if (secret) jwt.secret = secret;
   if (publicKey) jwt.publicKey = publicKey;
+  if (jwksUri) jwt.jwksUri = jwksUri;
   const algorithms = splitList(env.KOZOU_JWT_ALGORITHMS);
   if (algorithms) jwt.algorithms = algorithms;
   if (env.KOZOU_JWT_ISSUER) jwt.issuer = env.KOZOU_JWT_ISSUER;

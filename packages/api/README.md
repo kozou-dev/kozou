@@ -56,7 +56,8 @@ server only inside a trusted boundary (local dev, a docker-compose network).
 
 **Opt-in JWT + row-level security.** Pass an `auth` config (and a `pool`)
 to `startApiServer` to require a signed JWT on every request. Kozou verifies
-the token (HS256 shared secret or RS256 public key), then runs each request
+the token (an HS256 shared secret, an RS256 public key, or a provider's
+remote JWKS endpoint — exactly one), then runs each request
 inside a transaction on a dedicated connection under
 `SET LOCAL ROLE <role-from-claim>`, with the claims published via
 `set_config('request.jwt.claims', …, true)` — so **your own Postgres RLS
@@ -71,11 +72,14 @@ fully absent header is anonymous — a present but invalid/expired token is
 still `401`, never silently downgraded. The login role must be `GRANT`ed
 membership in the anonymous role.
 
+Set `auth.jwt.jwksUri` to verify against a provider's **remote JWKS endpoint**
+(Auth0, Clerk, Supabase, …) instead of a static key: the verification key is
+selected by the token's `kid`, fetched once, cached, and refreshed when the
+provider rotates keys.
+
 For a trusted same-host caller that has no end user to obtain a token from
 (the bundled Admin UI under `kozou dev`), `signServiceToken` mints an HS256
 token claiming a given role, signed with the same secret the server verifies.
-
-Not yet covered (follow-up): fetching verification keys from a remote JWKS URL.
 
 ## Safety
 

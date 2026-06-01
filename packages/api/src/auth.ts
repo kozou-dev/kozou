@@ -11,10 +11,12 @@ import {
   importSPKI,
   importJWK,
   jwtVerify,
+  createRemoteJWKSet,
   SignJWT,
   errors as joseErrors,
   type JWTPayload,
   type JWTVerifyOptions,
+  type JWTVerifyGetKey,
 } from 'jose';
 import { unauthorized, forbidden } from './errors.js';
 
@@ -22,10 +24,14 @@ export type JwtAlgorithm = 'HS256' | 'RS256';
 
 export type AuthConfig = {
   jwt: {
-    /** Shared secret for HS256. Provide exactly one of secret / publicKey. */
+    /** Shared secret for HS256. Provide exactly one of secret / publicKey / jwksUri. */
     secret?: string;
     /** Verification key for RS256: a PEM (SPKI) string or a JWK JSON string. */
     publicKey?: string;
+    /** URL of the provider's JWKS endpoint (Auth0 / Clerk / Supabase, …). The
+     *  key is selected by the token's `kid`, fetched once, cached, and
+     *  refreshed on rotation. Provide exactly one of secret / publicKey / jwksUri. */
+    jwksUri?: string;
     /** Accepted algorithms. Defaults to ['HS256'] or ['RS256'] by key type. */
     algorithms?: JwtAlgorithm[];
     /** Expected `iss`. When set, a mismatch is rejected. */
@@ -65,9 +71,11 @@ export function createAuthenticator(config: AuthConfig): Authenticator {
   const { jwt } = config;
   const hasSecret = typeof jwt.secret === 'string' && jwt.secret.length > 0;
   const hasPublicKey = typeof jwt.publicKey === 'string' && jwt.publicKey.length > 0;
-  if (hasSecret === hasPublicKey) {
+  const hasJwksUri = typeof jwt.jwksUri === 'string' && jwt.jwksUri.length > 0;
+  if ([hasSecret, hasPublicKey, hasJwksUri].filter(Boolean).length !== 1) {
     throw new Error(
-      '@kozou/api auth: configure exactly one of jwt.secret (HS256) or jwt.publicKey (RS256).',
+      '@kozou/api auth: configure exactly one of jwt.secret (HS256), ' +
+        'jwt.publicKey (RS256), or jwt.jwksUri (remote JWKS).',
     );
   }
 
@@ -79,10 +87,15 @@ export function createAuthenticator(config: AuthConfig): Authenticator {
   if (jwt.issuer !== undefined) verifyOptions.issuer = jwt.issuer;
   if (jwt.audience !== undefined) verifyOptions.audience = jwt.audience;
 
-  // Resolve key material once; reused for every request.
-  const keyPromise: Promise<CryptoKey | Uint8Array> = hasSecret
-    ? Promise.resolve(new TextEncoder().encode(jwt.secret))
-    : importPublicKey(jwt.publicKey as string, algorithms[0] ?? 'RS256');
+  // Resolve the key once into a getKey function jose calls per token. A remote
+  // JWKS resolves the key by `kid` (fetched + cached); a secret / static public
+  // key is imported once and wrapped so the verify call is uniform.
+  const getKey: Promise<JWTVerifyGetKey> = hasJwksUri
+    ? Promise.resolve(createRemoteJWKSet(new URL(jwt.jwksUri as string)))
+    : (hasSecret
+        ? Promise.resolve(new TextEncoder().encode(jwt.secret))
+        : importPublicKey(jwt.publicKey as string, algorithms[0] ?? 'RS256')
+      ).then((key): JWTVerifyGetKey => () => Promise.resolve(key));
 
   return {
     roleClaim,
@@ -100,8 +113,7 @@ export function createAuthenticator(config: AuthConfig): Authenticator {
       }
       let payload: JWTPayload;
       try {
-        const key = await keyPromise;
-        ({ payload } = await jwtVerify(token, key, verifyOptions));
+        ({ payload } = await jwtVerify(token, await getKey, verifyOptions));
       } catch (err) {
         // Any verification failure (signature, expiry, nbf, iss, aud, alg)
         // is a 401 with a generic message — never leak which check failed.

@@ -273,6 +273,35 @@ auth:
     expect(config.auth?.defaultRole).toBe('app_reader');
   });
 
+  it('parses auth.jwt.jwksUri from the config file', async () => {
+    const dir = await makeTempDir();
+    const file = await writeYaml(
+      dir,
+      `database:
+  url: postgres://u:p@h:5432/db
+auth:
+  jwt:
+    jwksUri: https://idp.example/.well-known/jwks.json
+`,
+    );
+    const config = await loadConfig({ path: file, env: {} });
+    expect(config.auth?.jwt.jwksUri).toBe('https://idp.example/.well-known/jwks.json');
+    expect(config.auth?.jwt.secret).toBeUndefined();
+  });
+
+  it('builds auth from KOZOU_JWT_JWKS_URI env alone', async () => {
+    const config = await loadConfig({
+      skipFile: true,
+      env: {
+        DATABASE_URL: 'postgres://u:p@h:5432/db',
+        KOZOU_JWT_JWKS_URI: 'https://idp.example/.well-known/jwks.json',
+      },
+    });
+    expect(config.auth?.jwt.jwksUri).toBe('https://idp.example/.well-known/jwks.json');
+    expect(config.auth?.jwt.secret).toBeUndefined();
+    expect(config.auth?.jwt.publicKey).toBeUndefined();
+  });
+
   it('uses KOZOU_JWT_PUBLIC_KEY for RS256 env config', async () => {
     const config = await loadConfig({
       skipFile: true,
