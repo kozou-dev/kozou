@@ -120,6 +120,14 @@ describe('emitMarkdown', () => {
     expect(md).toContain('Shown in listings \\| the public name.');
   });
 
+  it('escapes a backslash before the pipe so a stray "\\|" cannot break the cell', async () => {
+    const raw = makeRaw();
+    raw.tables[0]!.columns[1]!.comment = 'path\\|pipe';
+    const md = emitMarkdown(await buildSchemaContext({ raw }));
+    // backslash doubled, then the pipe escaped: `path\\\|pipe`.
+    expect(md).toContain('path\\\\\\|pipe');
+  });
+
   it('surfaces @ai notes and @policy rules as structured sections, not raw prose', async () => {
     const md = emitMarkdown(await buildSchemaContext({ raw: makeRaw() }));
     expect(md).toContain('**AI notes:**');

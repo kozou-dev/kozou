@@ -201,10 +201,16 @@ function escapeInline(value: string): string {
   return value.replace(/\s+/g, ' ').trim();
 }
 
-/** Collapse whitespace and escape the pipe so a value is safe inside a Markdown
- *  table cell. Both regexes are linear (single, unanchored) — no ReDoS. */
+/** Collapse whitespace and escape a value so it is safe inside a Markdown
+ *  table cell. The backslash is escaped first so a pre-existing `\` cannot
+ *  swallow the escape we add for the pipe. All regexes are linear (single,
+ *  unanchored) — no ReDoS. */
 function escapeCell(value: string): string {
-  return value.replace(/\s+/g, ' ').trim().replace(/\|/g, '\\|');
+  return value
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/\\/g, '\\\\')
+    .replace(/\|/g, '\\|');
 }
 
 function tableAnchor(t: TableContext): string {
