@@ -5,6 +5,7 @@
 import { Command } from 'commander';
 import { inspectCommand } from './commands/inspect.js';
 import { codegenCommand } from './commands/codegen.js';
+import { docsCommand } from './commands/docs.js';
 import { mcpCommand } from './commands/mcp.js';
 import { devCommand } from './commands/dev.js';
 import { PACKAGE_VERSION } from './index.js';
@@ -16,6 +17,11 @@ type InspectFlags = {
 };
 
 type CodegenFlags = {
+  output?: string;
+  config?: string;
+};
+
+type DocsFlags = {
   output?: string;
   config?: string;
 };
@@ -62,6 +68,18 @@ program
   .option('--config <path>', 'path to kozou.config.yaml')
   .action(async (flags: CodegenFlags) => {
     await codegenCommand({
+      output: flags.output,
+      config: flags.config,
+    });
+  });
+
+program
+  .command('docs')
+  .description('Generate a Markdown schema document from the database DDL + COMMENT.')
+  .option('--output <path>', 'output file (- for stdout)', '-')
+  .option('--config <path>', 'path to kozou.config.yaml')
+  .action(async (flags: DocsFlags) => {
+    await docsCommand({
       output: flags.output,
       config: flags.config,
     });
