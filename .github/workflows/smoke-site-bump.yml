@@ -1,0 +1,101 @@
+name: Smoke test (kozou-site docs bump)
+
+# TEMPORARY — remove after the smoke test.
+#
+# Exercises the exact cross-repo path of the release workflow's
+# `update-docs-site` job (App token -> kozou-site checkout -> pnpm ->
+# create-pull-request) without waiting for a real release. Because the
+# current published version already matches the docs, this writes one
+# throwaway file to force a visible diff so a PR is actually opened.
+#
+# It opens a "TEST (do not merge)" PR on kozou-site. Verify the PR, then
+# delete this workflow and close the PR.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  smoke-site-bump:
+    name: Smoke test the kozou-site docs bump path
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check for the kozou-site bump App credentials
+        id: guard
+        env:
+          APP_ID: ${{ secrets.KOZOU_SITE_APP_ID }}
+          PRIVATE_KEY: ${{ secrets.KOZOU_SITE_APP_PRIVATE_KEY }}
+        run: |
+          if [ -n "$APP_ID" ] && [ -n "$PRIVATE_KEY" ]; then
+            echo "Both App secrets are present."
+          else
+            echo "::error::KOZOU_SITE_APP_ID / KOZOU_SITE_APP_PRIVATE_KEY are not both set; cannot run the smoke test."
+            exit 1
+          fi
+
+      - name: Mint a GitHub App token scoped to kozou-site
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ secrets.KOZOU_SITE_APP_ID }}
+          private-key: ${{ secrets.KOZOU_SITE_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: kozou-site
+          permission-contents: write
+          permission-pull-requests: write
+
+      - name: Checkout kozou-site
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: ${{ github.repository_owner }}/kozou-site
+          ref: main
+          token: ${{ steps.app-token.outputs.token }}
+          persist-credentials: false
+          path: kozou-site
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@0e279bb959325dab635dd2c09392533439d90093 # v6.0.8
+        with:
+          package_json_file: kozou-site/package.json
+
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version-file: kozou-site/.nvmrc
+
+      - name: Exercise gen:docs and force a throwaway diff
+        working-directory: kozou-site
+        run: |
+          set -euo pipefail
+          # Install deps and run the real generator. At the current version
+          # this is a no-op, but it proves gen:docs runs cleanly inside the
+          # App-token checkout.
+          pnpm install --frozen-lockfile
+          pnpm gen:docs
+          # Force a visible diff so create-pull-request has something to open.
+          {
+            echo "# SMOKE TEST — DO NOT MERGE"
+            echo
+            echo "Created by a one-off release-pipeline smoke test (run ${GITHUB_RUN_ID})."
+            echo "It verifies the App token -> checkout -> create-PR path. Close this PR and delete the branch."
+          } > SMOKE_TEST_DO_NOT_MERGE.md
+
+      - name: Open the smoke-test pull request
+        uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1 # v8.1.1
+        with:
+          token: ${{ steps.app-token.outputs.token }}
+          path: kozou-site
+          base: main
+          branch: smoke-test/site-docs-bump
+          delete-branch: true
+          add-paths: |
+            SMOKE_TEST_DO_NOT_MERGE.md
+          commit-message: 'test: release pipeline smoke test (do not merge)'
+          title: 'TEST (do not merge): release pipeline docs-bump smoke test'
+          body: |
+            Automated one-off smoke test of the release pipeline's `update-docs-site` path
+            (GitHub App token -> kozou-site checkout -> pnpm -> create-pull-request).
+
+            **Do not merge.** Close this PR and delete the branch once verified.
