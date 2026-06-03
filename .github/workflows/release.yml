@@ -402,7 +402,7 @@ jobs:
         with:
           node-version-file: kozou-site/.nvmrc
 
-      - name: Bump @kozou/core and regenerate docs
+      - name: Bump kozou packages and regenerate docs
         id: bump
         if: steps.guard.outputs.enabled == 'true'
         working-directory: kozou-site
@@ -417,15 +417,17 @@ jobs:
             exit 0
           fi
           # Retry: npm needs a moment to propagate the freshly published version.
+          # @kozou/core feeds the version regions; kozou (the CLI) feeds the
+          # generated CLI reference. Both publish together from this release.
           for attempt in 1 2 3 4 5; do
-            if pnpm add -E "@kozou/core@${version}"; then
+            if pnpm add -E "@kozou/core@${version}" "kozou@${version}"; then
               break
             fi
             if [ "$attempt" -eq 5 ]; then
-              echo "::error::@kozou/core@${version} is not installable after retries."
+              echo "::error::@kozou/core@${version} / kozou@${version} are not installable after retries."
               exit 1
             fi
-            echo "Attempt ${attempt} failed; waiting for npm to propagate @kozou/core@${version}..."
+            echo "Attempt ${attempt} failed; waiting for npm to propagate ${version}..."
             sleep 15
           done
           pnpm gen:docs
@@ -433,7 +435,7 @@ jobs:
           # rather than `git diff` so freshly generated (untracked) files are
           # counted too, not only edits to already-tracked files.
           if [ -z "$(git status --porcelain -- package.json pnpm-lock.yaml src/content/docs)" ]; then
-            echo "::notice::kozou-site is already at @kozou/core@${version}; nothing to bump."
+            echo "::notice::kozou-site is already at ${version}; nothing to bump."
             echo "changed=false" >> "$GITHUB_OUTPUT"
           else
             echo "changed=true" >> "$GITHUB_OUTPUT"
@@ -451,18 +453,19 @@ jobs:
           token: ${{ steps.app-token.outputs.token }}
           path: kozou-site
           base: main
-          branch: bump/kozou-core-${{ steps.bump.outputs.version }}
+          branch: bump/kozou-${{ steps.bump.outputs.version }}
           delete-branch: true
           add-paths: |
             package.json
             pnpm-lock.yaml
             src/content/docs/**
-          commit-message: 'chore(deps): bump @kozou/core to ${{ steps.bump.outputs.version }} and regenerate docs'
-          title: 'chore(deps): bump @kozou/core to ${{ steps.bump.outputs.version }} and regenerate docs'
+          commit-message: 'chore(deps): bump kozou packages to ${{ steps.bump.outputs.version }} and regenerate docs'
+          title: 'chore(deps): bump kozou packages to ${{ steps.bump.outputs.version }} and regenerate docs'
           body: |
             Automated by the kozou release pipeline after publishing `${{ github.ref_name }}`.
 
-            - Bumps the pinned `@kozou/core` dependency to `${{ steps.bump.outputs.version }}`.
-            - Regenerates the product-coupled version regions with `pnpm gen:docs`.
+            - Bumps the pinned `@kozou/core` and `kozou` dependencies to `${{ steps.bump.outputs.version }}`.
+            - Regenerates the product-coupled docs regions with `pnpm gen:docs`
+              (version regions, CLI reference, and ui-hints reference).
 
             Review the regenerated docs in the diff, then merge to deploy.
