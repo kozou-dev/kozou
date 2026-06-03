@@ -337,3 +337,132 @@ jobs:
           files: |
             artifacts/*.tgz
             artifacts/*.bundle
+
+  # ==========================================================
+  # 5. update-docs-site — after a real publish, bump the pinned
+  #    @kozou/core in kozou-site, regenerate its version regions
+  #    (pnpm gen:docs), and open a PR. Cross-repo writes go
+  #    through a GitHub App token, never the default GITHUB_TOKEN.
+  #    continue-on-error: the publish already succeeded, so a docs
+  #    PR failure must never turn the release red.
+  # ==========================================================
+  update-docs-site:
+    name: Open kozou-site docs bump PR
+    needs: publish-npm
+    if: ${{ inputs.dry_run != true && github.event_name == 'push' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    continue-on-error: true
+    permissions:
+      contents: read
+    steps:
+      - name: Check for the kozou-site bump App credentials
+        id: guard
+        env:
+          APP_ID: ${{ secrets.KOZOU_SITE_APP_ID }}
+          PRIVATE_KEY: ${{ secrets.KOZOU_SITE_APP_PRIVATE_KEY }}
+        run: |
+          if [ -n "$APP_ID" ] && [ -n "$PRIVATE_KEY" ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::KOZOU_SITE_APP_ID / KOZOU_SITE_APP_PRIVATE_KEY are not both set; skipping the kozou-site docs bump. Provision the GitHub App to enable it."
+          fi
+
+      - name: Mint a GitHub App token scoped to kozou-site
+        id: app-token
+        if: steps.guard.outputs.enabled == 'true'
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ secrets.KOZOU_SITE_APP_ID }}
+          private-key: ${{ secrets.KOZOU_SITE_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: kozou-site
+          permission-contents: write
+          permission-pull-requests: write
+
+      - name: Checkout kozou-site
+        if: steps.guard.outputs.enabled == 'true'
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: ${{ github.repository_owner }}/kozou-site
+          ref: main
+          token: ${{ steps.app-token.outputs.token }}
+          persist-credentials: false
+          path: kozou-site
+
+      - name: Install pnpm
+        if: steps.guard.outputs.enabled == 'true'
+        uses: pnpm/action-setup@0e279bb959325dab635dd2c09392533439d90093 # v6.0.8
+        with:
+          package_json_file: kozou-site/package.json
+
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        if: steps.guard.outputs.enabled == 'true'
+        with:
+          node-version-file: kozou-site/.nvmrc
+
+      - name: Bump @kozou/core and regenerate docs
+        id: bump
+        if: steps.guard.outputs.enabled == 'true'
+        working-directory: kozou-site
+        env:
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          version="${REF_NAME#v}"
+          if [ ! -f scripts/gen-docs.mjs ]; then
+            echo "::notice::kozou-site has no scripts/gen-docs.mjs on main yet; skipping until the docs generator is merged."
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # Retry: npm needs a moment to propagate the freshly published version.
+          for attempt in 1 2 3 4 5; do
+            if pnpm add -E "@kozou/core@${version}"; then
+              break
+            fi
+            if [ "$attempt" -eq 5 ]; then
+              echo "::error::@kozou/core@${version} is not installable after retries."
+              exit 1
+            fi
+            echo "Attempt ${attempt} failed; waiting for npm to propagate @kozou/core@${version}..."
+            sleep 15
+          done
+          pnpm gen:docs
+          # Detect real changes in the allowlist. Use `git status --porcelain`
+          # rather than `git diff` so freshly generated (untracked) files are
+          # counted too, not only edits to already-tracked files.
+          if [ -z "$(git status --porcelain -- package.json pnpm-lock.yaml src/content/docs)" ]; then
+            echo "::notice::kozou-site is already at @kozou/core@${version}; nothing to bump."
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            echo "version=${version}" >> "$GITHUB_OUTPUT"
+          fi
+          # Surface anything generated outside the allowlist; it will not be committed.
+          if [ -n "$(git status --porcelain -- . ':!package.json' ':!pnpm-lock.yaml' ':!src/content/docs')" ]; then
+            echo "::warning::Changes outside the docs allowlist were produced; they will not be included in the PR."
+          fi
+
+      - name: Open the bump pull request
+        if: steps.guard.outputs.enabled == 'true' && steps.bump.outputs.changed == 'true'
+        uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1 # v8.1.1
+        with:
+          token: ${{ steps.app-token.outputs.token }}
+          path: kozou-site
+          base: main
+          branch: bump/kozou-core-${{ steps.bump.outputs.version }}
+          delete-branch: true
+          add-paths: |
+            package.json
+            pnpm-lock.yaml
+            src/content/docs/**
+          commit-message: 'chore(deps): bump @kozou/core to ${{ steps.bump.outputs.version }} and regenerate docs'
+          title: 'chore(deps): bump @kozou/core to ${{ steps.bump.outputs.version }} and regenerate docs'
+          body: |
+            Automated by the kozou release pipeline after publishing `${{ github.ref_name }}`.
+
+            - Bumps the pinned `@kozou/core` dependency to `${{ steps.bump.outputs.version }}`.
+            - Regenerates the product-coupled version regions with `pnpm gen:docs`.
+
+            Review the regenerated docs in the diff, then merge to deploy.
