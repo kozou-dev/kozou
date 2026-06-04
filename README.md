@@ -6,7 +6,7 @@ Kozou reads a PostgreSQL schema once and produces every form a modern team and i
 
 ## Status
 
-v0.2.0 (latest release). The CLI, schema introspection, MCP server (stdio + HTTP), reference Admin UI, and Markdown schema-document generation (`kozou docs`) are all available on npm; the runtime image lives on GHCR as a multi-arch manifest (linux/amd64 + linux/arm64). Releases land via the workflow in `.github/workflows/release.yml`.
+v0.2.1 (latest release). The CLI, schema introspection, MCP server (stdio + HTTP), reference Admin UI, and Markdown schema-document generation (`kozou docs`) are all available on npm; the runtime image lives on GHCR as a multi-arch manifest (linux/amd64 + linux/arm64). Releases land via the workflow in `.github/workflows/release.yml`.
 
 ## Quickstart
 
@@ -28,15 +28,21 @@ docker compose up
 Or pull the CLI runtime image directly:
 
 ```bash
-docker pull ghcr.io/kozou-dev/kozou:v0.2.0
-docker run --rm ghcr.io/kozou-dev/kozou:v0.2.0 inspect --help
-docker run --rm ghcr.io/kozou-dev/kozou:v0.2.0 mcp --help
+docker pull ghcr.io/kozou-dev/kozou:v0.2.1
+docker run --rm ghcr.io/kozou-dev/kozou:v0.2.1 inspect --help
+docker run --rm ghcr.io/kozou-dev/kozou:v0.2.1 mcp --help
 ```
 
 For library use (custom hosts, embedded MCP), install the workspace packages from npm:
 
 ```bash
 npm install kozou @kozou/core @kozou/introspect @kozou/mcp @kozou/svelte-ui
+```
+
+The experimental `@kozou/api` REST layer and `@kozou/codegen` TypeScript codegen ship as optional companions (the wire format and output may change without notice). Install them alongside `kozou` only when you want `kozou dev --adapter api` or `kozou codegen`:
+
+```bash
+npm install kozou @kozou/api @kozou/codegen
 ```
 
 ## Security
@@ -47,10 +53,10 @@ Designs where tenants in a multi-tenant SaaS can edit DB COMMENT text are **disc
 
 ## Requirements
 
-Runtime requirements for v0.2.0:
+Runtime requirements for v0.2.1:
 
 - **PostgreSQL 16 or later** — the canonical source of truth
-- **Docker 24 or later** (optional) — recommended for the `docker compose up` stack, which brings up PostgreSQL, PostgREST, and a `kozou` service running `kozou dev` (the bundled Admin UI + MCP HTTP server) from `ghcr.io/kozou-dev/kozou:v0.2.0` (a multi-arch image, native on linux/amd64 and linux/arm64). PostgREST stays a side-by-side container and is **not** bundled inside the Kozou image.
+- **Docker 24 or later** (optional) — recommended for the `docker compose up` stack, which brings up PostgreSQL, PostgREST, and a `kozou` service running `kozou dev` (the bundled Admin UI + MCP HTTP server) from `ghcr.io/kozou-dev/kozou:v0.2.1` (a multi-arch image, native on linux/amd64 and linux/arm64). PostgREST stays a side-by-side container and is **not** bundled inside the Kozou image.
 - **Node.js 20 or later** — for running the npm-published packages directly (`npx kozou …`)
 
 Contributors additionally need **pnpm 9 or later**. See [CONTRIBUTING.md](CONTRIBUTING.md) for the development environment setup.
@@ -60,7 +66,7 @@ Contributors additionally need **pnpm 9 or later**. See [CONTRIBUTING.md](CONTRI
 - v0.1.0 (shipped): schema introspection, MCP server (stdio), reference Admin UI, `create-kozou` scaffold, PostgREST adapter
 - v0.1.1 (shipped): MCP HTTP transport, `kozou dev` host integration, multi-arch Docker image (linux/amd64 + linux/arm64), Playwright E2E for the Admin UI, CodeQL reactivation, zod 4 / TypeScript 6 migration
 - v0.2.0 (shipped): `kozou docs` Markdown schema documents; `@policy` advisory metadata surfaced to AI agents through the MCP server
-- in development (source checkout today): the in-house `@kozou/api` REST layer — with multi-hop relation embedding and opt-in JWT + Postgres RLS — and `@kozou/codegen` TypeScript row types, exercised via `kozou dev --adapter api` and `kozou codegen`
+- v0.2.1 (shipped): multi-line `@ai` / `@policy` COMMENT blocks are now captured in full (not just the first line) in the MCP describe tools and `@kozou/api` OpenAPI; the experimental `@kozou/api` REST layer — with multi-hop relation embedding and opt-in JWT + Postgres RLS — and `@kozou/codegen` TypeScript row types are now published to npm as optional companions, exercised via `kozou dev --adapter api` and `kozou codegen`
 - v1.0: make `@kozou/api` the default and drop the PostgREST dependency; React UI exploration
 
 ## Name

@@ -117,12 +117,13 @@ expanded from the process environment at load time.
 
 ### Authentication (experimental, `--adapter api`)
 
-> **Source-checkout only.** The in-house `@kozou/api` backend is
-> experimental and not yet published to npm, so `kozou dev --adapter api`
-> works only from a source/workspace checkout of this repository. An
-> npm-installed `kozou` does not bundle `@kozou/api`; requesting
-> `--adapter api` there exits with an explicit error. The default
-> `kozou dev` (PostgREST adapter) is unaffected.
+> **Experimental, optional companion.** The in-house `@kozou/api` backend is
+> published to npm as an experimental preview (the API and wire format may
+> change without notice). It is **not** bundled with the `kozou` CLI, so
+> install it alongside `kozou` (`npm install kozou @kozou/api`) — or run from
+> a source/workspace checkout. Without it, `kozou dev --adapter api` exits
+> with an explicit error telling you to install it. The default `kozou dev`
+> (PostgREST adapter) is unaffected.
 
 By default the in-house `@kozou/api` backend (`kozou dev --adapter api`)
 runs **unauthenticated** on loopback. Add an `auth` section to require a

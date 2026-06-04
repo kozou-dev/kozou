@@ -125,6 +125,10 @@ jobs:
             dir: kozou
           - pkg: '@kozou/svelte-ui'
             dir: svelte-ui
+          - pkg: '@kozou/api'
+            dir: api
+          - pkg: '@kozou/codegen'
+            dir: codegen
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
@@ -183,11 +187,23 @@ jobs:
           #     `npm:registry.npmjs.org` (registry write auth).
           # See Step 7-Z-8 ~ 7-Z-11 for the root-cause trail.
           if [ "$GITHUB_EVENT_NAME" = "push" ]; then
-            echo "Publishing ${{ matrix.pkg }} to npm via npm CLI (pnpm pack handles the workspace:* rewrite)"
-            pnpm pack
-            TGZ=$(ls *.tgz | head -1)
-            echo "Packed tarball: $TGZ"
-            npm publish "$TGZ" --access public --provenance
+            # Idempotent publish. A tag push runs the whole matrix, but a
+            # package may already be on npm at its current version - e.g. a
+            # later tag that debuts a new package (@kozou/api / @kozou/codegen)
+            # while the already-published packages are unchanged. Skip those
+            # so `npm publish` does not fail the job on a duplicate version,
+            # which would otherwise block github-release / update-docs-site
+            # through their `needs:` on this job.
+            PKG_VERSION="$(node -p "require('./package.json').version")"
+            if npm view "${{ matrix.pkg }}@${PKG_VERSION}" version >/dev/null 2>&1; then
+              echo "${{ matrix.pkg }}@${PKG_VERSION} is already on npm; skipping publish."
+            else
+              echo "Publishing ${{ matrix.pkg }}@${PKG_VERSION} to npm via npm CLI (pnpm pack handles the workspace:* rewrite)"
+              pnpm pack
+              TGZ=$(ls *.tgz | head -1)
+              echo "Packed tarball: $TGZ"
+              npm publish "$TGZ" --access public --provenance
+            fi
           else
             echo "Dry-run mode (event=$GITHUB_EVENT_NAME, dry_run=${{ inputs.dry_run }}): pnpm publish --dry-run for ${{ matrix.pkg }}"
             pnpm publish --access public --provenance --no-git-checks --dry-run
@@ -311,7 +327,7 @@ jobs:
         # downstream consumer. (Codex 7th-pass P1.)
         run: |
           mkdir -p artifacts
-          for d in core introspect mcp kozou svelte-ui; do
+          for d in core introspect mcp kozou svelte-ui api codegen; do
             (cd "packages/$d" && pnpm pack --pack-destination ../../artifacts)
           done
           ls -la artifacts/

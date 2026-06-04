@@ -50,9 +50,10 @@ type InhouseApi = { url: string; close: () => Promise<void> };
 
 // Start the in-house @kozou/api server in-process: introspect the
 // configured database, build its SchemaContext, and serve it over a pg
-// pool. @kozou/api is an experimental, unpublished workspace package, so
-// it is imported dynamically and is only resolvable from a source /
-// workspace checkout — a published `kozou` install gets a clear error.
+// pool. @kozou/api is an experimental, optional companion package — not
+// bundled with the kozou CLI — so it is imported dynamically; when it is
+// neither installed alongside kozou nor resolvable from a workspace
+// checkout, the user gets a clear error.
 async function startInhouseApi(config: KozouConfig, port: number): Promise<InhouseApi> {
   let apiModule: typeof import('@kozou/api');
   try {
@@ -60,8 +61,9 @@ async function startInhouseApi(config: KozouConfig, port: number): Promise<Inhou
   } catch {
     throw new Error(
       `${PREFIX} --adapter api needs the experimental @kozou/api package, which is ` +
-        'not bundled in this release. Run kozou from a source / workspace checkout ' +
-        'to use it, or drop --adapter api to use the default REST adapter.',
+        'not bundled with the kozou CLI. Install it alongside kozou (npm install ' +
+        '@kozou/api), run kozou from a source / workspace checkout, or drop ' +
+        '--adapter api to use the default REST adapter.',
     );
   }
 
