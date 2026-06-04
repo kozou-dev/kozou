@@ -7,6 +7,10 @@
 // The loop creates and then deletes its row, leaving the fixture in its
 // seeded state (three authors incl. Margaret Atwood).
 
+import { readFileSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
 import { expect, test } from '@playwright/test';
 
 const TABLE = 'public.authors';
@@ -51,4 +55,24 @@ test('kozou dev --adapter api serves a full CRUD loop through the Admin UI', asy
   await expect(page.getByText(EDIT_NAME)).toHaveCount(0);
   await expect(page.getByRole('cell', { name: 'Margaret Atwood' })).toBeVisible();
   await expect(page.getByText(/3 total/)).toBeVisible();
+});
+
+// Issue #70: the in-house API advertises the kozou CLI version (not the
+// 0.0.0 package default) in its OpenAPI `info.version`. It binds loopback
+// on the port global-setup passes to `--api-port`.
+const API_PORT = 3437; // keep in sync with e2e-api/setup/global-setup.ts
+const KOZOU_VERSION = (
+  JSON.parse(
+    readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), '../../package.json'), 'utf8'),
+  ) as { version: string }
+).version;
+
+test('the in-house @kozou/api advertises the kozou version in its OpenAPI', async ({
+  request,
+}) => {
+  const res = await request.get(`http://127.0.0.1:${API_PORT}/openapi.json`);
+  expect(res.ok()).toBeTruthy();
+  const doc = (await res.json()) as { info?: { version?: string } };
+  expect(doc.info?.version).toBe(KOZOU_VERSION);
+  expect(doc.info?.version).not.toBe('0.0.0');
 });
