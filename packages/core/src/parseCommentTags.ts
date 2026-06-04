@@ -33,7 +33,11 @@ const KNOWN_WIDGETS: ReadonlySet<WidgetType> = new Set<WidgetType>([
 ]);
 
 const KNOWN_TAGS = new Set(['ai', 'widget', 'policy', 'example']);
-const TAG_RE = /^\s*@([a-zA-Z_][a-zA-Z0-9_]*)\s*:\s*(.*)$/;
+// Note: no `\s*` after the `:` — the captured value is `.trim()`ed in
+// code, and a `\s*` directly before `(.*)` makes this a polynomial-ReDoS
+// shape (both match spaces) that CodeQL flags. Leading/intra whitespace
+// uses single, non-overlapping `\s*` groups, so matching stays linear.
+const TAG_RE = /^\s*@([a-zA-Z_][a-zA-Z0-9_]*)\s*:(.*)$/;
 const INDENT_RE = /^[ \t]/;
 
 export type ExampleQuery = {
@@ -79,7 +83,7 @@ export function parseCommentTags(comment: string | null): ParsedComment {
     if (pending.kind === 'example') {
       result.examples.push({
         description: pending.description,
-        sql: dedent(pending.sqlLines).replace(/\s+$/, ''),
+        sql: dedent(pending.sqlLines).trimEnd(),
       });
     } else {
       const text = pending.lines.join('\n').trim();
@@ -160,7 +164,7 @@ export function parseCommentTags(comment: string | null): ParsedComment {
   }
   flushPending();
 
-  result.body = bodyLines.join('\n').replace(/\s+$/, '');
+  result.body = bodyLines.join('\n').trimEnd();
   return result;
 }
 
