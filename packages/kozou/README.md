@@ -21,7 +21,7 @@ npx -p kozou create-kozou my-project
 
 The package publishes through `./dist/`. `bin` exposes two entries:
 
-- `kozou` - the main multi-command CLI (`inspect` / `mcp` / `dev`)
+- `kozou` - the main multi-command CLI (`inspect` / `docs` / `mcp` / `dev`)
 - `create-kozou` - scaffolds a project directory with
   `docker-compose.yml`, `kozou.config.yaml`, `ui-hints.yaml`,
   `env.example`, and a starter migration
@@ -36,6 +36,16 @@ Context to stdout (or `--output <path>`):
 ```bash
 DATABASE_URL=postgres://kozou:kozou@localhost:5432/kozou \
   kozou inspect --format yaml > schema.yaml
+```
+
+### `kozou docs`
+
+Generates a single Markdown schema document from the database DDL +
+`COMMENT` metadata to stdout (or `--output <path>`):
+
+```bash
+DATABASE_URL=postgres://kozou:kozou@localhost:5432/kozou \
+  kozou docs --output schema.md
 ```
 
 ### `kozou mcp --stdio`
@@ -106,6 +116,13 @@ The full schema also accepts `server.ui.{port,host}`,
 expanded from the process environment at load time.
 
 ### Authentication (experimental, `--adapter api`)
+
+> **Source-checkout only.** The in-house `@kozou/api` backend is
+> experimental and not yet published to npm, so `kozou dev --adapter api`
+> works only from a source/workspace checkout of this repository. An
+> npm-installed `kozou` does not bundle `@kozou/api`; requesting
+> `--adapter api` there exits with an explicit error. The default
+> `kozou dev` (PostgREST adapter) is unaffected.
 
 By default the in-house `@kozou/api` backend (`kozou dev --adapter api`)
 runs **unauthenticated** on loopback. Add an `auth` section to require a
