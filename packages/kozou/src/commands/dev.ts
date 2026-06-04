@@ -22,6 +22,7 @@ import { existsSync } from 'node:fs';
 import { SchemaCache, startHttpServer, isLoopbackHost } from '@kozou/mcp';
 
 import { loadConfig, type KozouConfig } from '../config.js';
+import { PACKAGE_VERSION } from '../version.js';
 import {
   buildAdminUiEnv,
   resolveAdminUiEntry,
@@ -85,6 +86,9 @@ async function startInhouseApi(config: KozouConfig, port: number): Promise<Inhou
     auth: config.auth,
     host: API_HOST,
     port,
+    // Advertise the kozou CLI version in the API's `GET /` and OpenAPI
+    // `info.version`; without this it falls back to the package default.
+    version: PACKAGE_VERSION,
     logPrefix: `${PREFIX} api`,
   });
 
