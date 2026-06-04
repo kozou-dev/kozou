@@ -1,7 +1,6 @@
 {
   "name": "@kozou/api",
-  "version": "0.0.0",
-  "private": true,
+  "version": "0.2.1",
   "description": "Kozou's own REST layer: serves table CRUD / VIEW reads / OpenAPI from a SchemaContext (Kozou v0.2 spec, experimental).",
   "license": "Apache-2.0",
   "repository": {
@@ -26,9 +25,14 @@
   "files": [
     "dist"
   ],
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
   "scripts": {
     "typecheck": "tsc -p tsconfig.test.json",
     "build": "tsc",
+    "prepublishOnly": "pnpm run build",
     "test": "vitest run --coverage"
   },
   "dependencies": {

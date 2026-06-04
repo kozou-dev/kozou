@@ -7,10 +7,10 @@
 //   4. Build a SchemaContext (@kozou/core.buildSchemaContext).
 //   5. Emit TypeScript row types (@kozou/codegen) and write them out.
 //
-// @kozou/codegen is an experimental, unpublished workspace package, so it is
-// imported dynamically and is only resolvable from a source / workspace
-// checkout — a published `kozou` install gets a clear error (mirrors the
-// `--adapter api` handling in dev.ts).
+// @kozou/codegen is an experimental, optional companion package — not bundled
+// with the kozou CLI — so it is imported dynamically; when it is neither
+// installed alongside kozou nor resolvable from a workspace checkout, the user
+// gets a clear error (mirrors the `--adapter api` handling in dev.ts).
 
 import { writeFile } from 'node:fs/promises';
 import { buildSchemaContext, loadUIHints } from '@kozou/core';
@@ -36,7 +36,8 @@ export async function codegenCommand(opts: CodegenOptions = {}): Promise<void> {
   } catch {
     throw new Error(
       `${PREFIX} needs the experimental @kozou/codegen package, which is not ` +
-        'bundled in this release. Run kozou from a source / workspace checkout to use it.',
+        'bundled with the kozou CLI. Install it alongside kozou (npm install ' +
+        '@kozou/codegen), or run kozou from a source / workspace checkout.',
     );
   }
 

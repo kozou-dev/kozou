@@ -1,7 +1,8 @@
 # @kozou/api
 
-> **Experimental (Kozou v0.2).** Not published to npm yet. API and wire
-> format may change without notice while the package is stabilising.
+> **Experimental (Kozou v0.2).** Published to npm as an experimental
+> preview; the API and wire format may change without notice while the
+> package is stabilising.
 
 Kozou's own REST layer. Given a `SchemaContext` (from `@kozou/introspect`
 + `@kozou/core`) and a PostgreSQL connection, it serves the tables and
