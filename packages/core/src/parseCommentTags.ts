@@ -2,14 +2,18 @@
 // `@policy:`, `@example:`). See Kozou v0.1 design spec §10.1 for the
 // tag vocabulary and §7.3.6 for the `exampleQueries` MCP surface.
 //
-// `@example:` is the only multi-line tag in v0.1: the line itself
-// carries the human-facing description (may be empty), and any
-// indented continuation lines form the SQL body. The first non-
-// indented line (or another `@tag:`) terminates the block, and the
-// shared leading indent across continuation lines is stripped so the
-// resulting `sql` reads as written without the COMMENT-imposed
-// indent. The block is lifted out of `body` because the SQL is
-// surfaced separately via `examples`.
+// `@ai:`, `@policy:`, and `@example:` are multi-line: the tag line
+// carries the first value (may be empty), and indented continuation
+// lines extend it. A blank line, a non-indented line, or the next
+// `@tag:` terminates the block.
+//   - `@ai:` / `@policy:` capture the whole block (first line plus
+//     trimmed continuation lines, joined) as a single entry, so a
+//     multi-line note is not truncated to its first line. The lines
+//     stay in `body` too (forward compat, like a single-line tag).
+//   - `@example:` collects indented continuation lines as the SQL body;
+//     the shared leading indent is stripped so `sql` reads as written,
+//     and the block is lifted out of `body` because it is surfaced
+//     separately via `examples`.
 
 import type { WidgetType } from './types/context.js';
 
@@ -49,10 +53,12 @@ function isWidgetType(value: string): value is WidgetType {
   return KNOWN_WIDGETS.has(value as WidgetType);
 }
 
-interface PendingExample {
-  description: string;
-  sqlLines: string[];
-}
+type Pending =
+  | { kind: 'example'; description: string; sqlLines: string[] }
+  // `@ai:` / `@policy:` blocks: `lines[0]` is the tag-line value; any
+  // indented, non-blank continuation lines (trimmed) are appended so a
+  // multi-line note is captured whole, not just its first line.
+  | { kind: 'ai' | 'policy'; lines: string[] };
 
 export function parseCommentTags(comment: string | null): ParsedComment {
   const result: ParsedComment = {
@@ -66,30 +72,47 @@ export function parseCommentTags(comment: string | null): ParsedComment {
 
   const lines = comment.split('\n');
   const bodyLines: string[] = [];
-  let pending: PendingExample | null = null;
+  let pending: Pending | null = null;
 
   function flushPending() {
     if (pending === null) return;
-    result.examples.push({
-      description: pending.description,
-      sql: dedent(pending.sqlLines).replace(/\s+$/, ''),
-    });
+    if (pending.kind === 'example') {
+      result.examples.push({
+        description: pending.description,
+        sql: dedent(pending.sqlLines).replace(/\s+$/, ''),
+      });
+    } else {
+      const text = pending.lines.join('\n').trim();
+      if (pending.kind === 'ai') result.ai.push(text);
+      else result.policy.push(text);
+    }
     pending = null;
   }
 
   for (const line of lines) {
-    // Inside an `@example:` block: indented (or blank) lines extend the
-    // SQL body. An empty line is treated as part of the SQL paragraph
-    // so callers can include blank separators inside multi-statement
-    // examples.
+    // Continue an open block before treating the line as body / a tag.
     if (pending !== null) {
-      if (line.length === 0 || INDENT_RE.test(line)) {
-        pending.sqlLines.push(line);
+      if (pending.kind === 'example') {
+        // Indented (or blank) lines extend the SQL body. A blank line is
+        // kept so multi-statement examples can include separators.
+        if (line.length === 0 || INDENT_RE.test(line)) {
+          pending.sqlLines.push(line);
+          continue;
+        }
+      } else if (
+        // `@ai:` / `@policy:` continue onto indented, non-blank lines
+        // (up to the next tag, a blank line, or a non-indented line).
+        // Continuation lines stay in `body` too, like the tag line.
+        line.trim().length > 0 &&
+        INDENT_RE.test(line) &&
+        !TAG_RE.test(line)
+      ) {
+        pending.lines.push(line.trim());
+        bodyLines.push(line);
         continue;
       }
-      // Non-indented line ends the example.
+      // Anything else ends the block; re-process this line below.
       flushPending();
-      // Fall through to handle this line normally.
     }
 
     const match = TAG_RE.exec(line);
@@ -101,8 +124,8 @@ export function parseCommentTags(comment: string | null): ParsedComment {
     const value = match[2]!.trim();
 
     if (tag === 'ai') {
-      result.ai.push(value);
       bodyLines.push(line);
+      pending = { kind: 'ai', lines: [value] };
       continue;
     }
     if (tag === 'widget') {
@@ -117,15 +140,15 @@ export function parseCommentTags(comment: string | null): ParsedComment {
       continue;
     }
     if (tag === 'policy') {
-      result.policy.push(value);
       bodyLines.push(line);
+      pending = { kind: 'policy', lines: [value] };
       continue;
     }
     if (tag === 'example') {
       // Open an example block. The continuation collector above keeps
       // pushing indented lines into `sqlLines` until the next non-
       // indented line, the next tag, or the end of the comment.
-      pending = { description: value, sqlLines: [] };
+      pending = { kind: 'example', description: value, sqlLines: [] };
       continue;
     }
     if (!KNOWN_TAGS.has(tag)) {

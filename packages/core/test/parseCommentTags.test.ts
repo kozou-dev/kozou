@@ -37,6 +37,51 @@ describe('parseCommentTags', () => {
     expect(r.ai).toEqual(['instruction one', 'instruction two']);
   });
 
+  it('multi-line @ai block -> captured whole (not just the first line), kept in body', () => {
+    const r = parseCommentTags(
+      'Artists master.\n' +
+        '@ai: display_name is the public label, legal_name is internal.\n' +
+        '     treat death_year IS NULL as still active.\n' +
+        '     exclude rows where deleted_at IS NOT NULL.',
+    );
+    expect(r.ai).toEqual([
+      'display_name is the public label, legal_name is internal.\n' +
+        'treat death_year IS NULL as still active.\n' +
+        'exclude rows where deleted_at IS NOT NULL.',
+    ]);
+    // The whole block stays in the body too (forward compat).
+    expect(r.body).toContain('@ai: display_name is the public label');
+    expect(r.body).toContain('treat death_year IS NULL as still active.');
+    expect(r.body).toContain('exclude rows where deleted_at IS NOT NULL.');
+  });
+
+  it('@ai block ends at a blank line', () => {
+    const r = parseCommentTags('@ai: first line\n  second line\n\nUnrelated trailing prose.');
+    expect(r.ai).toEqual(['first line\nsecond line']);
+    expect(r.body).toContain('Unrelated trailing prose.');
+  });
+
+  it('@ai block ends at a non-indented line', () => {
+    const r = parseCommentTags('@ai: note line\nNot indented, so body.');
+    expect(r.ai).toEqual(['note line']);
+    expect(r.body).toContain('Not indented, so body.');
+  });
+
+  it('@ai and @policy multi-line blocks each end at the next tag', () => {
+    const r = parseCommentTags(
+      '@ai: ai note\n  ai continued\n@policy: policy note\n  policy continued',
+    );
+    expect(r.ai).toEqual(['ai note\nai continued']);
+    expect(r.policy).toEqual(['policy note\npolicy continued']);
+  });
+
+  it('multi-line @policy block -> captured whole', () => {
+    const r = parseCommentTags(
+      '@policy: never reuse a number once assigned.\n     blank stays allowed.',
+    );
+    expect(r.policy).toEqual(['never reuse a number once assigned.\nblank stays allowed.']);
+  });
+
   it('single @widget -> widget set, line removed from body', () => {
     const r = parseCommentTags('Inventory status.\n@widget: enum-select');
     expect(r.widget).toBe('enum-select');
