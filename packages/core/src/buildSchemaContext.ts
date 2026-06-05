@@ -95,7 +95,7 @@ function buildColumn(input: {
   };
 }
 
-function buildRelations(table: RawTable): RelationContext[] {
+function buildRelations(table: RawTable, issues: BuildIssue[]): RelationContext[] {
   const uniqueColumnSets = new Set<string>();
   for (const idx of table.indexes) {
     if (idx.unique) {
@@ -106,14 +106,14 @@ function buildRelations(table: RawTable): RelationContext[] {
     uniqueColumnSets.add(table.primaryKey.slice().sort().join(','));
   }
 
-  return table.foreignKeys
-    .filter((fk) => fk.columns.length === 1)
-    .map<RelationContext>((fk) => {
+  const relations: RelationContext[] = [];
+  for (const fk of table.foreignKeys) {
+    if (fk.columns.length === 1) {
       const fkKey = fk.columns.slice().sort().join(',');
       const cardinality: RelationContext['cardinality'] = uniqueColumnSets.has(fkKey)
         ? 'one-to-one'
         : 'many-to-one';
-      return {
+      relations.push({
         field: fk.columns[0]!,
         references: {
           schema: fk.referencedSchema,
@@ -122,8 +122,27 @@ function buildRelations(table: RawTable): RelationContext[] {
         },
         cardinality,
         meaning: fk.comment,
-      };
-    });
+      });
+      continue;
+    }
+    // Composite (multi-column) foreign keys are not yet embeddable:
+    // RelationContext models a single-column relation (`field` /
+    // `references.column`). Record the exclusion as a BuildIssue instead of
+    // dropping it silently, so MCP / CLI consumers can see why the relation
+    // is missing from `relations` and `relation-select`.
+    if (fk.columns.length > 1) {
+      issues.push({
+        path: `tables.${table.name}.relations.${fk.name}`,
+        message:
+          `Foreign key "${fk.name}" on "${table.schema}.${table.name}" spans multiple columns ` +
+          `(${fk.columns.join(', ')}); composite foreign keys are not yet embeddable and are ` +
+          `excluded from relations / relation-select.`,
+      });
+    }
+    // A zero-column foreign key cannot come from real PostgreSQL introspection;
+    // the degenerate case is skipped silently, matching the prior behaviour.
+  }
+  return relations;
 }
 
 function buildTableContext(input: {
@@ -162,7 +181,7 @@ function buildTableContext(input: {
     }
   }
 
-  const relations = buildRelations(table);
+  const relations = buildRelations(table, issues);
   for (const rel of relations) {
     const refKey = `${rel.references.schema}.${rel.references.table}`;
     if (!knownTables.has(refKey)) {

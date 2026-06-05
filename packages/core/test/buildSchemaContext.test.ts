@@ -171,6 +171,119 @@ describe('buildSchemaContext', () => {
     expect(profiles.relations[0]!.cardinality).toBe('one-to-one');
   });
 
+  it('composite FK -> excluded from relations + warns with a BuildIssue', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const fk: RawForeignKey = {
+      name: 'order_items_order_fkey',
+      columns: ['order_id', 'order_line'],
+      referencedSchema: 'public',
+      referencedTable: 'orders',
+      referencedColumns: ['id', 'line'],
+      onDelete: 'NO ACTION',
+      onUpdate: 'NO ACTION',
+      comment: 'Reference to the parent order line',
+    };
+    const raw = makeRaw({
+      tables: [
+        makeTable('orders', {
+          columns: [makeCol('id', 'uuid'), makeCol('line', 'int4')],
+          primaryKey: ['id', 'line'],
+        }),
+        makeTable('order_items', {
+          columns: [makeCol('order_id', 'uuid'), makeCol('order_line', 'int4')],
+          foreignKeys: [fk],
+        }),
+      ],
+    });
+    const ctx = await buildSchemaContext({ raw });
+    const orderItems = ctx.tables.find((t) => t.name === 'order_items')!;
+    // Composite FK is not emitted as an embeddable relation...
+    expect(orderItems.relations).toHaveLength(0);
+    // ...but its exclusion is surfaced, not silent.
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringMatching(
+        /order_items_order_fkey.*spans multiple columns \(order_id, order_line\)/,
+      ),
+    );
+  });
+
+  it('composite FK with strict=true -> KozouBuildError throw', async () => {
+    const fk: RawForeignKey = {
+      name: 'order_items_order_fkey',
+      columns: ['order_id', 'order_line'],
+      referencedSchema: 'public',
+      referencedTable: 'orders',
+      referencedColumns: ['id', 'line'],
+      onDelete: 'NO ACTION',
+      onUpdate: 'NO ACTION',
+      comment: null,
+    };
+    const raw = makeRaw({
+      tables: [
+        makeTable('order_items', {
+          columns: [makeCol('order_id', 'uuid'), makeCol('order_line', 'int4')],
+          foreignKeys: [fk],
+        }),
+      ],
+    });
+    await expect(buildSchemaContext({ raw, strict: true })).rejects.toBeInstanceOf(
+      KozouBuildError,
+    );
+  });
+
+  it('composite FK excluded while a single-column FK on the same table survives', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const singleFk: RawForeignKey = {
+      name: 'order_items_product_fkey',
+      columns: ['product_id'],
+      referencedSchema: 'public',
+      referencedTable: 'products',
+      referencedColumns: ['id'],
+      onDelete: 'NO ACTION',
+      onUpdate: 'NO ACTION',
+      comment: null,
+    };
+    const compositeFk: RawForeignKey = {
+      name: 'order_items_order_fkey',
+      columns: ['order_id', 'order_line'],
+      referencedSchema: 'public',
+      referencedTable: 'orders',
+      referencedColumns: ['id', 'line'],
+      onDelete: 'NO ACTION',
+      onUpdate: 'NO ACTION',
+      comment: null,
+    };
+    const raw = makeRaw({
+      tables: [
+        makeTable('products', { columns: [makeCol('id', 'uuid')], primaryKey: ['id'] }),
+        makeTable('orders', {
+          columns: [makeCol('id', 'uuid'), makeCol('line', 'int4')],
+          primaryKey: ['id', 'line'],
+        }),
+        makeTable('order_items', {
+          columns: [
+            makeCol('order_id', 'uuid'),
+            makeCol('order_line', 'int4'),
+            makeCol('product_id', 'uuid'),
+          ],
+          foreignKeys: [singleFk, compositeFk],
+        }),
+      ],
+    });
+    const ctx = await buildSchemaContext({ raw });
+    const orderItems = ctx.tables.find((t) => t.name === 'order_items')!;
+    // The single-column FK is unaffected by the composite exclusion.
+    expect(orderItems.relations).toHaveLength(1);
+    expect(orderItems.relations[0]).toMatchObject({
+      field: 'product_id',
+      references: { schema: 'public', table: 'products', column: 'id' },
+      cardinality: 'many-to-one',
+    });
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringMatching(/order_items_order_fkey.*spans multiple columns/),
+    );
+  });
+
   it('CHECK -> enumValues + widget enum-select', async () => {
     const check: RawCheck = {
       name: 'status_check',
