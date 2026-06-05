@@ -83,7 +83,9 @@ export type WidgetType =
   | 'currency';
 
 export type RelationContext = {
-  /** Column on this side of the relation (v0.1 limits this to 1) */
+  /** Column on this side of the relation. A relation maps a single column;
+   *  composite (multi-column) foreign keys are not yet embeddable, so they
+   *  are excluded here and reported as a build issue (see buildSchemaContext). */
   field: string;
   references: {
     schema: string;
