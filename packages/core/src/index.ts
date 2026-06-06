@@ -37,6 +37,7 @@ export {
 
 export type {
   DataAdapter,
+  ResourceId,
   ListParams,
   ListResult,
   SortSpec,

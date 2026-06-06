@@ -228,22 +228,58 @@ export function buildListQuery(
   };
 }
 
+/** Primary key columns for an item-by-id operation. A PK-less resource (a
+ *  view, or a table without a primary key) cannot be addressed by id. */
+function primaryKey(resource: Resource): string[] {
+  if (resource.primaryKey.length === 0) {
+    throw badRequest(
+      `Resource "${resource.name}" has no primary key; fetch/update/delete by id is unavailable.`,
+    );
+  }
+  return resource.primaryKey;
+}
+
+/**
+ * Resolve the bound key values from an item id segment.
+ *
+ * A single-column PK takes the id verbatim, so the value may itself contain a
+ * comma. A composite PK splits the segment on commas into one component per
+ * key column, in `primaryKey` declaration order; the component count must
+ * match the key arity (else 400).
+ *
+ * Limitation: with a composite key, a key *value* cannot contain a comma (the
+ * segment is split after URL-decoding). Single-column keys are unaffected.
+ */
+function resolveKeyValues(resource: Resource, id: string, keyColumns: string[]): string[] {
+  if (keyColumns.length === 1) return [id];
+  const parts = id.split(',');
+  if (parts.length !== keyColumns.length) {
+    throw badRequest(
+      `Resource "${resource.name}" has a composite primary key (${keyColumns.join(', ')}); ` +
+        `expected ${keyColumns.length} comma-separated key components, got ${parts.length}.`,
+    );
+  }
+  return parts;
+}
+
+/** `pk0 = $start AND pk1 = $start+1 AND ...` for the given key columns. */
+function keyWhereClause(keyColumns: string[], startParam: number): string {
+  return keyColumns.map((c, i) => `${quoteIdent(c)} = $${startParam + i}`).join(' AND ');
+}
+
 export function buildGetQuery(
   resource: Resource,
   id: string,
   embed?: EmbedNode[],
 ): BuiltGetQuery {
-  if (resource.primaryKey.length !== 1) {
-    throw badRequest(
-      `Resource "${resource.name}" does not have a single-column primary key; fetch-by-id is unavailable.`,
-    );
-  }
-  const pk = resource.primaryKey[0];
+  const keyColumns = primaryKey(resource);
+  const keyValues = resolveKeyValues(resource, id, keyColumns);
   const table = qualified(resource);
   const embedSql =
     embed && embed.length > 0 ? buildEmbedSelectFragment(embed, table, { n: 0 }) : '';
-  const text = `SELECT ${selectColumns(resource)}${embedSql} FROM ${table} WHERE ${quoteIdent(pk)} = $1 LIMIT 1`;
-  return { text, values: [id] };
+  const where = keyWhereClause(keyColumns, 1);
+  const text = `SELECT ${selectColumns(resource)}${embedSql} FROM ${table} WHERE ${where} LIMIT 1`;
+  return { text, values: keyValues };
 }
 
 // --- Write path (Phase 2) --------------------------------------------------
@@ -317,24 +353,27 @@ export function buildUpdateQuery(
   id: string,
   data: Record<string, unknown>,
 ): BuiltMutation {
-  const pk = singlePrimaryKey(resource);
+  const keyColumns = primaryKey(resource);
   const keys = Object.keys(data);
   if (keys.length === 0) {
     throw badRequest(`No fields to update on resource "${resource.name}".`);
   }
   assertKnownColumns(resource, keys);
+  const keyValues = resolveKeyValues(resource, id, keyColumns);
 
   const sets = keys.map((k, i) => `${quoteIdent(k)} = $${i + 1}`).join(', ');
-  const values = keys.map((k) => data[k]);
-  values.push(id);
-  const text = `UPDATE ${qualified(resource)} SET ${sets} WHERE ${quoteIdent(pk)} = $${values.length} RETURNING ${selectColumns(resource)}`;
+  const values = [...keys.map((k) => data[k]), ...keyValues];
+  const where = keyWhereClause(keyColumns, keys.length + 1);
+  const text = `UPDATE ${qualified(resource)} SET ${sets} WHERE ${where} RETURNING ${selectColumns(resource)}`;
   return { text, values };
 }
 
 export function buildDeleteQuery(resource: Resource, id: string): BuiltMutation {
-  const pk = singlePrimaryKey(resource);
-  const text = `DELETE FROM ${qualified(resource)} WHERE ${quoteIdent(pk)} = $1 RETURNING ${selectColumns(resource)}`;
-  return { text, values: [id] };
+  const keyColumns = primaryKey(resource);
+  const keyValues = resolveKeyValues(resource, id, keyColumns);
+  const where = keyWhereClause(keyColumns, 1);
+  const text = `DELETE FROM ${qualified(resource)} WHERE ${where} RETURNING ${selectColumns(resource)}`;
+  return { text, values: keyValues };
 }
 
 function clampRelationLimit(limit: number | undefined): number {

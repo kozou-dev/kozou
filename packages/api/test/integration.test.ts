@@ -12,6 +12,10 @@ import { startApiServer, type ApiServerHandle, type Queryable } from '../src/ind
 
 const ABSENT_UUID = '00000000-0000-0000-0000-000000000000';
 
+// Fixed UUIDs for the composite-primary-key fixture (order_lines).
+const ORDER_A = '11111111-1111-1111-1111-111111111111';
+const ORDER_B = '22222222-2222-2222-2222-222222222222';
+
 type ListBody = {
   rows: Record<string, unknown>[];
   total: number;
@@ -57,6 +61,21 @@ describe('@kozou/api integration (generic fixture)', () => {
         [edition.rows[0].id],
       );
       inventoryItemId = item.rows[0].id;
+
+      // A composite-primary-key table for the item-by-id (§3) tests.
+      await client.query(
+        `CREATE TABLE order_lines (
+           order_id uuid NOT NULL,
+           line_no integer NOT NULL,
+           qty integer NOT NULL,
+           PRIMARY KEY (order_id, line_no)
+         )`,
+      );
+      await client.query(
+        `INSERT INTO order_lines (order_id, line_no, qty)
+         VALUES ($1, 1, 10), ($1, 2, 20), ($2, 1, 5)`,
+        [ORDER_A, ORDER_B],
+      );
     } finally {
       await client.end();
     }
@@ -412,6 +431,62 @@ describe('@kozou/api integration (generic fixture)', () => {
     const booksEmbeds = body.components.schemas[`${db.schema}.books`]['x-kozou-embeds'];
     expect(booksEmbeds?.some((e) => e.field === 'author_id')).toBe(true);
     expect(body.paths['/books'].get?.parameters?.some((p) => p.name === 'embed')).toBe(true);
+  });
+
+  // --- Composite primary key, item-by-id (Kozou v1.0 spec §3) --------------
+
+  it('lists a composite-primary-key table', async () => {
+    const { status, body } = await getJson<ListBody>('/order_lines');
+    expect(status).toBe(200);
+    expect(body.total).toBe(3);
+  });
+
+  it('fetches a row by its composite key and distinguishes the components', async () => {
+    const first = await getJson<{ qty: number }>(`/order_lines/${ORDER_A},1`);
+    expect(first.status).toBe(200);
+    expect(first.body.qty).toBe(10);
+    const second = await getJson<{ qty: number }>(`/order_lines/${ORDER_A},2`);
+    expect(second.body.qty).toBe(20);
+  });
+
+  it('returns 400 when the composite key arity is wrong', async () => {
+    const { status } = await getJson(`/order_lines/${ORDER_A}`); // one component for a 2-col PK
+    expect(status).toBe(400);
+  });
+
+  it('returns 404 for a non-existent composite key', async () => {
+    const { status } = await getJson(`/order_lines/${ORDER_A},999`);
+    expect(status).toBe(404);
+  });
+
+  it('updates exactly the row addressed by its composite key', async () => {
+    const updated = await fetch(`${base}/order_lines/${ORDER_A},1`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ qty: 99 }),
+    });
+    expect(updated.status).toBe(200);
+    expect(((await updated.json()) as { qty: number }).qty).toBe(99);
+    // the sibling row (same order_id, different line_no) is untouched
+    const sibling = await getJson<{ qty: number }>(`/order_lines/${ORDER_A},2`);
+    expect(sibling.body.qty).toBe(20);
+  });
+
+  it('deletes the row addressed by its composite key', async () => {
+    const deleted = await fetch(`${base}/order_lines/${ORDER_B},1`, { method: 'DELETE' });
+    expect(deleted.status).toBe(200);
+    const gone = await getJson(`/order_lines/${ORDER_B},1`);
+    expect(gone.status).toBe(404);
+  });
+
+  it('documents the composite key format in the OpenAPI {id} parameter', async () => {
+    const { body } = await getJson<{
+      paths: Record<string, { get?: { parameters?: { name: string; description?: string }[] } }>;
+    }>('/openapi.json');
+    const idParam = body.paths['/order_lines/{id}'].get?.parameters?.find((p) => p.name === 'id');
+    expect(idParam?.description).toMatch(/composite primary key/i);
+    expect(idParam?.description).toContain('order_id');
+    expect(idParam?.description).toContain('line_no');
   });
 
   it('returns 404 for an unknown resource', async () => {

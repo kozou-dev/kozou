@@ -212,14 +212,36 @@ describe('buildGetQuery', () => {
     expect(q.values).toEqual(['abc']);
   });
 
-  it('rejects a composite primary key', () => {
+  it('builds a fetch-by-id query against a composite primary key', () => {
     const composite = tableResource('cp', [col('a', 'text'), col('b', 'text')], ['a', 'b']);
-    expect(() => buildGetQuery(composite, '1')).toThrow(/single-column primary key/);
+    const q = buildGetQuery(composite, 'x,y');
+    expect(q.text).toBe(
+      'SELECT "a", "b" FROM "public"."cp" WHERE "a" = $1 AND "b" = $2 LIMIT 1',
+    );
+    expect(q.values).toEqual(['x', 'y']);
+  });
+
+  it('rejects a composite id with the wrong number of components (400)', () => {
+    const composite = tableResource('cp', [col('a', 'text'), col('b', 'text')], ['a', 'b']);
+    try {
+      buildGetQuery(composite, 'only-one');
+      expect.unreachable('should have thrown');
+    } catch (err) {
+      expect(err).toBeInstanceOf(KozouApiError);
+      expect((err as KozouApiError).status).toBe(400);
+      expect((err as KozouApiError).message).toMatch(/composite primary key.*expected 2/);
+    }
+  });
+
+  it('does not split a single-column key, so a comma in the value is preserved', () => {
+    const q = buildGetQuery(authors, 'a,b');
+    expect(q.text).toContain('WHERE "id" = $1 LIMIT 1');
+    expect(q.values).toEqual(['a,b']);
   });
 
   it('rejects a view (no primary key)', () => {
     const v = viewResource('vw', [col('a', 'text')]);
-    expect(() => buildGetQuery(v, '1')).toThrow(/single-column primary key/);
+    expect(() => buildGetQuery(v, '1')).toThrow(/no primary key/);
   });
 });
 
@@ -262,9 +284,22 @@ describe('buildUpdateQuery', () => {
     expect(() => buildUpdateQuery(authors, 'abc', { bogus: 1 })).toThrow(/Unknown column "bogus"/);
   });
 
-  it('rejects a resource without a single-column primary key', () => {
-    const composite = tableResource('cp', [col('a', 'text'), col('b', 'text')], ['a', 'b']);
-    expect(() => buildUpdateQuery(composite, '1', { a: 'x' })).toThrow(/single-column primary key/);
+  it('matches on every column of a composite primary key', () => {
+    const composite = tableResource(
+      'cp',
+      [col('a', 'text'), col('b', 'text'), col('note', 'text')],
+      ['a', 'b'],
+    );
+    const q = buildUpdateQuery(composite, 'x,y', { note: 'hi' });
+    expect(q.text).toBe(
+      'UPDATE "public"."cp" SET "note" = $1 WHERE "a" = $2 AND "b" = $3 RETURNING "a", "b", "note"',
+    );
+    expect(q.values).toEqual(['hi', 'x', 'y']);
+  });
+
+  it('rejects a PK-less resource (400)', () => {
+    const v = viewResource('vw', [col('a', 'text')]);
+    expect(() => buildUpdateQuery(v, '1', { a: 'x' })).toThrow(/no primary key/);
   });
 });
 
@@ -277,9 +312,18 @@ describe('buildDeleteQuery', () => {
     expect(q.values).toEqual(['abc']);
   });
 
-  it('rejects a resource without a single-column primary key', () => {
+  it('deletes by every column of a composite primary key', () => {
+    const composite = tableResource('cp', [col('a', 'text'), col('b', 'text')], ['a', 'b']);
+    const q = buildDeleteQuery(composite, 'x,y');
+    expect(q.text).toBe(
+      'DELETE FROM "public"."cp" WHERE "a" = $1 AND "b" = $2 RETURNING "a", "b"',
+    );
+    expect(q.values).toEqual(['x', 'y']);
+  });
+
+  it('rejects a PK-less resource (400)', () => {
     const v = viewResource('vw', [col('a', 'text')]);
-    expect(() => buildDeleteQuery(v, '1')).toThrow(/single-column primary key/);
+    expect(() => buildDeleteQuery(v, '1')).toThrow(/no primary key/);
   });
 });
 

@@ -218,13 +218,7 @@ function resourcePaths(
     };
   }
 
-  const idParam = {
-    name: 'id',
-    in: 'path',
-    required: true,
-    schema: { type: 'string' },
-    description: 'Primary key of the row.',
-  };
+  const idParam = itemIdParam(resource);
   const item: JsonObject = {
     get: {
       summary: `Fetch a ${label} row by id`,
@@ -259,6 +253,27 @@ function resourcePaths(
     [`/${segment}`]: collection,
     [`/${segment}/{id}`]: item,
   };
+}
+
+/** The `{id}` path parameter. A composite primary key is addressed by
+ *  comma-joining its components — in `primaryKey` declaration order — into the
+ *  single `{id}` segment, each component percent-encoded. */
+function itemIdParam(resource: ResourceLike): JsonObject {
+  const pk = 'primaryKey' in resource ? resource.primaryKey : [];
+  let description: string;
+  if (pk.length > 1) {
+    const cols = pk.map((c) => `\`${c}\``).join(', ');
+    description =
+      `Composite primary key: the components (${cols}) in this order, joined by an ` +
+      `unescaped comma in the single path segment. Percent-encode reserved characters ` +
+      `within a component; a component value cannot itself contain a comma (the segment ` +
+      `is split on commas after URL-decoding).`;
+  } else if (pk.length === 1) {
+    description = `Primary key of the row (\`${pk[0]}\`).`;
+  } else {
+    description = 'Primary key of the row.';
+  }
+  return { name: 'id', in: 'path', required: true, schema: { type: 'string' }, description };
 }
 
 function listParameters(): JsonObject[] {
