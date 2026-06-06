@@ -58,6 +58,10 @@ export {
   type RelationOptionsParams,
   type BuiltRelationOptions,
   type SortDirection,
+  type Filter,
+  type FilterOperator,
+  type ScalarFilterOperator,
+  type IsKeyword,
 } from './query-builder.js';
 
 export { buildOpenApiDocument, type OpenApiOptions } from './openapi.js';

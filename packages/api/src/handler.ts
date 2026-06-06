@@ -13,6 +13,8 @@ import {
   buildRelationOptionsQuery,
   type ListQueryParams,
   type SortDirection,
+  type Filter,
+  type FilterOperator,
 } from './query-builder.js';
 import { parseEmbedParam, resolveEmbedSpec } from './embed.js';
 
@@ -50,7 +52,10 @@ export type ApiHttpResult = {
   body: unknown;
 };
 
-const RESERVED_PARAMS = new Set(['page', 'pageSize', 'sort', 'search', 'embed']);
+/** List query keys consumed as controls (not column filters). Shared with the
+ *  OpenAPI generator so it never advertises a control key as a filterable
+ *  column. */
+export const RESERVED_PARAMS = new Set(['page', 'pageSize', 'sort', 'search', 'embed']);
 
 export async function handleApiRequest(
   deps: ApiHandlerDeps,
@@ -258,14 +263,75 @@ export function parseListParams(query: URLSearchParams): ListQueryParams {
   const sort = parseSort(query.get('sort'));
   if (sort.length > 0) params.sort = sort;
 
-  const filters: Record<string, string> = {};
+  // Each non-reserved query entry is one horizontal filter. Repeated keys are
+  // kept (not collapsed) so a column can carry several filters — e.g. a
+  // `?price=gte.10&price=lte.20` range — that combine with AND.
+  const filters: Filter[] = [];
   for (const [key, value] of query.entries()) {
     if (RESERVED_PARAMS.has(key)) continue;
-    filters[key] = value; // last value wins on repeated keys
+    filters.push(parseFilter(key, value));
   }
-  if (Object.keys(filters).length > 0) params.filters = filters;
+  if (filters.length > 0) params.filters = filters;
 
   return params;
+}
+
+const FILTER_OPERATORS = new Set<FilterOperator>([
+  'eq',
+  'neq',
+  'gt',
+  'gte',
+  'lt',
+  'lte',
+  'like',
+  'ilike',
+  'in',
+  'is',
+]);
+
+function isFilterOperator(token: string): token is FilterOperator {
+  return (FILTER_OPERATORS as Set<string>).has(token);
+}
+
+/**
+ * Parse one `?<column>=<raw>` entry into a structured {@link Filter}.
+ *
+ * Grammar: `<op>.<value>` where `op` is one of the known operators; the split
+ * is on the FIRST `.` only (so values may contain dots). A value whose prefix
+ * is not a known operator — or which has no leading `op.` at all — is treated
+ * as an equality match, keeping the legacy `?<column>=<value>` form working.
+ * The split uses `indexOf`, not a regular expression (ReDoS-safe).
+ */
+function parseFilter(column: string, raw: string): Filter {
+  const dot = raw.indexOf('.');
+  if (dot > 0) {
+    const maybeOp = raw.slice(0, dot);
+    if (isFilterOperator(maybeOp)) {
+      return buildFilter(column, maybeOp, raw.slice(dot + 1));
+    }
+  }
+  return { column, op: 'eq', value: raw };
+}
+
+function buildFilter(column: string, op: FilterOperator, rhs: string): Filter {
+  if (op === 'in') {
+    if (rhs.length < 2 || rhs[0] !== '(' || rhs[rhs.length - 1] !== ')') {
+      throw badRequest(`Filter "${column}=in.${rhs}" must look like "in.(v1,v2,...)".`);
+    }
+    const inner = rhs.slice(1, -1);
+    // Note: values cannot contain a comma (no quoting is supported in v1.0).
+    const values = inner.length === 0 ? [] : inner.split(',');
+    return { column, op: 'in', values };
+  }
+  if (op === 'is') {
+    if (rhs === 'null' || rhs === 'notnull' || rhs === 'true' || rhs === 'false') {
+      return { column, op: 'is', keyword: rhs };
+    }
+    throw badRequest(
+      `Filter "${column}=is.${rhs}" must be one of is.null, is.notnull, is.true, is.false.`,
+    );
+  }
+  return { column, op, value: rhs };
 }
 
 function parsePositiveInt(raw: string | null): number | undefined {

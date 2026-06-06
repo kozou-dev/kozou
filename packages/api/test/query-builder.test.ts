@@ -46,12 +46,94 @@ describe('buildListQuery', () => {
   });
 
   it('applies column-equality filters as bound parameters', () => {
-    const q = buildListQuery(authors, { filters: { display_name: 'Ada' } });
+    const q = buildListQuery(authors, {
+      filters: [{ column: 'display_name', op: 'eq', value: 'Ada' }],
+    });
     expect(q.dataText).toContain('WHERE "display_name" = $1');
     expect(q.dataText).toContain('LIMIT $2 OFFSET $3');
     expect(q.dataValues).toEqual(['Ada', DEFAULT_PAGE_SIZE, 0]);
     expect(q.countText).toContain('WHERE "display_name" = $1');
     expect(q.countValues).toEqual(['Ada']);
+  });
+
+  it('maps each comparison operator to its SQL and binds the value', () => {
+    const cases: { op: 'neq' | 'gt' | 'gte' | 'lt' | 'lte'; sql: string }[] = [
+      { op: 'neq', sql: '<>' },
+      { op: 'gt', sql: '>' },
+      { op: 'gte', sql: '>=' },
+      { op: 'lt', sql: '<' },
+      { op: 'lte', sql: '<=' },
+    ];
+    for (const { op, sql } of cases) {
+      const q = buildListQuery(authors, { filters: [{ column: 'rank', op, value: '5' }] });
+      expect(q.dataText).toContain(`WHERE "rank" ${sql} $1`);
+      expect(q.dataValues).toEqual(['5', DEFAULT_PAGE_SIZE, 0]);
+      expect(q.countValues).toEqual(['5']);
+    }
+  });
+
+  it('LIKE / ILIKE translate `*` wildcards to `%` and bind the pattern', () => {
+    const like = buildListQuery(authors, {
+      filters: [{ column: 'display_name', op: 'like', value: 'Ada*' }],
+    });
+    expect(like.dataText).toContain('WHERE "display_name" LIKE $1');
+    expect(like.dataValues[0]).toBe('Ada%');
+
+    const ilike = buildListQuery(authors, {
+      filters: [{ column: 'display_name', op: 'ilike', value: '*love*' }],
+    });
+    expect(ilike.dataText).toContain('WHERE "display_name" ILIKE $1');
+    expect(ilike.dataValues[0]).toBe('%love%');
+  });
+
+  it('IN expands to one bound placeholder per value', () => {
+    const q = buildListQuery(authors, {
+      filters: [{ column: 'display_name', op: 'in', values: ['Ada', 'Grace'] }],
+    });
+    expect(q.dataText).toContain('WHERE "display_name" IN ($1, $2)');
+    expect(q.dataText).toContain('LIMIT $3 OFFSET $4');
+    expect(q.dataValues).toEqual(['Ada', 'Grace', DEFAULT_PAGE_SIZE, 0]);
+    expect(q.countValues).toEqual(['Ada', 'Grace']);
+  });
+
+  it('rejects an empty IN list with a 400', () => {
+    expect(() =>
+      buildListQuery(authors, { filters: [{ column: 'display_name', op: 'in', values: [] }] }),
+    ).toThrow(/needs at least one value/);
+  });
+
+  it('IS emits a fixed keyword clause with no bound value', () => {
+    const nul = buildListQuery(authors, {
+      filters: [{ column: 'rank', op: 'is', keyword: 'null' }],
+    });
+    expect(nul.dataText).toContain('WHERE "rank" IS NULL');
+    expect(nul.dataValues).toEqual([DEFAULT_PAGE_SIZE, 0]); // no filter value bound
+
+    const notnull = buildListQuery(authors, {
+      filters: [{ column: 'rank', op: 'is', keyword: 'notnull' }],
+    });
+    expect(notnull.dataText).toContain('WHERE "rank" IS NOT NULL');
+
+    const isTrue = buildListQuery(authors, {
+      filters: [{ column: 'rank', op: 'is', keyword: 'true' }],
+    });
+    expect(isTrue.dataText).toContain('WHERE "rank" IS TRUE');
+
+    const isFalse = buildListQuery(authors, {
+      filters: [{ column: 'rank', op: 'is', keyword: 'false' }],
+    });
+    expect(isFalse.dataText).toContain('WHERE "rank" IS FALSE');
+  });
+
+  it('ANDs several filters on the same column (e.g. a range) with stable $n', () => {
+    const q = buildListQuery(authors, {
+      filters: [
+        { column: 'rank', op: 'gte', value: '10' },
+        { column: 'rank', op: 'lte', value: '20' },
+      ],
+    });
+    expect(q.dataText).toContain('WHERE "rank" >= $1 AND "rank" <= $2');
+    expect(q.dataValues).toEqual(['10', '20', DEFAULT_PAGE_SIZE, 0]);
   });
 
   it('searches across text/textarea columns only, reusing one placeholder', () => {
@@ -71,7 +153,10 @@ describe('buildListQuery', () => {
   });
 
   it('combines filters and search with AND', () => {
-    const q = buildListQuery(authors, { filters: { rank: '1' }, search: 'lov' });
+    const q = buildListQuery(authors, {
+      filters: [{ column: 'rank', op: 'eq', value: '1' }],
+      search: 'lov',
+    });
     expect(q.dataText).toContain('WHERE "rank" = $1 AND ("display_name" ILIKE $2 OR "bio" ILIKE $2)');
     expect(q.dataValues).toEqual(['1', '%lov%', DEFAULT_PAGE_SIZE, 0]);
   });
@@ -102,7 +187,7 @@ describe('buildListQuery', () => {
 
   it('rejects an unknown filter column with a 400', () => {
     try {
-      buildListQuery(authors, { filters: { bogus: '1' } });
+      buildListQuery(authors, { filters: [{ column: 'bogus', op: 'eq', value: '1' }] });
       expect.unreachable('should have thrown');
     } catch (err) {
       expect(err).toBeInstanceOf(KozouApiError);
@@ -267,7 +352,7 @@ describe('embed in read queries', () => {
 
   it('keeps $n numbering when embed combines with a filter and search', () => {
     const q = buildListQuery(books, {
-      filters: { author_id: 'x' },
+      filters: [{ column: 'author_id', op: 'eq', value: 'x' }],
       search: 'foo',
       embed: embedAuthors,
     });
