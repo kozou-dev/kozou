@@ -5,12 +5,20 @@
 // non-breaking change (see end of Kozou v0.1 spec §4.4). For the concrete
 // adapter implementation names, refer to Kozou v0.1 spec §4.4.
 
+/**
+ * Identifier of a single record. A scalar for a single-column primary key;
+ * an array — in `SchemaContext.tables[].primaryKey` declaration order — for a
+ * composite primary key. Widening the scalar form to also allow an array is
+ * backward compatible: existing single-key callers pass a scalar unchanged.
+ */
+export type ResourceId = string | number | Array<string | number>;
+
 export interface DataAdapter {
   /** List records (pagination, search, sort) */
   list(resource: string, params: ListParams): Promise<ListResult>;
 
   /** Fetch a single record */
-  get(resource: string, id: string | number): Promise<Record<string, unknown>>;
+  get(resource: string, id: ResourceId): Promise<Record<string, unknown>>;
 
   /** Create a record */
   create(
@@ -21,12 +29,12 @@ export interface DataAdapter {
   /** Update a record */
   update(
     resource: string,
-    id: string | number,
+    id: ResourceId,
     data: Record<string, unknown>,
   ): Promise<Record<string, unknown>>;
 
   /** Delete a record */
-  delete(resource: string, id: string | number): Promise<void>;
+  delete(resource: string, id: ResourceId): Promise<void>;
 
   /** Lightweight search used by relation-select (returns label / search fields only) */
   searchRelation(
