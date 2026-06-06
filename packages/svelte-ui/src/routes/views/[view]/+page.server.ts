@@ -26,7 +26,10 @@ export const load: PageServerLoad = async ({ params, locals, url }) => {
   const searchFields = pickViewSearchFields(view);
   const listParams = parseListParamsFromUrl({ url, searchFields });
 
-  const result = await getAdapter().list(view.qualifiedName, listParams);
+  const result = await getAdapter(locals.schema).list(
+    view.qualifiedName,
+    listParams,
+  );
 
   return {
     view: {

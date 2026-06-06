@@ -13,6 +13,7 @@ import type { TableContext } from '@kozou/core';
 
 import { buildMutationPayload } from '$lib/form/mutation-payload.js';
 import { zodFromTable } from '$lib/form/zod-from-table.js';
+import { rowIdSegment } from '$lib/resource-id.js';
 import { getAdapter } from '$lib/server/adapter.js';
 
 import type { Actions, PageServerLoad } from './$types';
@@ -66,16 +67,17 @@ export const actions: Actions = {
       table,
       form.data as Record<string, unknown>,
     );
-    const created = await getAdapter().create(table.qualifiedName, payload);
-    const pkField = table.primaryKey[0];
-    const id =
-      pkField !== undefined && created[pkField] !== undefined
-        ? String(created[pkField])
-        : '';
+    const created = await getAdapter(locals.schema).create(
+      table.qualifiedName,
+      payload,
+    );
+    // Build the detail link from the created row's key columns (a composite
+    // key joins them; an empty/incomplete key falls back to the listing).
+    const segment = rowIdSegment(created, table.primaryKey);
     throw redirect(
       303,
-      id.length > 0
-        ? `/tables/${table.qualifiedName}/${id}`
+      segment !== null
+        ? `/tables/${table.qualifiedName}/${segment}`
         : `/tables/${table.qualifiedName}`,
     );
   },

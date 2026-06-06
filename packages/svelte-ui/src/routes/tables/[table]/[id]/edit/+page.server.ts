@@ -12,6 +12,7 @@ import type { TableContext } from '@kozou/core';
 
 import { buildMutationPayload } from '$lib/form/mutation-payload.js';
 import { zodFromTable } from '$lib/form/zod-from-table.js';
+import { encodeResourceId, parseResourceId } from '$lib/resource-id.js';
 import { getAdapter } from '$lib/server/adapter.js';
 
 import type { Actions, PageServerLoad } from './$types';
@@ -45,10 +46,11 @@ export const load: PageServerLoad = async ({ params, locals }) => {
   if (!table) {
     throw error(404, `Unknown table: ${params.table}`);
   }
-  const row = await getAdapter().get(table.qualifiedName, params.id);
+  const id = parseResourceId(params.id, table.primaryKey);
+  const row = await getAdapter(locals.schema).get(table.qualifiedName, id);
   const schema = zodFromTable(table);
   const form = await superValidate(row, zod4(schema));
-  return { table: tableViewModel(table), form, id: params.id };
+  return { table: tableViewModel(table), form, id: encodeResourceId(id) };
 };
 
 export const actions: Actions = {
@@ -66,7 +68,8 @@ export const actions: Actions = {
       table,
       form.data as Record<string, unknown>,
     );
-    await getAdapter().update(table.qualifiedName, params.id, payload);
-    throw redirect(303, `/tables/${table.qualifiedName}/${params.id}`);
+    const id = parseResourceId(params.id, table.primaryKey);
+    await getAdapter(locals.schema).update(table.qualifiedName, id, payload);
+    throw redirect(303, `/tables/${table.qualifiedName}/${encodeResourceId(id)}`);
   },
 };

@@ -16,6 +16,7 @@ import type {
   ListParams,
   ListResult,
   RelationOption,
+  ResourceId,
   SearchRelationParams,
   SortSpec,
 } from '@kozou/core';
@@ -30,9 +31,30 @@ const DEFAULT_RELATION_LIMIT = 20;
 
 const OR_FILTER_KEY = '__or';
 
+// The horizontal filter operators the in-house API list endpoint accepts
+// (Kozou v1.0 dev spec §4). The REST surface this adapter targets shares the
+// same `col=op.value` grammar natively, so an already-prefixed filter value
+// is forwarded verbatim; a bare value defaults to equality for backward
+// compatibility. Detection uses indexOf, not a regex (ReDoS-safe).
+const FILTER_OPERATORS = new Set([
+  'eq',
+  'neq',
+  'gt',
+  'gte',
+  'lt',
+  'lte',
+  'like',
+  'ilike',
+  'in',
+  'is',
+]);
+
+/** A single key column, the ordered columns of a composite key, or a
+ *  function computing either from the resource name. */
 export type PostgrestPrimaryKeyResolver =
   | string
-  | ((resource: string) => string);
+  | string[]
+  | ((resource: string) => string | string[]);
 
 export interface PostgrestAdapterOptions {
   /** Base URL of the PostgREST server (trailing slash is stripped). */
@@ -61,7 +83,7 @@ export class PostgrestAdapterError extends AdapterError {
 export class PostgrestDataAdapter implements DataAdapter {
   private readonly baseUrl: string;
   private readonly defaultSchema: string;
-  private readonly resolvePrimaryKey: (resource: string) => string;
+  private readonly resolvePrimaryKey: (resource: string) => string | string[];
   private readonly staticHeaders: Record<string, string>;
   private readonly fetchImpl: FetchLike;
   private readonly defaultPageSize: number;
@@ -118,13 +140,12 @@ export class PostgrestDataAdapter implements DataAdapter {
 
   async get(
     resource: string,
-    id: string | number,
+    id: ResourceId,
   ): Promise<Record<string, unknown>> {
     const { schema, table } = splitResource(resource, this.defaultSchema);
-    const primaryKey = this.resolvePrimaryKey(resource);
 
     const query = new URLSearchParams();
-    query.set(primaryKey, `eq.${id}`);
+    this.appendKeyEquals(query, resource, id);
     query.set('limit', '1');
 
     const url = `${this.baseUrl}/${encodeURIComponent(table)}?${query.toString()}`;
@@ -153,13 +174,12 @@ export class PostgrestDataAdapter implements DataAdapter {
 
   async update(
     resource: string,
-    id: string | number,
+    id: ResourceId,
     data: Record<string, unknown>,
   ): Promise<Record<string, unknown>> {
     const { schema, table } = splitResource(resource, this.defaultSchema);
-    const primaryKey = this.resolvePrimaryKey(resource);
     const query = new URLSearchParams();
-    query.set(primaryKey, `eq.${id}`);
+    this.appendKeyEquals(query, resource, id);
     const url = `${this.baseUrl}/${encodeURIComponent(table)}?${query.toString()}`;
     const headers = this.mutationHeaders(schema);
     const response = await this.send('PATCH', url, headers, JSON.stringify(data));
@@ -167,11 +187,10 @@ export class PostgrestDataAdapter implements DataAdapter {
     return (await readJson(response, url)) as Record<string, unknown>;
   }
 
-  async delete(resource: string, id: string | number): Promise<void> {
+  async delete(resource: string, id: ResourceId): Promise<void> {
     const { schema, table } = splitResource(resource, this.defaultSchema);
-    const primaryKey = this.resolvePrimaryKey(resource);
     const query = new URLSearchParams();
-    query.set(primaryKey, `eq.${id}`);
+    this.appendKeyEquals(query, resource, id);
     const url = `${this.baseUrl}/${encodeURIComponent(table)}?${query.toString()}`;
     const headers: Record<string, string> = { ...this.staticHeaders };
     addProfileHeader(headers, schema, this.defaultSchema, 'write');
@@ -184,7 +203,10 @@ export class PostgrestDataAdapter implements DataAdapter {
     params: SearchRelationParams,
   ): Promise<RelationOption[]> {
     const { schema, table } = splitResource(resource, this.defaultSchema);
-    const primaryKey = this.resolvePrimaryKey(resource);
+    // relation-select targets a single-column key in v1.0 (a composite key as
+    // a relation target is a fast-follow, Kozou v1.0 dev spec §3.5 / §5.2), so
+    // the option id uses the first key column.
+    const primaryKey = keyColumns(this.resolvePrimaryKey(resource))[0];
     const limit = params.limit ?? DEFAULT_RELATION_LIMIT;
 
     const query = new URLSearchParams();
@@ -211,6 +233,32 @@ export class PostgrestDataAdapter implements DataAdapter {
       id: row[primaryKey] as string | number,
       label: String(row[params.labelField] ?? ''),
     }));
+  }
+
+  /**
+   * Append the per-column equality filters that address a row by id. A
+   * composite key expands to `?col0=eq.v0&col1=eq.v1` in `primaryKey`
+   * declaration order (Kozou v1.0 dev spec §3.7); a single-column key keeps
+   * the `?col=eq.value` form. The id component count must match the key
+   * arity (else a config error, surfacing a wiring mismatch).
+   */
+  private appendKeyEquals(
+    query: URLSearchParams,
+    resource: string,
+    id: ResourceId,
+  ): void {
+    const columns = keyColumns(this.resolvePrimaryKey(resource));
+    const values = asResourceIdArray(id);
+    if (columns.length !== values.length) {
+      throw adapterConfigError(
+        `PostgrestDataAdapter: resource "${resource}" has a ${columns.length}-column ` +
+          `primary key (${columns.join(', ')}) but ${values.length} id ` +
+          `component(s) were supplied.`,
+      );
+    }
+    columns.forEach((column, i) => {
+      query.set(column, `eq.${serializeFilterValue(values[i])}`);
+    });
   }
 
   private mutationHeaders(schema: string): Record<string, string> {
@@ -250,10 +298,20 @@ function stripTrailingSlash(url: string): string {
 
 function makePrimaryKeyResolver(
   pk: PostgrestPrimaryKeyResolver | undefined,
-): (resource: string) => string {
+): (resource: string) => string | string[] {
   if (pk === undefined) return () => DEFAULT_PRIMARY_KEY;
   if (typeof pk === 'function') return pk;
   return () => pk;
+}
+
+/** Normalize a resolver result to the ordered list of key columns. */
+function keyColumns(pk: string | string[]): string[] {
+  return Array.isArray(pk) ? pk : [pk];
+}
+
+/** Normalize a ResourceId to the ordered list of key values. */
+function asResourceIdArray(id: ResourceId): Array<string | number> {
+  return Array.isArray(id) ? id : [id];
 }
 
 function splitResource(
@@ -281,8 +339,23 @@ function appendFilters(
       query.set('or', `(${serializeOrExpression(value)})`);
       continue;
     }
+    // A value already carrying a known operator prefix (`gt.5`, `in.(a,b)`,
+    // `is.null`, ...) is the REST surface's native grammar, so it is
+    // forwarded verbatim; a bare value defaults to equality (Kozou v1.0 dev
+    // spec §4, kept consistent with the in-house API adapter).
+    if (typeof value === 'string' && hasOperatorPrefix(value)) {
+      query.set(key, value);
+      continue;
+    }
     query.set(key, `eq.${serializeFilterValue(value)}`);
   }
+}
+
+/** Whether a filter value begins with a `<op>.` prefix from the known
+ *  operator set. Split on the first `.` via indexOf (no regex, ReDoS-safe). */
+function hasOperatorPrefix(value: string): boolean {
+  const dot = value.indexOf('.');
+  return dot > 0 && FILTER_OPERATORS.has(value.slice(0, dot));
 }
 
 function serializeOrExpression(value: unknown): string {
