@@ -17,6 +17,7 @@ import { error, redirect } from '@sveltejs/kit';
 import type { TableContext } from '@kozou/core';
 
 import { resolveFkLabels } from '$lib/detail/resolve-fk-labels.js';
+import { encodeResourceId, parseResourceId } from '$lib/resource-id.js';
 import { getAdapter } from '$lib/server/adapter.js';
 
 import type { Actions, PageServerLoad } from './$types';
@@ -47,8 +48,9 @@ export const load: PageServerLoad = async ({ params, locals }) => {
   if (!table) {
     throw error(404, `Unknown table: ${params.table}`);
   }
-  const adapter = getAdapter();
-  const row = await adapter.get(table.qualifiedName, params.id);
+  const adapter = getAdapter(locals.schema);
+  const id = parseResourceId(params.id, table.primaryKey);
+  const row = await adapter.get(table.qualifiedName, id);
 
   const fkLabels = await resolveFkLabels({
     table,
@@ -68,7 +70,9 @@ export const load: PageServerLoad = async ({ params, locals }) => {
     table: tableViewModel(table),
     row,
     fkLabels,
-    id: params.id,
+    // Canonical encoded segment for edit / back links (single-key values are
+    // unchanged; a composite key keeps its comma-joined form).
+    id: encodeResourceId(id),
   };
 };
 
@@ -78,7 +82,8 @@ export const actions: Actions = {
     if (!table) {
       throw error(404, `Unknown table: ${params.table}`);
     }
-    await getAdapter().delete(table.qualifiedName, params.id);
+    const id = parseResourceId(params.id, table.primaryKey);
+    await getAdapter(locals.schema).delete(table.qualifiedName, id);
     throw redirect(303, `/tables/${table.qualifiedName}`);
   },
 };

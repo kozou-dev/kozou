@@ -18,6 +18,7 @@ import type {
   ListParams,
   ListResult,
   RelationOption,
+  ResourceId,
   SearchRelationParams,
   SortSpec,
 } from '@kozou/core';
@@ -97,7 +98,7 @@ export class KozouApiDataAdapter implements DataAdapter {
     };
   }
 
-  async get(resource: string, id: string | number): Promise<Record<string, unknown>> {
+  async get(resource: string, id: ResourceId): Promise<Record<string, unknown>> {
     const url = this.itemUrl(resource, id);
     return (await this.getJson(url)) as Record<string, unknown>;
   }
@@ -112,7 +113,7 @@ export class KozouApiDataAdapter implements DataAdapter {
 
   async update(
     resource: string,
-    id: string | number,
+    id: ResourceId,
     data: Record<string, unknown>,
   ): Promise<Record<string, unknown>> {
     return (await this.sendJson('PATCH', this.itemUrl(resource, id), data)) as Record<
@@ -121,7 +122,7 @@ export class KozouApiDataAdapter implements DataAdapter {
     >;
   }
 
-  async delete(resource: string, id: string | number): Promise<void> {
+  async delete(resource: string, id: ResourceId): Promise<void> {
     const url = this.itemUrl(resource, id);
     const headers = { ...this.staticHeaders, Accept: 'application/json' };
     const response = await this.send('DELETE', url, headers, undefined);
@@ -146,8 +147,15 @@ export class KozouApiDataAdapter implements DataAdapter {
     return Array.isArray(body.options) ? body.options : [];
   }
 
-  private itemUrl(resource: string, id: string | number): string {
-    return `${this.baseUrl}/${encodeResource(resource)}/${encodeURIComponent(String(id))}`;
+  // Item path: `/<resource>/<id>`. A composite key encodes each component
+  // and joins them with an unescaped comma (Kozou v0.2/v1.0 wire format,
+  // §3.2); the server decodes the segment, then splits on commas. A scalar
+  // key is encoded verbatim, so single-column keys are unchanged.
+  private itemUrl(resource: string, id: ResourceId): string {
+    const segment = Array.isArray(id)
+      ? id.map((part) => encodeURIComponent(String(part))).join(',')
+      : encodeURIComponent(String(id));
+    return `${this.baseUrl}/${encodeResource(resource)}/${segment}`;
   }
 
   private async getJson(url: string): Promise<unknown> {

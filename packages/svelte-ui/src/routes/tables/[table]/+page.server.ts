@@ -35,7 +35,10 @@ export const load: PageServerLoad = async ({ params, locals, url }) => {
   const searchFields = pickSearchFields(table);
   const listParams = parseListParamsFromUrl({ url, searchFields });
 
-  const result = await getAdapter().list(table.qualifiedName, listParams);
+  const result = await getAdapter(locals.schema).list(
+    table.qualifiedName,
+    listParams,
+  );
 
   return {
     table: {

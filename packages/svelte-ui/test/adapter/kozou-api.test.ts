@@ -102,6 +102,21 @@ describe('KozouApiDataAdapter.get', () => {
     const { adapter } = adapterWith(() => jsonResponse({ error: { code: 'not_found' } }, 404));
     await expect(adapter.get('books', 'missing')).rejects.toBeInstanceOf(KozouApiAdapterError);
   });
+
+  it('builds a composite item path by comma-joining encoded components', async () => {
+    const { calls, adapter } = adapterWith(() =>
+      jsonResponse({ order_id: 100, line_no: 2, qty: 5 }),
+    );
+    await adapter.get('order_lines', [100, 2]);
+    // The separator comma is left unescaped; only each component is encoded.
+    expect(new URL(calls[0].url).pathname).toBe('/order_lines/100,2');
+  });
+
+  it('percent-encodes each composite component but not the separator', async () => {
+    const { calls, adapter } = adapterWith(() => jsonResponse({}));
+    await adapter.get('order_lines', ['a/b', 'c d']);
+    expect(new URL(calls[0].url).pathname).toBe('/order_lines/a%2Fb,c%20d');
+  });
 });
 
 describe('KozouApiDataAdapter mutations', () => {
@@ -128,6 +143,17 @@ describe('KozouApiDataAdapter mutations', () => {
     await adapter.delete('books', 'abc');
     expect(calls[0].method).toBe('DELETE');
     expect(new URL(calls[0].url).pathname).toBe('/books/abc');
+  });
+
+  it('PATCHes and DELETEs a composite item path', async () => {
+    const { calls, adapter } = adapterWith(() => jsonResponse({ order_id: 100, line_no: 2 }));
+    await adapter.update('order_lines', [100, 2], { qty: 9 });
+    expect(calls[0].method).toBe('PATCH');
+    expect(new URL(calls[0].url).pathname).toBe('/order_lines/100,2');
+
+    await adapter.delete('order_lines', [100, 2]);
+    expect(calls[1].method).toBe('DELETE');
+    expect(new URL(calls[1].url).pathname).toBe('/order_lines/100,2');
   });
 
   it('surfaces a non-2xx mutation as a KozouApiAdapterError', async () => {

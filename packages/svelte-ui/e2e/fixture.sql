@@ -63,6 +63,18 @@ COMMENT ON COLUMN inventory_items.status IS 'Current state of the item.
 COMMENT ON COLUMN inventory_items.selling_price IS 'Actual selling price.
 @widget: currency';
 
+-- A composite-primary-key table so the suite can exercise item-by-id CRUD
+-- across both adapters (Kozou v1.0 dev spec §3.6 / §3.7). Integer key
+-- columns keep the browser CRUD loop's form values easy to type.
+CREATE TABLE order_lines (
+  order_id integer NOT NULL,
+  line_no integer NOT NULL,
+  product text NOT NULL,
+  qty integer NOT NULL,
+  PRIMARY KEY (order_id, line_no)
+);
+COMMENT ON TABLE order_lines IS 'Line items on an order (composite primary key).';
+
 CREATE VIEW vw_inventory_for_sale AS
   SELECT i.id, i.edition_id, i.selling_price, e.book_id, b.title AS book_title, b.author_id, a.display_name AS author_name
   FROM inventory_items i
@@ -96,6 +108,11 @@ INSERT INTO inventory_items (id, edition_id, status, selling_price, visibility) 
   ('00000000-0000-0000-0000-000000000030', '00000000-0000-0000-0000-000000000020', 'for_sale', 15.99, 'public'),
   ('00000000-0000-0000-0000-000000000031', '00000000-0000-0000-0000-000000000021', 'for_sale', 12.50, 'public'),
   ('00000000-0000-0000-0000-000000000032', '00000000-0000-0000-0000-000000000022', 'reserved', 18.00, 'public');
+
+INSERT INTO order_lines (order_id, line_no, product, qty) VALUES
+  (100, 1, 'Widget', 3),
+  (100, 2, 'Gadget', 5),
+  (200, 1, 'Sprocket', 2);
 
 -- ---------------------------------------------------------------------------
 -- Grants required for the PostgREST anonymous role to read + write.
