@@ -152,6 +152,83 @@ describe('@kozou/api integration (generic fixture)', () => {
     expect(status).toBe(400);
   });
 
+  // --- Horizontal filter operators (Kozou v1.0 spec §4) --------------------
+
+  const q = (col: string, expr: string): string =>
+    `/authors?${col}=${encodeURIComponent(expr)}`;
+
+  it('eq (and the bare-value shorthand) matches one row', async () => {
+    const op = await getJson<ListBody>(q('display_name', 'eq.Ada Lovelace'));
+    expect(op.body.total).toBe(1);
+    expect(op.body.rows[0].display_name).toBe('Ada Lovelace');
+    // Bare value (no operator prefix) means eq — backward compatible.
+    const bare = await getJson<ListBody>(q('display_name', 'Ada Lovelace'));
+    expect(bare.body.total).toBe(1);
+  });
+
+  it('neq excludes the matching row', async () => {
+    const { body } = await getJson<ListBody>(q('display_name', 'neq.Ada Lovelace'));
+    expect(body.total).toBe(2);
+    expect(body.rows.every((r) => r.display_name !== 'Ada Lovelace')).toBe(true);
+  });
+
+  it('ilike is case-insensitive and like is case-sensitive (with `*` wildcards)', async () => {
+    const ilike = await getJson<ListBody>(q('display_name', 'ilike.*TURING*'));
+    expect(ilike.body.total).toBe(1);
+    expect(ilike.body.rows[0].display_name).toBe('Alan Turing');
+    // Same pattern, wrong case, case-sensitive LIKE -> no match.
+    const like = await getJson<ListBody>(q('display_name', 'like.*TURING*'));
+    expect(like.body.total).toBe(0);
+    const likeHit = await getJson<ListBody>(q('display_name', 'like.Alan*'));
+    expect(likeHit.body.total).toBe(1);
+  });
+
+  it('in matches any of the listed values', async () => {
+    const { body } = await getJson<ListBody>(q('display_name', 'in.(Ada Lovelace,Grace Hopper)'));
+    expect(body.total).toBe(2);
+  });
+
+  it('is.null / is.notnull filter on a nullable column', async () => {
+    const nul = await getJson<ListBody>(q('deleted_at', 'is.null'));
+    expect(nul.body.total).toBe(3);
+    const notnull = await getJson<ListBody>(q('deleted_at', 'is.notnull'));
+    expect(notnull.body.total).toBe(0);
+  });
+
+  it('numeric comparison operators filter on selling_price', async () => {
+    const gt = await getJson<ListBody>('/inventory_items?selling_price=gt.10');
+    expect(gt.body.total).toBe(1);
+    const lt = await getJson<ListBody>('/inventory_items?selling_price=lt.10');
+    expect(lt.body.total).toBe(0);
+    const gte = await getJson<ListBody>('/inventory_items?selling_price=gte.42.50');
+    expect(gte.body.total).toBe(1);
+    const lte = await getJson<ListBody>('/inventory_items?selling_price=lte.10');
+    expect(lte.body.total).toBe(0);
+  });
+
+  it('ANDs a gte/lte range on the same column', async () => {
+    const inRange = await getJson<ListBody>('/inventory_items?selling_price=gte.40&selling_price=lte.45');
+    expect(inRange.body.total).toBe(1);
+    const outOfRange = await getJson<ListBody>(
+      '/inventory_items?selling_price=gte.0&selling_price=lte.40',
+    );
+    expect(outOfRange.body.total).toBe(0);
+  });
+
+  it('documents the filter grammar as per-column query parameters in OpenAPI', async () => {
+    const { body } = await getJson<{
+      paths: Record<string, { get?: { parameters?: { name: string; description?: string }[] } }>;
+    }>('/openapi.json');
+    const params = body.paths['/authors'].get?.parameters ?? [];
+    const displayName = params.find((p) => p.name === 'display_name');
+    expect(displayName?.description).toContain('eq, neq, gt, gte, lt, lte, like, ilike, in, is');
+  });
+
+  it('rejects a malformed in. list with 400', async () => {
+    const { status } = await getJson(q('display_name', 'in.Ada Lovelace'));
+    expect(status).toBe(400);
+  });
+
   it('runs a full create -> get -> update -> delete loop', async () => {
     const created = await fetch(`${base}/authors`, {
       method: 'POST',

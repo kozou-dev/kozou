@@ -246,7 +246,47 @@ describe('parseListParams', () => {
       { field: 'name', order: 'desc' },
       { field: 'age', order: 'asc' },
     ]);
-    expect(p.filters).toEqual({ status: 'active', kind: 'x' });
+    expect(p.filters).toEqual([
+      { column: 'status', op: 'eq', value: 'active' },
+      { column: 'kind', op: 'eq', value: 'x' },
+    ]);
+  });
+
+  it('parses the `<op>.<value>` grammar; a bare value means eq', () => {
+    const p = parseListParams(
+      new URLSearchParams(
+        'price=gte.10&price=lte.20&name=ilike.*ada*&tag=in.(a,b,c)&deleted_at=is.null&status=active',
+      ),
+    );
+    expect(p.filters).toEqual([
+      { column: 'price', op: 'gte', value: '10' },
+      { column: 'price', op: 'lte', value: '20' },
+      { column: 'name', op: 'ilike', value: '*ada*' },
+      { column: 'tag', op: 'in', values: ['a', 'b', 'c'] },
+      { column: 'deleted_at', op: 'is', keyword: 'null' },
+      { column: 'status', op: 'eq', value: 'active' },
+    ]);
+  });
+
+  it('treats an unknown operator prefix as a literal equality value', () => {
+    // "1.5" has a dot but "1" is not an operator -> eq on the whole value.
+    const p = parseListParams(new URLSearchParams('price=1.5&note=foo.bar'));
+    expect(p.filters).toEqual([
+      { column: 'price', op: 'eq', value: '1.5' },
+      { column: 'note', op: 'eq', value: 'foo.bar' },
+    ]);
+  });
+
+  it('keeps the explicit eq. prefix verbatim (escaping an op-like value)', () => {
+    const p = parseListParams(new URLSearchParams('name=eq.in.crowd'));
+    expect(p.filters).toEqual([{ column: 'name', op: 'eq', value: 'in.crowd' }]);
+  });
+
+  it('rejects a malformed in. list and an unknown is. keyword with 400', () => {
+    expect(() => parseListParams(new URLSearchParams('tag=in.a,b'))).toThrow(/must look like/);
+    expect(() => parseListParams(new URLSearchParams('flag=is.maybe'))).toThrow(
+      /is\.null, is\.notnull, is\.true, is\.false/,
+    );
   });
 
   it('treats an empty search and non-numeric page as absent', () => {

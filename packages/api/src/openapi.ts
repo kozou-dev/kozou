@@ -20,6 +20,7 @@ import type {
   RelationContext,
   WidgetType,
 } from '@kozou/core';
+import { RESERVED_PARAMS } from './handler.js';
 
 export type OpenApiOptions = {
   title?: string;
@@ -200,7 +201,7 @@ function resourcePaths(
     get: {
       summary: `List ${label}`,
       description: resource.description ?? undefined,
-      parameters: [...listParameters(), embedParam()],
+      parameters: [...listParameters(), ...filterParameters(resource), embedParam()],
       responses: {
         '200': jsonResponse(`A page of ${label}.`, listResultSchema(rowRef)),
       },
@@ -267,6 +268,27 @@ function listParameters(): JsonObject[] {
     queryParam('sort', { type: 'string' }, 'Comma-separated `field.asc` / `field.desc`.'),
     queryParam('search', { type: 'string' }, 'Free-text ILIKE across text columns.'),
   ];
+}
+
+/** Operators accepted by the `<column>=<op>.<value>` filter grammar. */
+const FILTER_OPERATORS_DOC = 'eq, neq, gt, gte, lt, lte, like, ilike, in, is';
+
+/** One query parameter per filterable column documenting the
+ *  `<column>=<op>.<value>` grammar. Control keys (page/sort/…) are skipped so
+ *  the doc never advertises them as filters. Multiple filters on one column
+ *  combine with AND (e.g. a `gte`/`lte` range). */
+function filterParameters(resource: ResourceLike): JsonObject[] {
+  return resource.columns
+    .filter((c) => !RESERVED_PARAMS.has(c.name))
+    .map((c) =>
+      queryParam(
+        c.name,
+        { type: 'string' },
+        `Filter on \`${c.name}\`: \`<op>.<value>\` where op is one of ${FILTER_OPERATORS_DOC} ` +
+          `(e.g. \`${c.name}=gte.10\`, \`${c.name}=in.(a,b)\`, \`${c.name}=is.null\`). ` +
+          `A bare value means \`eq\`. Repeat the key to AND several conditions.`,
+      ),
+    );
 }
 
 function queryParam(name: string, schema: JsonObject, description: string): JsonObject {

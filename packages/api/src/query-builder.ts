@@ -21,16 +21,70 @@ export const MAX_PAGE_SIZE = 200;
 
 export type SortDirection = 'asc' | 'desc';
 
+/** Horizontal filter operators for the `?<col>=<op>.<value>` query grammar. */
+export type FilterOperator =
+  | 'eq'
+  | 'neq'
+  | 'gt'
+  | 'gte'
+  | 'lt'
+  | 'lte'
+  | 'like'
+  | 'ilike'
+  | 'in'
+  | 'is';
+
+/** Comparison operators that bind a single value. */
+export type ScalarFilterOperator = Exclude<FilterOperator, 'in' | 'is'>;
+
+/** Allowed right-hand keywords for the `is` operator (never bound — a fixed
+ *  SQL `IS [NOT] NULL/TRUE/FALSE` clause). */
+export type IsKeyword = 'null' | 'notnull' | 'true' | 'false';
+
+/** A single horizontal filter. `column` must be a declared column of the
+ *  resource (enforced in {@link buildListQuery}). Multiple filters on the same
+ *  column are allowed and combine with AND (e.g. a `gte`/`lte` range). */
+export type Filter =
+  | { column: string; op: ScalarFilterOperator; value: string }
+  | { column: string; op: 'in'; values: string[] }
+  | { column: string; op: 'is'; keyword: IsKeyword };
+
 export type ListQueryParams = {
   page?: number;
   pageSize?: number;
   sort?: { field: string; order: SortDirection }[];
   search?: string;
-  /** Column-equality filters. Keys must be declared columns of the resource. */
-  filters?: Record<string, string>;
+  /** Horizontal filters. Each filter's column must be a declared column of
+   *  the resource; every supplied value is a bound parameter. */
+  filters?: Filter[];
   /** Resolved forward to-one relations to inline as nested JSON objects. */
   embed?: EmbedNode[];
 };
+
+const SCALAR_OP_SQL: Record<ScalarFilterOperator, string> = {
+  eq: '=',
+  neq: '<>',
+  gt: '>',
+  gte: '>=',
+  lt: '<',
+  lte: '<=',
+  like: 'LIKE',
+  ilike: 'ILIKE',
+};
+
+const IS_KEYWORD_SQL: Record<IsKeyword, string> = {
+  null: 'NULL',
+  notnull: 'NOT NULL',
+  true: 'TRUE',
+  false: 'FALSE',
+};
+
+/** Wildcard mapping for LIKE/ILIKE: a literal `*` in the pattern maps to SQL
+ *  `%`. Plain linear string replacement — no regular expression (avoids ReDoS,
+ *  per the CodeQL `js/polynomial-redos` precedent). */
+function toLikePattern(value: string): string {
+  return value.split('*').join('%');
+}
 
 export type BuiltListQuery = {
   dataText: string;
@@ -83,13 +137,34 @@ export function buildListQuery(
   const whereValues: unknown[] = [];
   const nextParam = (): string => `$${whereValues.length + 1}`;
 
-  // Column-equality filters.
-  for (const [key, value] of Object.entries(params.filters ?? {})) {
-    if (!columnNames.has(key)) {
-      throw badRequest(`Unknown filter column "${key}" on resource "${resource.name}".`);
+  // Horizontal filters. The column allowlist is the resource's own columns;
+  // every supplied value is a bound parameter ($n). `is` emits a fixed
+  // keyword clause (no value bound).
+  for (const filter of params.filters ?? []) {
+    if (!columnNames.has(filter.column)) {
+      throw badRequest(`Unknown filter column "${filter.column}" on resource "${resource.name}".`);
     }
-    whereParts.push(`${quoteIdent(key)} = ${nextParam()}`);
-    whereValues.push(value);
+    const column = quoteIdent(filter.column);
+    if (filter.op === 'in') {
+      if (filter.values.length === 0) {
+        throw badRequest(`Filter "${filter.column}=in.()" needs at least one value.`);
+      }
+      const placeholders: string[] = [];
+      for (const value of filter.values) {
+        placeholders.push(nextParam());
+        whereValues.push(value);
+      }
+      whereParts.push(`${column} IN (${placeholders.join(', ')})`);
+    } else if (filter.op === 'is') {
+      whereParts.push(`${column} IS ${IS_KEYWORD_SQL[filter.keyword]}`);
+    } else {
+      whereParts.push(`${column} ${SCALAR_OP_SQL[filter.op]} ${nextParam()}`);
+      whereValues.push(
+        filter.op === 'like' || filter.op === 'ilike'
+          ? toLikePattern(filter.value)
+          : filter.value,
+      );
+    }
   }
 
   // Free-text search across text-like columns.
