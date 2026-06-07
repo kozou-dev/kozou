@@ -39,7 +39,7 @@ For library use (custom hosts, embedded MCP), install the workspace packages fro
 npm install kozou @kozou/core @kozou/introspect @kozou/mcp @kozou/svelte-ui
 ```
 
-The experimental `@kozou/api` REST layer and `@kozou/codegen` TypeScript codegen ship as optional companions (the wire format and output may change without notice). Install them alongside `kozou` only when you want `kozou dev --adapter api` or `kozou codegen`:
+`@kozou/api` (Kozou's in-house REST layer — its wire format and OpenAPI are a stable contract as of v1.0) and the experimental `@kozou/codegen` TypeScript codegen ship as optional companions. Install them alongside `kozou` only when you want `kozou dev --adapter api` or `kozou codegen`:
 
 ```bash
 npm install kozou @kozou/api @kozou/codegen
