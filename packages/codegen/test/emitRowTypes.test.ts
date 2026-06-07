@@ -188,6 +188,42 @@ describe('emitRowTypes', () => {
     );
     expect(messages).toEqual([]);
   });
+
+  it('escapes a JSDoc terminator (*/) in a COMMENT so the output still compiles', async () => {
+    const raw: RawIntrospection = {
+      serverVersion: '16.2',
+      introspectedAt: '2026-01-01T00:00:00.000Z',
+      schemas: ['public'],
+      enums: [],
+      functions: [],
+      tables: [
+        {
+          schema: 'public',
+          name: 'docs',
+          comment: 'a table COMMENT that closes the */ block early',
+          primaryKey: ['id'],
+          foreignKeys: [],
+          checks: [],
+          indexes: [],
+          rowCountEstimate: null,
+          columns: [
+            col('id', 'uuid', { nullable: false }),
+            col('note', 'text', {
+              comment: 'free-form note with a /* legacy */ marker and a trailing */',
+            }),
+          ],
+        },
+      ],
+      views: [],
+    };
+    const out = emitRowTypes(await buildSchemaContext({ raw }));
+    // The terminator is neutralized (escaped), not the surrounding prose.
+    expect(out).toContain('*\\/');
+    const messages = (await typeCheck(out)).map((d) =>
+      ts.flattenDiagnosticMessageText(d.messageText, '\n'),
+    );
+    expect(messages).toEqual([]);
+  });
 });
 
 describe('mapDataType', () => {

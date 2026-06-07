@@ -114,15 +114,186 @@ describe('buildListQuery', () => {
     });
     expect(notnull.dataText).toContain('WHERE "rank" IS NOT NULL');
 
-    const isTrue = buildListQuery(authors, {
-      filters: [{ column: 'rank', op: 'is', keyword: 'true' }],
+    // is.true / is.false require a boolean column (see the #76 type-check test).
+    const flags = tableResource('flags', [
+      col('id', 'uuid', { isPrimaryKey: true, nullable: false }),
+      col('active', 'boolean', { dataType: 'boolean' }),
+    ]);
+    const isTrue = buildListQuery(flags, {
+      filters: [{ column: 'active', op: 'is', keyword: 'true' }],
     });
-    expect(isTrue.dataText).toContain('WHERE "rank" IS TRUE');
+    expect(isTrue.dataText).toContain('WHERE "active" IS TRUE');
 
-    const isFalse = buildListQuery(authors, {
-      filters: [{ column: 'rank', op: 'is', keyword: 'false' }],
+    const isFalse = buildListQuery(flags, {
+      filters: [{ column: 'active', op: 'is', keyword: 'false' }],
     });
-    expect(isFalse.dataText).toContain('WHERE "rank" IS FALSE');
+    expect(isFalse.dataText).toContain('WHERE "active" IS FALSE');
+  });
+
+  it('rejects an operator that is incompatible with the column type (400)', () => {
+    // ILIKE / LIKE need a text-like column.
+    const numbers = tableResource('numbers', [
+      col('id', 'uuid', { isPrimaryKey: true, nullable: false }),
+      col('amount', 'currency', { dataType: 'numeric' }),
+    ]);
+    expect(() =>
+      buildListQuery(numbers, {
+        filters: [{ column: 'amount', op: 'ilike', value: '*5*' }],
+      }),
+    ).toThrow(/requires a text-like column/);
+
+    // is.true / is.false need a boolean column.
+    expect(() =>
+      buildListQuery(authors, {
+        filters: [{ column: 'display_name', op: 'is', keyword: 'true' }],
+      }),
+    ).toThrow(/requires a boolean column/);
+
+    // The same check carries the 400 status.
+    try {
+      buildListQuery(numbers, { filters: [{ column: 'amount', op: 'like', value: 'x' }] });
+      expect.unreachable('expected a 400');
+    } catch (err) {
+      expect(err).toBeInstanceOf(KozouApiError);
+      expect((err as KozouApiError).status).toBe(400);
+    }
+  });
+
+  it('treats array type spellings as non-text for LIKE/ILIKE (not scalar targets)', () => {
+    const arrays = tableResource('arrays', [
+      col('id', 'uuid', { isPrimaryKey: true, nullable: false }),
+      col('tags', 'text', { dataType: 'text[]' }),
+      col('names', 'text', { dataType: 'character varying[]' }),
+      col('flags', 'boolean', { dataType: 'boolean[]' }),
+    ]);
+    expect(() =>
+      buildListQuery(arrays, { filters: [{ column: 'tags', op: 'ilike', value: '*x*' }] }),
+    ).toThrow(/requires a text-like column/);
+    expect(() =>
+      buildListQuery(arrays, { filters: [{ column: 'names', op: 'like', value: 'x' }] }),
+    ).toThrow(/requires a text-like column/);
+    expect(() =>
+      buildListQuery(arrays, { filters: [{ column: 'flags', op: 'is', keyword: 'true' }] }),
+    ).toThrow(/requires a boolean column/);
+  });
+
+  it('strips length/precision modifiers when judging text-likeness', () => {
+    const sized = tableResource('sized', [
+      col('id', 'uuid', { isPrimaryKey: true, nullable: false }),
+      col('code', 'text', { dataType: 'character varying(255)' }),
+    ]);
+    expect(() =>
+      buildListQuery(sized, { filters: [{ column: 'code', op: 'ilike', value: '*x*' }] }),
+    ).not.toThrow();
+  });
+
+  it('rejects a filter value that cannot parse as the column type (400, pre-execution) (#76)', () => {
+    const t = tableResource('t', [
+      col('id', 'uuid', { isPrimaryKey: true, nullable: false }),
+      col('amount', 'currency', { dataType: 'numeric' }),
+      col('count', 'number', { dataType: 'integer' }),
+      col('active', 'boolean', { dataType: 'boolean' }),
+    ]);
+    // Non-numeric value on a numeric column (the issue's headline case).
+    expect(() =>
+      buildListQuery(t, { filters: [{ column: 'amount', op: 'eq', value: 'abc' }] }),
+    ).toThrow(/is not valid for column "amount"/);
+    // A bad value inside in.() is caught too.
+    expect(() =>
+      buildListQuery(t, { filters: [{ column: 'amount', op: 'in', values: ['1', 'two'] }] }),
+    ).toThrow(/is not valid for column "amount"/);
+    // Integer column rejects a fractional value.
+    expect(() =>
+      buildListQuery(t, { filters: [{ column: 'count', op: 'gt', value: '1.5' }] }),
+    ).toThrow(/is not valid for column "count"/);
+    // Boolean column rejects a non-boolean literal.
+    expect(() =>
+      buildListQuery(t, { filters: [{ column: 'active', op: 'eq', value: 'maybe' }] }),
+    ).toThrow(/is not valid for column "active"/);
+    // Hex/binary literals that JS Number() tolerates but PostgreSQL rejects.
+    expect(() =>
+      buildListQuery(t, { filters: [{ column: 'amount', op: 'eq', value: '0x10' }] }),
+    ).toThrow(/is not valid for column "amount"/);
+    expect(() =>
+      buildListQuery(t, { filters: [{ column: 'count', op: 'eq', value: '0b101' }] }),
+    ).toThrow(/is not valid for column "count"/);
+    // Integer value outside the column width's range.
+    expect(() =>
+      buildListQuery(t, { filters: [{ column: 'count', op: 'eq', value: '9999999999' }] }),
+    ).toThrow(/is not valid for column "count"/);
+    // The check carries the 400 status.
+    try {
+      buildListQuery(t, { filters: [{ column: 'amount', op: 'eq', value: 'abc' }] });
+      expect.unreachable('expected a 400');
+    } catch (err) {
+      expect((err as KozouApiError).status).toBe(400);
+    }
+  });
+
+  it('accepts well-formed values for numeric / integer / boolean columns', () => {
+    const t = tableResource('t', [
+      col('id', 'uuid', { isPrimaryKey: true, nullable: false }),
+      col('amount', 'currency', { dataType: 'numeric' }),
+      col('count', 'number', { dataType: 'integer' }),
+      col('active', 'boolean', { dataType: 'boolean' }),
+    ]);
+    expect(() =>
+      buildListQuery(t, { filters: [{ column: 'amount', op: 'gte', value: '42.50' }] }),
+    ).not.toThrow();
+    // Scientific notation is valid PostgreSQL numeric input.
+    expect(() =>
+      buildListQuery(t, { filters: [{ column: 'amount', op: 'lt', value: '1e3' }] }),
+    ).not.toThrow();
+    // Arbitrary-precision numeric beyond JS Number range is still valid (the
+    // check is lexical, not a JS Number coercion).
+    expect(() =>
+      buildListQuery(t, {
+        filters: [{ column: 'amount', op: 'eq', value: '123456789012345678901234567890.12' }],
+      }),
+    ).not.toThrow();
+    // Negative integer within range.
+    expect(() =>
+      buildListQuery(t, { filters: [{ column: 'count', op: 'eq', value: '-7' }] }),
+    ).not.toThrow();
+    expect(() =>
+      buildListQuery(t, { filters: [{ column: 'count', op: 'eq', value: '7' }] }),
+    ).not.toThrow();
+    expect(() =>
+      buildListQuery(t, { filters: [{ column: 'active', op: 'eq', value: 'true' }] }),
+    ).not.toThrow();
+    // A non-numeric column does not get value-checked here (text passes through).
+    expect(() =>
+      buildListQuery(t, { filters: [{ column: 'id', op: 'eq', value: 'anything' }] }),
+    ).not.toThrow();
+  });
+
+  it('free-text search skips a text-widget column whose underlying type is non-text (text[])', () => {
+    const r = tableResource('docs', [
+      col('id', 'uuid', { isPrimaryKey: true, nullable: false }),
+      col('title', 'text', { dataType: 'text' }),
+      col('tags', 'text', { dataType: 'text[]' }), // text widget, array type
+    ]);
+    const q = buildListQuery(r, { search: 'foo' });
+    expect(q.dataText).toContain('"title" ILIKE');
+    expect(q.dataText).not.toContain('"tags" ILIKE'); // array column is not ILIKE'd
+  });
+
+  it('allows a type-compatible operator (ilike on text, is.true on boolean)', () => {
+    const ok = tableResource('rec', [
+      col('id', 'uuid', { isPrimaryKey: true, nullable: false }),
+      col('name', 'text', { dataType: 'character varying' }),
+      col('active', 'boolean', { dataType: 'boolean' }),
+    ]);
+    expect(() =>
+      buildListQuery(ok, { filters: [{ column: 'name', op: 'ilike', value: '*a*' }] }),
+    ).not.toThrow();
+    expect(() =>
+      buildListQuery(ok, { filters: [{ column: 'active', op: 'is', keyword: 'true' }] }),
+    ).not.toThrow();
+    // is.null / is.notnull stay valid on any type.
+    expect(() =>
+      buildListQuery(ok, { filters: [{ column: 'name', op: 'is', keyword: 'null' }] }),
+    ).not.toThrow();
   });
 
   it('ANDs several filters on the same column (e.g. a range) with stable $n', () => {
@@ -364,6 +535,26 @@ describe('buildRelationOptionsQuery', () => {
     expect(() =>
       buildRelationOptionsQuery(authors, { labelField: 'bogus', searchFields: [] }),
     ).toThrow(/Unknown column "bogus"/);
+  });
+
+  it('rejects a non-text-like relation search field with 400 (#76)', () => {
+    const r = tableResource('opts', [
+      col('id', 'uuid', { isPrimaryKey: true, nullable: false }),
+      col('name', 'text', { dataType: 'text' }),
+      col('amount', 'currency', { dataType: 'numeric' }),
+    ]);
+    try {
+      buildRelationOptionsQuery(r, { labelField: 'name', searchFields: ['amount'], query: 'x' });
+      expect.unreachable('expected a 400');
+    } catch (err) {
+      expect(err).toBeInstanceOf(KozouApiError);
+      expect((err as KozouApiError).status).toBe(400);
+      expect((err as KozouApiError).message).toMatch(/must be a text-like column/);
+    }
+    // A text search field is accepted.
+    expect(() =>
+      buildRelationOptionsQuery(r, { labelField: 'name', searchFields: ['name'], query: 'x' }),
+    ).not.toThrow();
   });
 });
 

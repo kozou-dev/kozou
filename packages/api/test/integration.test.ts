@@ -234,6 +234,34 @@ describe('@kozou/api integration (generic fixture)', () => {
     expect(outOfRange.body.total).toBe(0);
   });
 
+  it('rejects a type-incompatible operator with 400, not 500 (#76)', async () => {
+    // ILIKE on a numeric column — caught statically before the query runs.
+    const ilikeNumeric = await getJson(`/inventory_items?selling_price=ilike.*5*`);
+    expect(ilikeNumeric.status).toBe(400);
+    // is.true on a text column — also caught statically.
+    const isTrueText = await getJson(`/authors?display_name=is.true`);
+    expect(isTrueText.status).toBe(400);
+  });
+
+  it('rejects a value-format mismatch with 400, not 500 (#76)', async () => {
+    // A non-numeric value on a numeric column is rejected pre-execution by the
+    // filter value check, so it never reaches PostgreSQL as a 500.
+    const { status, body } = await getJson<{ error?: { code: string } }>(
+      `/inventory_items?selling_price=eq.abc`,
+    );
+    expect(status).toBe(400);
+    expect(body.error?.code).toBe('bad_request');
+  });
+
+  it('rejects a non-text relation-options search field with 400 (#76)', async () => {
+    // `fields` is request-controlled; ILIKE'ing a numeric column would 500.
+    const { status, body } = await getJson<{ error?: { code: string } }>(
+      `/inventory_items?as=options&label=status&fields=selling_price&q=x`,
+    );
+    expect(status).toBe(400);
+    expect(body.error?.code).toBe('bad_request');
+  });
+
   it('documents the filter grammar as per-column query parameters in OpenAPI', async () => {
     const { body } = await getJson<{
       paths: Record<string, { get?: { parameters?: { name: string; description?: string }[] } }>;

@@ -70,7 +70,14 @@ function jsDoc(description: string | null, indent: number): string | null {
   const trimmed = description.trim();
   if (trimmed === '') return null;
   const pad = ' '.repeat(indent);
-  const body = trimmed.split('\n').map((line) => `${pad} * ${line.trimEnd()}`.trimEnd());
+  const body = trimmed.split('\n').map((line) => {
+    // Neutralize the JSDoc terminator: a COMMENT containing `*/` would close
+    // the block early and break the generated TypeScript. Escaping it to `*\/`
+    // keeps the text readable while preventing premature termination. Linear
+    // split/join (no regex) per the CodeQL `js/polynomial-redos` precedent.
+    const safe = line.trimEnd().split('*/').join('*\\/');
+    return `${pad} * ${safe}`.trimEnd();
+  });
   return [`${pad}/**`, ...body, `${pad} */`].join('\n');
 }
 
