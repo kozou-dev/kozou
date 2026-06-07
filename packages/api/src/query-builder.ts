@@ -9,6 +9,8 @@
 //   - Every user-supplied value is a bound parameter ($1, $2, ...). No
 //     value is interpolated into the SQL string.
 
+import type { ColumnContext } from '@kozou/core';
+
 import { badRequest } from './errors.js';
 import { quoteIdent, qualified } from './ident.js';
 import { buildEmbedSelectFragment, type EmbedNode } from './embed.js';
@@ -86,6 +88,214 @@ function toLikePattern(value: string): string {
   return value.split('*').join('%');
 }
 
+/** Reduce a `format_type`-style `dataType` to its base scalar type name, or
+ *  `null` when it is an array (`text[]`) — arrays are not scalar `LIKE` /
+ *  boolean targets. Lower-cases, drops a trailing length/precision modifier
+ *  (`character varying(255)` -> `character varying`), and trims. No regex
+ *  (linear scan), per the CodeQL `js/polynomial-redos` precedent. */
+function baseScalarType(dataType: string): string | null {
+  const lower = dataType.trim().toLowerCase();
+  if (lower.includes('[')) return null; // any array spelling, e.g. text[]
+  const paren = lower.indexOf('(');
+  return (paren === -1 ? lower : lower.slice(0, paren)).trim();
+}
+
+/** Base scalar types that accept `LIKE` / `ILIKE`. Judged by the underlying
+ *  PostgreSQL type, not the widget — a `varchar` surfaced as an `enum-select`
+ *  still accepts `ilike` (Kozou v1.0 issue #76). Exact-match on the normalized
+ *  base type so array spellings (`text[]`) are excluded. */
+const TEXT_LIKE_BASE_TYPES = new Set([
+  'text',
+  'character varying',
+  'varchar',
+  'character',
+  'char',
+  'bpchar',
+  'citext',
+  'name',
+]);
+
+function isTextLikeType(dataType: string): boolean {
+  const base = baseScalarType(dataType);
+  return base !== null && TEXT_LIKE_BASE_TYPES.has(base);
+}
+
+/** A boolean column — the only type for which `is.true` / `is.false` is valid
+ *  (a `boolean[]` array is excluded). */
+function isBooleanType(dataType: string): boolean {
+  const base = baseScalarType(dataType);
+  return base === 'boolean' || base === 'bool';
+}
+
+/** Inclusive [min, max] range for each integer width, used to reject values
+ *  that parse as integers but overflow the column type at execution. */
+const INTEGER_BOUNDS: Record<string, [bigint, bigint]> = {
+  smallint: [-32768n, 32767n],
+  int2: [-32768n, 32767n],
+  integer: [-2147483648n, 2147483647n],
+  int: [-2147483648n, 2147483647n],
+  int4: [-2147483648n, 2147483647n],
+  bigint: [-9223372036854775808n, 9223372036854775807n],
+  int8: [-9223372036854775808n, 9223372036854775807n],
+};
+const DECIMAL_BASE_TYPES = new Set([
+  'numeric',
+  'decimal',
+  'real',
+  'double precision',
+  'float',
+  'float4',
+  'float8',
+]);
+const BOOLEAN_LITERALS = new Set([
+  'true',
+  'false',
+  't',
+  'f',
+  'yes',
+  'no',
+  'y',
+  'n',
+  'on',
+  'off',
+  '1',
+  '0',
+]);
+
+/** A plain base-10 integer literal (optional sign, then digits). A manual
+ *  scan — no regex — so it rejects the `0x`/`0b`/`0o` and exponent forms that
+ *  JavaScript's `Number` tolerates but a PostgreSQL integer column does not. */
+function isPlainInteger(s: string): boolean {
+  let i = 0;
+  if (s[0] === '+' || s[0] === '-') i = 1;
+  if (i === s.length) return false; // sign only / empty
+  for (; i < s.length; i++) {
+    if (s[i] < '0' || s[i] > '9') return false;
+  }
+  return true;
+}
+
+/** A lexical decimal literal: optional sign, an integer and/or fractional
+ *  part (at least one digit overall), and an optional exponent. A manual scan
+ *  (no regex) that validates *syntax only* — it does not coerce through JS
+ *  `Number`, so arbitrary-precision PostgreSQL `numeric` values (hundreds of
+ *  digits, magnitudes beyond JS range) are accepted, while `abc`, `0x10`, and
+ *  `NaN`/`Infinity` are rejected. Range/precision are left to PostgreSQL. */
+function isLexicalDecimal(s: string): boolean {
+  let i = 0;
+  const n = s.length;
+  if (i < n && (s[i] === '+' || s[i] === '-')) i++;
+  let digits = 0;
+  while (i < n && s[i] >= '0' && s[i] <= '9') {
+    i++;
+    digits++;
+  }
+  if (i < n && s[i] === '.') {
+    i++;
+    while (i < n && s[i] >= '0' && s[i] <= '9') {
+      i++;
+      digits++;
+    }
+  }
+  if (digits === 0) return false; // need at least one digit somewhere
+  if (i < n && (s[i] === 'e' || s[i] === 'E')) {
+    i++;
+    if (i < n && (s[i] === '+' || s[i] === '-')) i++;
+    let expDigits = 0;
+    while (i < n && s[i] >= '0' && s[i] <= '9') {
+      i++;
+      expDigits++;
+    }
+    if (expDigits === 0) return false;
+  }
+  return i === n; // the whole string was consumed
+}
+
+/** Whether a string filter value parses as the column's base scalar type, for
+ *  the types where a bad value would otherwise surface only at execution as a
+ *  500: integer family (exact, with width range), decimal/float family
+ *  (lexical syntax), and boolean. Other types (uuid / date / json / ...) are
+ *  not pre-checked and fall through to PostgreSQL.
+ *
+ *  Documented residual (follow-up #81): only *syntax* is validated for the
+ *  decimal/float family — true range overflow (`real`/`double precision`) and
+ *  `numeric(p,s)` precision overflow still reach PostgreSQL. Validating syntax
+ *  (not range) avoids false-rejecting valid arbitrary-precision `numeric`
+ *  values, which JS `Number` range cannot represent. */
+function valueFitsType(base: string, value: string): boolean {
+  const trimmed = value.trim();
+  if (trimmed === '') return false;
+  const bounds = INTEGER_BOUNDS[base];
+  if (bounds !== undefined) {
+    if (!isPlainInteger(trimmed)) return false;
+    const n = BigInt(trimmed);
+    return n >= bounds[0] && n <= bounds[1];
+  }
+  if (DECIMAL_BASE_TYPES.has(base)) {
+    return isLexicalDecimal(trimmed);
+  }
+  if (base === 'boolean' || base === 'bool') {
+    return BOOLEAN_LITERALS.has(trimmed.toLowerCase());
+  }
+  return true;
+}
+
+/**
+ * Reject a filter value that cannot parse as the column's type *before* the
+ * query runs (Kozou v1.0 issue #76). Limited to numeric-family and boolean
+ * columns — the common cases that otherwise raise a PostgreSQL data error
+ * (a 500) at execution. The check is tied to the bound filter value, so a
+ * 400 here is unambiguously client-caused (no server/view error is masked).
+ */
+function assertFilterValueParsable(
+  filter: Filter,
+  column: ColumnContext,
+  resource: Resource,
+): void {
+  if (filter.op === 'is') return; // fixed keyword clause, no bound value
+  const base = baseScalarType(column.dataType);
+  if (base === null) return; // array etc. — not value-checked here
+  const values = filter.op === 'in' ? filter.values : [filter.value];
+  for (const value of values) {
+    if (!valueFitsType(base, value)) {
+      throw badRequest(
+        `Filter value "${value}" is not valid for column "${filter.column}" (${column.dataType}) ` +
+          `on resource "${resource.name}".`,
+      );
+    }
+  }
+}
+
+/**
+ * Reject statically-knowable operator/column-type mismatches with a 400 before
+ * the query runs (Kozou v1.0 issue #76): `like`/`ilike` need a text-like
+ * column, and `is.true`/`is.false` need a boolean column. Value-format
+ * mismatches that only surface at execution (e.g. `eq.abc` on a numeric
+ * column) are mapped to 400 by the handler's error classifier instead.
+ */
+function assertFilterTypeCompatible(
+  filter: Filter,
+  column: ColumnContext,
+  resource: Resource,
+): void {
+  if ((filter.op === 'like' || filter.op === 'ilike') && !isTextLikeType(column.dataType)) {
+    throw badRequest(
+      `Operator "${filter.op}" requires a text-like column; "${filter.column}" on resource ` +
+        `"${resource.name}" is ${column.dataType}.`,
+    );
+  }
+  if (
+    filter.op === 'is' &&
+    (filter.keyword === 'true' || filter.keyword === 'false') &&
+    !isBooleanType(column.dataType)
+  ) {
+    throw badRequest(
+      `Filter "is.${filter.keyword}" requires a boolean column; "${filter.column}" on resource ` +
+        `"${resource.name}" is ${column.dataType}.`,
+    );
+  }
+}
+
 export type BuiltListQuery = {
   dataText: string;
   dataValues: unknown[];
@@ -106,12 +316,17 @@ function selectColumns(resource: Resource): string {
   return resource.columns.map((c) => quoteIdent(c.name)).join(', ');
 }
 
-/** Columns that free-text search targets: text-like widgets only. uuid /
- *  enum / numeric columns are excluded (an `ILIKE` against them either
- *  errors or is meaningless). */
+/** Columns that free-text search targets: text-like widgets whose underlying
+ *  type is also text-like. uuid / enum / numeric columns are excluded (an
+ *  `ILIKE` against them either errors or is meaningless), as are text-widget
+ *  columns whose real type is an array / domain / other non-text scalar — the
+ *  base-type guard keeps `?search=` from emitting an ILIKE that PostgreSQL
+ *  rejects (Kozou v1.0 issue #76). */
 function searchableColumns(resource: Resource): string[] {
   return resource.columns
-    .filter((c) => c.widget === 'text' || c.widget === 'textarea')
+    .filter(
+      (c) => (c.widget === 'text' || c.widget === 'textarea') && isTextLikeType(c.dataType),
+    )
     .map((c) => c.name);
 }
 
@@ -131,7 +346,7 @@ export function buildListQuery(
   resource: Resource,
   params: ListQueryParams,
 ): BuiltListQuery {
-  const columnNames = new Set(resource.columns.map((c) => c.name));
+  const columnsByName = new Map(resource.columns.map((c) => [c.name, c]));
 
   const whereParts: string[] = [];
   const whereValues: unknown[] = [];
@@ -141,9 +356,12 @@ export function buildListQuery(
   // every supplied value is a bound parameter ($n). `is` emits a fixed
   // keyword clause (no value bound).
   for (const filter of params.filters ?? []) {
-    if (!columnNames.has(filter.column)) {
+    const columnDef = columnsByName.get(filter.column);
+    if (columnDef === undefined) {
       throw badRequest(`Unknown filter column "${filter.column}" on resource "${resource.name}".`);
     }
+    assertFilterTypeCompatible(filter, columnDef, resource);
+    assertFilterValueParsable(filter, columnDef, resource);
     const column = quoteIdent(filter.column);
     if (filter.op === 'in') {
       if (filter.values.length === 0) {
@@ -186,7 +404,7 @@ export function buildListQuery(
   const orderParts: string[] = [];
   if (params.sort && params.sort.length > 0) {
     for (const s of params.sort) {
-      if (!columnNames.has(s.field)) {
+      if (!columnsByName.has(s.field)) {
         throw badRequest(`Unknown sort column "${s.field}" on resource "${resource.name}".`);
       }
       orderParts.push(`${quoteIdent(s.field)} ${s.order === 'desc' ? 'DESC' : 'ASC'}`);
@@ -388,6 +606,20 @@ export function buildRelationOptionsQuery(
 ): BuiltRelationOptions {
   const pk = singlePrimaryKey(resource);
   assertKnownColumns(resource, [params.labelField, ...params.searchFields]);
+
+  // `searchFields` is request-controlled (`?as=options&fields=`); each is
+  // ILIKE'd below, so reject a non-text-like field with a 400 rather than
+  // letting PostgreSQL raise an operator error (a 500) at execution
+  // (Kozou v1.0 issue #76).
+  const columnsByName = new Map(resource.columns.map((c) => [c.name, c]));
+  for (const field of params.searchFields) {
+    const column = columnsByName.get(field);
+    if (column !== undefined && !isTextLikeType(column.dataType)) {
+      throw badRequest(
+        `Relation search field "${field}" must be a text-like column; it is ${column.dataType}.`,
+      );
+    }
+  }
 
   const values: unknown[] = [];
   let where = '';
