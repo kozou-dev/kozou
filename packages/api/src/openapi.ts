@@ -71,8 +71,12 @@ export function buildOpenApiDocument(
     const ref = `#/components/schemas/${resource.qualifiedName}`;
     const relations: RelationContext[] = 'relations' in resource ? resource.relations : [];
     const reverse = reverseByParent.get(resource.qualifiedName) ?? [];
-    schemas[resource.qualifiedName] = resourceSchema(resource, relations, reverse, knownQNames);
-    Object.assign(paths, resourcePaths(resource, segmentFor(resource), ref, writable));
+    const embeds = embedHints(relations, reverse, knownQNames);
+    schemas[resource.qualifiedName] = resourceSchema(resource, embeds);
+    Object.assign(
+      paths,
+      resourcePaths(resource, segmentFor(resource), ref, writable, embeds.length > 0),
+    );
   }
 
   return {
@@ -88,12 +92,7 @@ export function buildOpenApiDocument(
   };
 }
 
-function resourceSchema(
-  resource: ResourceLike,
-  relations: RelationContext[],
-  reverse: ReverseEntry[],
-  knownQNames: Set<string>,
-): JsonObject {
+function resourceSchema(resource: ResourceLike, embeds: JsonObject[]): JsonObject {
   const properties: JsonObject = {};
   const required: string[] = [];
   for (const column of resource.columns) {
@@ -107,10 +106,10 @@ function resourceSchema(
   if (resource.policy && resource.policy.length > 0) schema['x-kozou-policy'] = resource.policy;
   if (required.length > 0) schema.required = required;
 
-  // Embeddable relations, as a hint for clients building `?embed=`: forward
-  // (to-one) plus reverse (to-many). Only targets that are themselves exposed
-  // resources are listed.
-  const embeds = embedHints(relations, reverse, knownQNames);
+  // Embeddable relations (forward to-one + reverse to-many, only targets that
+  // are themselves exposed resources), as a hint for clients building
+  // `?embed=`. Computed once by the caller and shared with the path builder so
+  // the `embed` query parameter is only advertised where it is usable.
   if (embeds.length > 0) schema['x-kozou-embeds'] = embeds;
   return schema;
 }
@@ -193,15 +192,21 @@ function resourcePaths(
   segment: string,
   ref: string,
   writable: boolean,
+  hasEmbeds: boolean,
 ): JsonObject {
   const rowRef = { $ref: ref };
   const label = resource.label || resource.name;
+
+  // The `embed` parameter is only advertised where the resource has at least
+  // one embeddable relation; a non-empty `embed` on a relation-less resource
+  // (e.g. a view) is rejected with 400, so listing it would be misleading.
+  const embedParams = hasEmbeds ? [embedParam()] : [];
 
   const collection: JsonObject = {
     get: {
       summary: `List ${label}`,
       description: resource.description ?? undefined,
-      parameters: [...listParameters(), ...filterParameters(resource), embedParam()],
+      parameters: [...listParameters(), ...filterParameters(resource), ...embedParams],
       responses: {
         '200': jsonResponse(`A page of ${label}.`, listResultSchema(rowRef)),
       },
@@ -218,46 +223,55 @@ function resourcePaths(
     };
   }
 
-  const idParam = itemIdParam(resource);
-  const item: JsonObject = {
-    get: {
-      summary: `Fetch a ${label} row by id`,
-      parameters: [idParam, embedParam()],
-      responses: {
-        '200': jsonResponse('The row.', rowRef),
-        '404': errorResponse('No such row.'),
-      },
-    },
-  };
-  if (writable) {
-    item.patch = {
-      summary: `Update a ${label} row`,
-      parameters: [idParam],
-      requestBody: jsonBody(rowRef),
-      responses: {
-        '200': jsonResponse('The updated row.', rowRef),
-        '404': errorResponse('No such row.'),
+  const paths: JsonObject = { [`/${segment}`]: collection };
+
+  // Item-by-id routes only exist for resources addressable by a primary key.
+  // Views and primary-key-less tables cannot be fetched/updated/deleted by id
+  // (the request handler rejects such reads with 400), so the document must
+  // not advertise an item path for them.
+  const primaryKey = 'primaryKey' in resource ? resource.primaryKey : [];
+  if (primaryKey.length >= 1) {
+    const idParam = itemIdParam(resource);
+    const item: JsonObject = {
+      get: {
+        summary: `Fetch a ${label} row by id`,
+        parameters: [idParam, ...embedParams],
+        responses: {
+          '200': jsonResponse('The row.', rowRef),
+          '404': errorResponse('No such row.'),
+        },
       },
     };
-    item.delete = {
-      summary: `Delete a ${label} row`,
-      parameters: [idParam],
-      responses: {
-        '200': jsonResponse('The deleted row.', rowRef),
-        '404': errorResponse('No such row.'),
-      },
-    };
+    if (writable) {
+      item.patch = {
+        summary: `Update a ${label} row`,
+        parameters: [idParam],
+        requestBody: jsonBody(rowRef),
+        responses: {
+          '200': jsonResponse('The updated row.', rowRef),
+          '404': errorResponse('No such row.'),
+        },
+      };
+      item.delete = {
+        summary: `Delete a ${label} row`,
+        parameters: [idParam],
+        responses: {
+          '200': jsonResponse('The deleted row.', rowRef),
+          '404': errorResponse('No such row.'),
+        },
+      };
+    }
+    paths[`/${segment}/{id}`] = item;
   }
 
-  return {
-    [`/${segment}`]: collection,
-    [`/${segment}/{id}`]: item,
-  };
+  return paths;
 }
 
-/** The `{id}` path parameter. A composite primary key is addressed by
- *  comma-joining its components — in `primaryKey` declaration order — into the
- *  single `{id}` segment, each component percent-encoded. */
+/** The `{id}` path parameter. Only called for a resource with a non-empty
+ *  primary key (the caller in `resourcePaths` guards on it). A composite
+ *  primary key is addressed by comma-joining its components — in `primaryKey`
+ *  declaration order — into the single `{id}` segment, each component
+ *  percent-encoded. */
 function itemIdParam(resource: ResourceLike): JsonObject {
   const pk = 'primaryKey' in resource ? resource.primaryKey : [];
   let description: string;
@@ -268,10 +282,8 @@ function itemIdParam(resource: ResourceLike): JsonObject {
       `unescaped comma in the single path segment. Percent-encode reserved characters ` +
       `within a component; a component value cannot itself contain a comma (the segment ` +
       `is split on commas after URL-decoding).`;
-  } else if (pk.length === 1) {
-    description = `Primary key of the row (\`${pk[0]}\`).`;
   } else {
-    description = 'Primary key of the row.';
+    description = `Primary key of the row (\`${pk[0]}\`).`;
   }
   return { name: 'id', in: 'path', required: true, schema: { type: 'string' }, description };
 }
