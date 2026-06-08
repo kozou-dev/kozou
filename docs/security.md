@@ -1,4 +1,4 @@
-# Kozou v0.1 Security Considerations
+# Kozou Security Considerations
 
 ## Threat Model
 
@@ -41,9 +41,13 @@ situations can enable prompt injection:
 4. **Environments without an audit log on schema edits**: an attacker
    tampers with COMMENT text briefly and the change persists.
 
-## Mitigation (v0.1, current state)
+## Mitigation: prompt injection
 
-v0.1 ships **no built-in mitigations**. The baseline assumptions are:
+Kozou ships **no built-in mitigation for the prompt-injection risk above** — keeping
+malicious COMMENT text out of the schema is the schema owner's job. (This concerns
+COMMENT *trust*, a different axis from *access control*; for who may read or write your
+data through Kozou, see [Authentication and authorization](#authentication-and-authorization)
+below.) The baseline assumptions are:
 
 - **Kozou trusts every principal who can edit the DB schema**
   (single-tenant / internal use).
@@ -74,6 +78,44 @@ The following are being considered for v0.1.1 and later:
    deployments of Kozou (tight schema-edit permissions, audit logs
    for COMMENT changes, etc.).
 
+## Authentication and authorization
+
+This is a different axis from the COMMENT trust boundary above. Here the question is
+**who may read or write your data through Kozou's surfaces**, not whether COMMENT text
+is trusted.
+
+**Kozou is a resource server and enforcement layer — not an identity provider.** When
+you enable auth, `@kozou/api` verifies the signed JWT on each request that carries one
+(an HS256 shared secret, an RS256 public key, or a provider's remote JWKS endpoint),
+then runs that request inside a transaction under `SET LOCAL ROLE <role-from-claim>`
+with the claims published via `request.jwt.claims`. A request with no token is rejected
+with `401` unless you configure an anonymous role (`anonRole`), in which case it runs
+under that role with empty claims so your policies decide what an anonymous caller
+sees; a present-but-invalid token is always `401`. Your own **PostgreSQL
+row-level-security (RLS) policies** decide what each request can read and write. Kozou
+authenticates and
+switches role; it does not write policies. This enforcement is route-independent — the
+same RLS applies to `psql` and any other client, not just Kozou. The roles an
+application needs (for example admin / editor / author / viewer) are PostgreSQL roles
+plus RLS policies, which Kozou already runs each request under.
+
+**Identity provision is delegated.** User registration, login, password and session
+management, OAuth, and JWT *issuance* are out of scope for Kozou and are expected to
+come from an external identity provider:
+
+- **Supabase Auth (recommended).** PostgreSQL-native, issues role-claim JWTs, designed
+  for RLS — it lines up directly with Kozou's enforcement model.
+- **Auth0 / Clerk**, verified through `jwt.jwksUri` (keys selected by `kid`, cached,
+  rotated).
+- **A minimal self-hosted issuer** — any service that mints a role-claim JWT signed
+  with the secret Kozou verifies.
+
+A FastAPI-Users-style authentication / user-management library is a **non-goal**:
+Kozou stays a schema-to-surfaces compiler and an enforcement layer, and delegates
+identity to a hardened provider (the same boundary PostgREST draws against GoTrue /
+Supabase Auth). See `packages/kozou/README.md` for the `auth` config and
+`packages/api/README.md` for the request-level security boundary.
+
 ## Test Coverage
 
 `packages/mcp/test/tools.test.ts` contains a regression-fixed test that
@@ -91,7 +133,10 @@ future change adds or removes the mitigations above.
 - **Evaluate the risk that malicious COMMENT text could influence the
   AI agent's behaviour before deploying to production.**
 
-## Related spec
+## Related documentation
 
-- Kozou v0.1 spec §7 (MCP specification)
-- Kozou v0.1 spec §18.5 (HTTP-mode no-auth risk; HTTP arrives in v0.1.1)
+- [`packages/kozou/README.md`](../packages/kozou/README.md) — the `auth` config
+  (JWT verification, role claim, allowed/default/anonymous roles) for the in-house
+  `@kozou/api` backend.
+- [`packages/api/README.md`](../packages/api/README.md) — the request-level security
+  boundary of `@kozou/api` (loopback default, JWT + RLS, JWKS).
