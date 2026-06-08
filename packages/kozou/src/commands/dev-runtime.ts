@@ -31,12 +31,13 @@ export function resolveOrigin(config: KozouConfig, env: NodeJS.ProcessEnv): stri
 // Build the child-process environment for the Admin UI server. Keeping
 // it pure makes the wiring unit-testable without spawning anything.
 //
-// When `apiAdapterUrl` is given (`kozou dev --adapter api`), the UI is
-// pointed at the in-house @kozou/api server via KOZOU_ADAPTER_KIND=api;
-// otherwise it uses the default REST adapter URL from config. On the api
-// path `apiToken` (when present) is exposed as KOZOU_ADAPTER_TOKEN so the
-// UI attaches it as a Bearer token; any inherited value is cleared so a
-// stray env var cannot leak in.
+// When `apiAdapterUrl` is given (the default in-house @kozou/api backend),
+// the UI is pointed at that server via KOZOU_ADAPTER_KIND=api; otherwise (the
+// external REST opt-out) it uses the adapter URL from config and leaves
+// KOZOU_ADAPTER_KIND unset, so the UI falls back to its REST adapter. On the
+// api path `apiToken` (when present) is exposed as KOZOU_ADAPTER_TOKEN so the
+// UI attaches it as a Bearer token; any inherited value is cleared so a stray
+// env var cannot leak in.
 export function buildAdminUiEnv(
   config: KozouConfig,
   origin: string,
@@ -44,25 +45,32 @@ export function buildAdminUiEnv(
   apiAdapterUrl?: string,
   apiToken?: string,
 ): NodeJS.ProcessEnv {
-  const adapter =
-    apiAdapterUrl !== undefined
-      ? { KOZOU_ADAPTER_KIND: 'api', KOZOU_ADAPTER_URL: apiAdapterUrl }
-      : { KOZOU_ADAPTER_URL: config.adapter.url };
   const env: NodeJS.ProcessEnv = {
     ...baseEnv,
     DATABASE_URL: config.database.url,
-    ...adapter,
     PORT: String(config.server.ui.port),
     HOST: config.server.ui.host,
     ORIGIN: origin,
     NODE_ENV: 'production',
   };
   if (apiAdapterUrl !== undefined) {
+    // In-house @kozou/api backend: point the UI at it and attach the token
+    // when one was resolved, clearing any inherited stale token otherwise.
+    env.KOZOU_ADAPTER_KIND = 'api';
+    env.KOZOU_ADAPTER_URL = apiAdapterUrl;
     if (apiToken !== undefined && apiToken.length > 0) {
       env.KOZOU_ADAPTER_TOKEN = apiToken;
     } else {
       delete env.KOZOU_ADAPTER_TOKEN;
     }
+  } else {
+    // External REST opt-out: the UI uses its REST adapter at the config url.
+    // Clear any inherited KOZOU_ADAPTER_KIND / token so a stray value in the
+    // parent environment cannot flip the UI onto the api adapter (or leak a
+    // token) — the opt-out selection must be authoritative.
+    delete env.KOZOU_ADAPTER_KIND;
+    delete env.KOZOU_ADAPTER_TOKEN;
+    env.KOZOU_ADAPTER_URL = config.adapter.url;
   }
   return env;
 }

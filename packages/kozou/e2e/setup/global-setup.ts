@@ -136,7 +136,9 @@ export default async function globalSetup() {
   // exists for them); the database / adapter URLs use ${VAR} expansion so
   // the container-assigned host ports stay out of the file and the dev
   // command's config loader (incl. ${VAR} expansion) is itself dogfooded.
-  // adapter.type defaults to its only allowed value, so it is omitted.
+  // This suite pins the external REST opt-out via adapter.type so `kozou dev`
+  // (no flag) selects it — exercising config-driven adapter selection and the
+  // opt-out path against the sidecar above.
   const configDir = mkdtempSync(join(tmpdir(), 'kozou-e2e-'));
   const configPath = join(configDir, 'kozou.config.yaml');
   writeFileSync(
@@ -154,6 +156,7 @@ export default async function globalSetup() {
       `      port: ${MCP_PORT}`,
       `      host: ${HOST}`,
       'adapter:',
+      '  type: postgrest',
       '  url: ${KOZOU_ADAPTER_URL}',
       '',
     ].join('\n'),

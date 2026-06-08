@@ -1,8 +1,9 @@
-// The Kozou v0.2 CLI integration headline: a single `kozou dev
-// --adapter api` brings up the Admin UI *and* the in-house @kozou/api
-// data backend together (global-setup launches exactly that command),
-// and the UI drives a full browser CRUD loop through @kozou/api — no
-// separate data-backend container in the stack.
+// The Kozou v1.0 CLI integration headline: a plain `kozou dev` (no
+// adapter flag) brings up the Admin UI *and* the in-house @kozou/api
+// data backend together — the in-house backend is the default
+// (global-setup launches exactly that command) — and the UI drives a
+// full browser CRUD loop through @kozou/api with no separate
+// data-backend container in the stack.
 //
 // The loop creates and then deletes its row, leaving the fixture in its
 // seeded state (three authors incl. Margaret Atwood).
@@ -19,7 +20,7 @@ const EDIT_NAME = 'E2E Dev-API Author (edited)';
 
 const DETAIL_URL = new RegExp(`/tables/${TABLE.replace('.', '\\.')}/[0-9a-f-]{36}$`);
 
-test('kozou dev --adapter api serves a full CRUD loop through the Admin UI', async ({
+test('kozou dev (default api backend) serves a full CRUD loop through the Admin UI', async ({
   page,
 }) => {
   // Read: the list renders the seeded rows, served by the in-house API.
