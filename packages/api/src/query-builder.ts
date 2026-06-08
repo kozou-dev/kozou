@@ -180,7 +180,8 @@ function isPlainInteger(s: string): boolean {
  *  (no regex) that validates *syntax only* — it does not coerce through JS
  *  `Number`, so arbitrary-precision PostgreSQL `numeric` values (hundreds of
  *  digits, magnitudes beyond JS range) are accepted, while `abc`, `0x10`, and
- *  `NaN`/`Infinity` are rejected. Range/precision are left to PostgreSQL. */
+ *  `NaN`/`Infinity` are rejected. Range / precision are checked separately
+ *  (see `decimalFitsRange`). */
 function isLexicalDecimal(s: string): boolean {
   let i = 0;
   const n = s.length;
@@ -211,18 +212,117 @@ function isLexicalDecimal(s: string): boolean {
   return i === n; // the whole string was consumed
 }
 
-/** Whether a string filter value parses as the column's base scalar type, for
- *  the types where a bad value would otherwise surface only at execution as a
- *  500: integer family (exact, with width range), decimal/float family
- *  (lexical syntax), and boolean. Other types (uuid / date / json / ...) are
- *  not pre-checked and fall through to PostgreSQL.
+/** Parse a `numeric(p,s)` / `numeric(p)` type modifier out of a `format_type`
+ *  string, or `null` when the type carries none (arbitrary-precision numeric).
+ *  Linear scan / split — no regex (CodeQL `js/polynomial-redos` precedent). */
+function numericTypmod(dataType: string): { precision: number; scale: number } | null {
+  const open = dataType.indexOf('(');
+  if (open === -1) return null;
+  const close = dataType.indexOf(')', open + 1);
+  if (close === -1) return null;
+  const parts = dataType.slice(open + 1, close).split(',');
+  const precision = Number.parseInt(parts[0].trim(), 10);
+  if (!Number.isInteger(precision)) return null;
+  const scale = parts.length > 1 ? Number.parseInt(parts[1].trim(), 10) : 0;
+  if (!Number.isInteger(scale)) return null;
+  return { precision, scale };
+}
+
+/** Number of decimal digits of a non-negative BigInt (`0n` -> 1). */
+function bigIntDigits(n: bigint): number {
+  return n === 0n ? 1 : n.toString().length;
+}
+
+/** Whether a lexically-valid decimal fits `numeric(precision, scale)`.
+ *  PostgreSQL rounds the value to `scale` fractional digits, then requires the
+ *  result to fit in `precision` total significant digits — i.e. the value
+ *  scaled to an integer in units of `10^-scale` must have at most `precision`
+ *  digits. Done with BigInt so rounding carry (`9999999999.995` ->
+ *  `10000000000.00` on `numeric(12,2)`) is exact and arbitrary-precision values
+ *  are never lost. A huge exponent is handled without materialising `10^exp`. */
+function numericFitsTypmod(value: string, precision: number, scale: number): boolean {
+  let s = value.trim();
+  if (s[0] === '+' || s[0] === '-') s = s.slice(1);
+  let eIdx = s.indexOf('e');
+  if (eIdx === -1) eIdx = s.indexOf('E');
+  let exp = 0;
+  if (eIdx !== -1) {
+    exp = Number.parseInt(s.slice(eIdx + 1), 10);
+    s = s.slice(0, eIdx);
+  }
+  const dot = s.indexOf('.');
+  const intPart = dot === -1 ? s : s.slice(0, dot);
+  const fracPart = dot === -1 ? '' : s.slice(dot + 1);
+  const d = intPart + fracPart === '' ? 0n : BigInt(intPart + fracPart);
+  if (d === 0n) return true; // zero fits any numeric(p, s)
+  // value = d * 10^(exp - fracPart.length); the rounded scaled integer is
+  // R = round(value * 10^scale) = round(d * 10^j), and we need it to have at
+  // most `precision` digits.
+  const j = exp - fracPart.length + scale;
+  if (j >= 0) {
+    // d * 10^j has exactly bigIntDigits(d) + j digits — no exponentiation.
+    return bigIntDigits(d) + j <= precision;
+  }
+  const drop = -j;
+  // Dropping more digits than d has rounds the magnitude to 0 or 1 — always fits.
+  if (drop > bigIntDigits(d)) return true;
+  const pow = 10n ** BigInt(drop); // drop <= digit count, so this is bounded
+  const q = d / pow;
+  const rem = d % pow;
+  const r = rem * 2n >= pow ? q + 1n : q; // round half away from zero (PostgreSQL)
+  return bigIntDigits(r) <= precision;
+}
+
+/** Whether a lexically-valid decimal is genuinely zero — all mantissa digits
+ *  are zero (`0`, `0.0`, `0e5`) — rather than a nonzero value that merely
+ *  rounds to zero. Scans the mantissa only, not the exponent. */
+function isLexicalZero(value: string): boolean {
+  let end = value.indexOf('e');
+  if (end === -1) end = value.indexOf('E');
+  if (end === -1) end = value.length;
+  for (let i = 0; i < end; i++) {
+    if (value[i] >= '1' && value[i] <= '9') return false;
+  }
+  return true;
+}
+
+/** Whether a lexically-valid decimal is representable by a PostgreSQL float
+ *  type. PostgreSQL rejects both overflow (magnitude above the type maximum)
+ *  and underflow (a nonzero magnitude that rounds to zero in the type). `real`
+ *  is IEEE single precision, so round through `Math.fround` — it maps an
+ *  overflow to `Infinity` and an underflow to `0`; `double precision` is IEEE
+ *  double, which JS `Number` models exactly. */
+function floatFits(value: string, single: boolean): boolean {
+  const n = single ? Math.fround(Number(value)) : Number(value);
+  if (!Number.isFinite(n)) return false; // overflow -> Infinity
+  return n !== 0 || isLexicalZero(value); // nonzero input rounding to 0 = underflow
+}
+
+/** Whether a lexically-valid decimal fits the decimal/float column's range.
+ *  `numeric(p,s)`: see `numericFitsTypmod` (rounded to `scale`, must fit in `p`
+ *  total digits); without a typmod, precision is unlimited. `real` /
+ *  `double precision`: must be within the type's representable range. */
+function decimalFitsRange(base: string, dataType: string, value: string): boolean {
+  if (base === 'real' || base === 'float4') return floatFits(value, true);
+  if (base === 'double precision' || base === 'float8' || base === 'float') {
+    return floatFits(value, false);
+  }
+  const typmod = numericTypmod(dataType);
+  if (typmod === null) return true; // arbitrary precision — no precision bound
+  return numericFitsTypmod(value, typmod.precision, typmod.scale);
+}
+
+/** Whether a string filter value parses as the column's type, for the types
+ *  where a bad value would otherwise surface only at execution as a 500:
+ *  integer family (exact, with width range), decimal/float family (lexical
+ *  syntax plus range/precision, Kozou v1.0 issue #81), and boolean. Other
+ *  types (uuid / date / json / ...) are not pre-checked and fall through to
+ *  PostgreSQL.
  *
- *  Documented residual (follow-up #81): only *syntax* is validated for the
- *  decimal/float family — true range overflow (`real`/`double precision`) and
- *  `numeric(p,s)` precision overflow still reach PostgreSQL. Validating syntax
- *  (not range) avoids false-rejecting valid arbitrary-precision `numeric`
- *  values, which JS `Number` range cannot represent. */
-function valueFitsType(base: string, value: string): boolean {
+ *  Decimal syntax is validated without coercing through JS `Number` (so an
+ *  arbitrary-precision `numeric` is not false-rejected); range / precision is
+ *  then checked from the type modifier (`numeric(p,s)`) or the float range. */
+function valueFitsType(base: string, dataType: string, value: string): boolean {
   const trimmed = value.trim();
   if (trimmed === '') return false;
   const bounds = INTEGER_BOUNDS[base];
@@ -232,7 +332,8 @@ function valueFitsType(base: string, value: string): boolean {
     return n >= bounds[0] && n <= bounds[1];
   }
   if (DECIMAL_BASE_TYPES.has(base)) {
-    return isLexicalDecimal(trimmed);
+    if (!isLexicalDecimal(trimmed)) return false;
+    return decimalFitsRange(base, dataType, trimmed);
   }
   if (base === 'boolean' || base === 'bool') {
     return BOOLEAN_LITERALS.has(trimmed.toLowerCase());
@@ -257,7 +358,7 @@ function assertFilterValueParsable(
   if (base === null) return; // array etc. — not value-checked here
   const values = filter.op === 'in' ? filter.values : [filter.value];
   for (const value of values) {
-    if (!valueFitsType(base, value)) {
+    if (!valueFitsType(base, column.dataType, value)) {
       throw badRequest(
         `Filter value "${value}" is not valid for column "${filter.column}" (${column.dataType}) ` +
           `on resource "${resource.name}".`,

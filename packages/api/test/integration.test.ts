@@ -76,6 +76,12 @@ describe('@kozou/api integration (generic fixture)', () => {
          VALUES ($1, 1, 10), ($1, 2, 20), ($2, 1, 5)`,
         [ORDER_A, ORDER_B],
       );
+
+      // A real column for the float range-overflow filter check (§4 / #81).
+      await client.query(
+        `CREATE TABLE float_samples (id integer PRIMARY KEY, approx real NOT NULL)`,
+      );
+      await client.query(`INSERT INTO float_samples (id, approx) VALUES (1, 1.5)`);
     } finally {
       await client.end();
     }
@@ -251,6 +257,32 @@ describe('@kozou/api integration (generic fixture)', () => {
     );
     expect(status).toBe(400);
     expect(body.error?.code).toBe('bad_request');
+  });
+
+  it('rejects numeric precision / float range overflow with 400, not 500 (#81)', async () => {
+    // numeric(12,2): an integer part beyond 10 digits would raise a PostgreSQL
+    // "numeric field overflow" (500); it is now rejected pre-execution.
+    const overflow = await getJson<{ error?: { code: string } }>(
+      `/inventory_items?selling_price=eq.999999999999999999999`,
+    );
+    expect(overflow.status).toBe(400);
+    expect(overflow.body.error?.code).toBe('bad_request');
+    // The exponent form that expands past the budget is caught too.
+    const expOverflow = await getJson(`/inventory_items?selling_price=eq.1e20`);
+    expect(expOverflow.status).toBe(400);
+    // A value within numeric(12,2) still runs (200), proving no false reject.
+    const ok = await getJson<ListBody>(`/inventory_items?selling_price=lte.1000000.00`);
+    expect(ok.status).toBe(200);
+    // real: a magnitude beyond the float4 range would raise "out of range" (500);
+    // it is rejected as 400 instead. An in-range value still runs.
+    const floatOverflow = await getJson(`/float_samples?approx=gt.1e40`);
+    expect(floatOverflow.status).toBe(400);
+    const floatOk = await getJson<ListBody>(`/float_samples?approx=lt.1000`);
+    expect(floatOk.status).toBe(200);
+    // real underflow: a nonzero value that rounds to zero is also rejected (PG
+    // raises "value out of range: underflow" otherwise).
+    const floatUnderflow = await getJson(`/float_samples?approx=eq.1e-46`);
+    expect(floatUnderflow.status).toBe(400);
   });
 
   it('rejects a non-text relation-options search field with 400 (#76)', async () => {
