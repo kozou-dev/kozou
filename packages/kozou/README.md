@@ -1,8 +1,8 @@
 # kozou
 
 CLI entry point for [Kozou](https://kozou.org): scaffolding,
-schema introspection, and MCP server hand-off. See *Kozou v0.1
-design spec* §9 for the command surface.
+schema introspection, and MCP server hand-off. See the Commands
+section below for the full command surface.
 
 ## Install
 

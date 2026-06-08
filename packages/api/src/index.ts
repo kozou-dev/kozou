@@ -1,6 +1,7 @@
-// @kozou/api: Kozou's own REST layer (experimental, Kozou v0.2).
-// Serves the tables and views of a SchemaContext as a REST API. See the
-// Kozou v0.2 design spec §2–§4.
+// @kozou/api: Kozou's own REST layer — the default `kozou dev` data backend.
+// Serves the tables and views of a SchemaContext as a REST API. Its wire
+// format and OpenAPI are a stable contract as of Kozou v1.0; see the README
+// for the supported surface and the scope table.
 
 export {
   startApiServer,

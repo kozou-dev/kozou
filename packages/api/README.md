@@ -158,7 +158,7 @@ deliberate opt-out.
 ## Security boundary
 
 By default the API ships with **no authentication** and binds to
-`127.0.0.1` (like the MCP HTTP server, Kozou v0.1 spec §18.5); it prints a
+`127.0.0.1` (like the MCP HTTP server); it prints a
 loud warning when bound to a non-loopback host. Run the unauthenticated
 server only inside a trusted boundary (local dev, a docker-compose network).
 

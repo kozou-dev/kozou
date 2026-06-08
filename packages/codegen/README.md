@@ -1,6 +1,6 @@
 # @kozou/codegen
 
-> **Experimental (Kozou v0.2).** API and output may change without notice
+> **Experimental.** API and output may change without notice
 > while the package is stabilising.
 
 Kozou's TypeScript codegen. Given a `SchemaContext` (from `@kozou/introspect`
@@ -8,9 +8,9 @@ Kozou's TypeScript codegen. Given a `SchemaContext` (from `@kozou/introspect`
 the JSON row shape a client receives from `@kozou/api` — driven entirely by
 your PostgreSQL DDL + `COMMENT` metadata.
 
-This is the compiler-native half of Kozou's type story (Kozou v0.2 design
-spec §5.2). It is a pure, offline function — no database connection or
-running API is required to generate the row types.
+This is the compiler-native half of Kozou's type story. It is a pure,
+offline function — no database connection or running API is required to
+generate the row types.
 
 ## Scope
 

@@ -42,9 +42,7 @@ type DevFlags = {
 
 const program = new Command()
   .name('kozou')
-  .description(
-    'PostgreSQL compiler. One source, many faithful forms. (Kozou v0.1 design spec §9)',
-  )
+  .description('PostgreSQL compiler. One source, many faithful forms.')
   .version(PACKAGE_VERSION);
 
 program
