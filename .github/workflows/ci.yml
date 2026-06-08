@@ -125,14 +125,15 @@ jobs:
         run: pnpm --filter @kozou/svelte-ui run test:e2e
 
   e2e-kozou-dev:
-    name: Playwright E2E (kozou dev)
+    name: Playwright E2E (kozou dev, PostgREST opt-out)
     runs-on: ubuntu-latest
-    # Mirrors the svelte-ui E2E job, but launches `node dist/cli.js dev`
-    # so the dev command's own wiring (config -> env, ORIGIN propagation,
-    # MCP HTTP in-process, both servers together) is exercised against a
-    # real postgres + REST-adapter stack. The Playwright globalSetup owns
-    # the DB lifecycle via testcontainers, same as the svelte-ui suite.
-    # (See packages/kozou/e2e/setup/global-setup.ts.)
+    # Launches `node dist/cli.js dev` so the dev command's own wiring
+    # (config -> env, ORIGIN propagation, MCP HTTP in-process, both servers
+    # together) is exercised. This suite pins `adapter.type: postgrest` in its
+    # config, so `kozou dev` (no flag) selects the external REST opt-out — it
+    # is the regression guard for the opt-out path and the REST-adapter
+    # sidecar. The Playwright globalSetup owns the DB + sidecar lifecycle via
+    # testcontainers. (See packages/kozou/e2e/setup/global-setup.ts.)
     env:
       NODE_OPTIONS: '--max-old-space-size=4096'
     steps:
@@ -202,12 +203,13 @@ jobs:
         run: pnpm --filter @kozou/svelte-ui run test:e2e:api
 
   e2e-kozou-dev-api:
-    name: Playwright E2E (kozou dev --adapter api)
+    name: Playwright E2E (kozou dev, default in-house API)
     runs-on: ubuntu-latest
-    # Kozou v0.2 CLI integration: launches `node dist/cli.js dev
-    # --adapter api`, which starts the in-house @kozou/api server
-    # in-process and spawns the Admin UI pointed at it (no data-backend
-    # sidecar), then drives a browser CRUD loop. The Playwright
+    # Kozou v1.0 default: launches a plain `node dist/cli.js dev` (no adapter
+    # flag), which resolves adapter.type to its default `api`, starts the
+    # in-house @kozou/api server in-process, and spawns the Admin UI pointed
+    # at it — NO data-backend sidecar (the §1.3 DoD: default config, no
+    # PostgREST container) — then drives a browser CRUD loop. The Playwright
     # globalSetup owns the postgres lifecycle via testcontainers.
     # (See packages/kozou/e2e-api/setup/global-setup.ts.)
     env:

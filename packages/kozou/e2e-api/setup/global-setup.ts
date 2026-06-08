@@ -1,15 +1,15 @@
-// Playwright globalSetup for the `kozou dev --adapter api` E2E suite
-// (Kozou v0.2 CLI integration). Proves the headline experience: a single
-// `kozou dev --adapter api` brings up both the Admin UI and the in-house
-// @kozou/api data backend, with the UI wired to the API — no separate
-// data-backend container.
+// Playwright globalSetup for the default `kozou dev` E2E suite (Kozou v1.0).
+// Proves the headline v1.0 experience: a plain `kozou dev` — no adapter flag —
+// brings up both the Admin UI and the in-house @kozou/api data backend (now
+// the default), with the UI wired to the API and NO separate data-backend
+// container. The adapter resolves to `api` from the config default.
 //
 // Steps:
 //   1. postgres:16 via @testcontainers/postgresql
 //   2. fixture schema + seed rows applied with `pg`
 //   3. a temp kozou.config.yaml (ports/host literal, db url via ${VAR}),
-//      then `kozou dev --config <tmp> --adapter api` spawned with
-//      DATABASE_URL / ORIGIN in its environment
+//      then `kozou dev --config <tmp>` spawned with DATABASE_URL / ORIGIN in
+//      its environment — the adapter defaults to the in-house api backend
 //
 // `kozou dev` introspects the database and starts @kozou/api in-process,
 // then spawns the bundled Admin UI pointed at it. The kozou `dist/cli.js`
@@ -91,8 +91,9 @@ export default async function globalSetup() {
 
   // kozou.config.yaml: ports/host literal; db url via ${VAR} expansion so
   // the container-assigned host port stays out of the file (and exercises
-  // the config loader's env expansion). The adapter block is omitted —
-  // --adapter api ignores it and the in-house server connects directly.
+  // the config loader's env expansion). The adapter block is omitted, so
+  // adapter.type takes its default (`api`) and `kozou dev` (no flag) starts
+  // the in-house backend, which connects to the database directly.
   const configDir = mkdtempSync(join(tmpdir(), 'kozou-e2e-api-'));
   const configPath = join(configDir, 'kozou.config.yaml');
   writeFileSync(
@@ -115,10 +116,10 @@ export default async function globalSetup() {
   );
   state.configDir = configDir;
 
-  log(`spawning kozou dev --adapter api — UI ${HOST}:${UI_PORT}, API ${HOST}:${API_PORT}`);
+  log(`spawning kozou dev (default api backend) — UI ${HOST}:${UI_PORT}, API ${HOST}:${API_PORT}`);
   state.kozouDev = spawn(
     'node',
-    [CLI_ENTRY, 'dev', '--config', configPath, '--adapter', 'api', '--api-port', String(API_PORT)],
+    [CLI_ENTRY, 'dev', '--config', configPath, '--api-port', String(API_PORT)],
     {
       cwd: packageRoot,
       env: { ...process.env, DATABASE_URL: pgUri, ORIGIN },
