@@ -2,8 +2,9 @@
 
 SvelteKit + Svelte 5 Admin UI for [Kozou](https://kozou.org). Reads
 a `SchemaContext` from [`@kozou/core`](../core) and talks to a
-backend through the `DataAdapter` interface defined there. The
-default adapter speaks PostgREST.
+backend through the `DataAdapter` interface defined there. Used
+standalone, its default adapter speaks PostgREST; under `kozou dev`
+the default is Kozou's bundled in-house REST backend (`@kozou/api`).
 
 > **Status:** published to npm as `@kozou/svelte-ui`. The package
 > ships only the adapter-node `build/` artifact; host integration
@@ -19,9 +20,6 @@ default adapter speaks PostgREST.
 | Forms | `sveltekit-superforms` + `formsnap` + `zod` (4.4) |
 | Tables | `@tanstack/table-core` (Svelte 5 wrapper internalised) |
 | HTTP | `fetch` via the `DataAdapter` interface from `@kozou/core` |
-
-The full feature catalogue lives in the *Kozou v0.1 design spec*
-§8.
 
 ## Routes
 
