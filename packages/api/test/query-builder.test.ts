@@ -267,6 +267,100 @@ describe('buildListQuery', () => {
     ).not.toThrow();
   });
 
+  it('rejects numeric(p,s) precision overflow and out-of-range floats (400, pre-execution) (#81)', () => {
+    const t = tableResource('t', [
+      col('id', 'uuid', { isPrimaryKey: true, nullable: false }),
+      col('price', 'currency', { dataType: 'numeric(12,2)' }), // 12 total / scale 2
+      col('tiny', 'number', { dataType: 'numeric(3,5)' }), // scale > precision
+      col('ratio', 'number', { dataType: 'real' }),
+      col('measure', 'number', { dataType: 'double precision' }),
+    ]);
+    // numeric(12,2): more than 12 total digits after scaling overflows.
+    expect(() =>
+      buildListQuery(t, { filters: [{ column: 'price', op: 'eq', value: '999999999999999999999' }] }),
+    ).toThrow(/is not valid for column "price"/);
+    // Exponent form that expands past the budget overflows too.
+    expect(() =>
+      buildListQuery(t, { filters: [{ column: 'price', op: 'eq', value: '1e20' }] }),
+    ).toThrow(/is not valid for column "price"/);
+    // Scale rounding carries into a new integer digit: 9999999999.995 rounds to
+    // 10000000000.00 (13 digits) on numeric(12,2) — a 500 without the carry check.
+    expect(() =>
+      buildListQuery(t, { filters: [{ column: 'price', op: 'eq', value: '9999999999.995' }] }),
+    ).toThrow(/is not valid for column "price"/);
+    // numeric(3,5): a value >= 0.01 needs more than 3 total digits after scaling.
+    expect(() =>
+      buildListQuery(t, { filters: [{ column: 'tiny', op: 'eq', value: '0.5' }] }),
+    ).toThrow(/is not valid for column "tiny"/);
+    // real: a magnitude beyond ~3.4e38 is out of range.
+    expect(() =>
+      buildListQuery(t, { filters: [{ column: 'ratio', op: 'gt', value: '1e40' }] }),
+    ).toThrow(/is not valid for column "ratio"/);
+    // double precision: a magnitude beyond ~1.8e308 is out of range.
+    expect(() =>
+      buildListQuery(t, { filters: [{ column: 'measure', op: 'lt', value: '1e400' }] }),
+    ).toThrow(/is not valid for column "measure"/);
+    // Underflow: a nonzero magnitude that rounds to zero is rejected too.
+    expect(() =>
+      buildListQuery(t, { filters: [{ column: 'ratio', op: 'eq', value: '1e-46' }] }),
+    ).toThrow(/is not valid for column "ratio"/);
+    expect(() =>
+      buildListQuery(t, { filters: [{ column: 'measure', op: 'eq', value: '1e-400' }] }),
+    ).toThrow(/is not valid for column "measure"/);
+    // The check carries the 400 status.
+    try {
+      buildListQuery(t, { filters: [{ column: 'price', op: 'eq', value: '1e20' }] });
+      expect.unreachable('expected a 400');
+    } catch (err) {
+      expect((err as KozouApiError).status).toBe(400);
+    }
+  });
+
+  it('accepts in-range numeric(p,s) / float values and unbounded numeric (#81)', () => {
+    const t = tableResource('t', [
+      col('id', 'uuid', { isPrimaryKey: true, nullable: false }),
+      col('price', 'currency', { dataType: 'numeric(12,2)' }),
+      col('tiny', 'number', { dataType: 'numeric(3,5)' }), // scale > precision
+      col('ratio', 'number', { dataType: 'real' }),
+      col('unbounded', 'currency', { dataType: 'numeric' }), // no typmod
+    ]);
+    // Right at the 12-total-digit budget of numeric(12,2).
+    expect(() =>
+      buildListQuery(t, { filters: [{ column: 'price', op: 'lte', value: '1234567890.99' }] }),
+    ).not.toThrow();
+    // Excess scale is rounded by PostgreSQL, not rejected.
+    expect(() =>
+      buildListQuery(t, { filters: [{ column: 'price', op: 'eq', value: '1.23456' }] }),
+    ).not.toThrow();
+    // Zero fits any numeric(p,s) regardless of how the exponent shifts it.
+    expect(() =>
+      buildListQuery(t, { filters: [{ column: 'price', op: 'eq', value: '0e20' }] }),
+    ).not.toThrow();
+    expect(() =>
+      buildListQuery(t, { filters: [{ column: 'price', op: 'eq', value: '0000e3' }] }),
+    ).not.toThrow();
+    // numeric(3,5) holds 3 significant digits at scale 5 (|value| < 0.01).
+    expect(() =>
+      buildListQuery(t, { filters: [{ column: 'tiny', op: 'eq', value: '0.00123' }] }),
+    ).not.toThrow();
+    // real within range, including the smallest denormal and a true zero.
+    expect(() =>
+      buildListQuery(t, { filters: [{ column: 'ratio', op: 'lt', value: '1e38' }] }),
+    ).not.toThrow();
+    expect(() =>
+      buildListQuery(t, { filters: [{ column: 'ratio', op: 'gte', value: '1e-45' }] }),
+    ).not.toThrow();
+    expect(() =>
+      buildListQuery(t, { filters: [{ column: 'ratio', op: 'eq', value: '0e5' }] }),
+    ).not.toThrow();
+    // numeric without a typmod is arbitrary precision — a huge value is fine.
+    expect(() =>
+      buildListQuery(t, {
+        filters: [{ column: 'unbounded', op: 'eq', value: '123456789012345678901234567890.5' }],
+      }),
+    ).not.toThrow();
+  });
+
   it('free-text search skips a text-widget column whose underlying type is non-text (text[])', () => {
     const r = tableResource('docs', [
       col('id', 'uuid', { isPrimaryKey: true, nullable: false }),
