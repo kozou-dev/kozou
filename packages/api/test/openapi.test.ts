@@ -73,8 +73,26 @@ describe('buildOpenApiDocument', () => {
 
     expect(doc.paths['/vw_active'].get).toBeDefined();
     expect(doc.paths['/vw_active'].post).toBeUndefined();
-    expect(doc.paths['/vw_active/{id}'].patch).toBeUndefined();
-    expect(doc.paths['/vw_active/{id}'].delete).toBeUndefined();
+    // A view has no primary key, so it is not addressable by id: the document
+    // must not advertise an item path the request handler would reject (400).
+    expect(doc.paths['/vw_active/{id}']).toBeUndefined();
+  });
+
+  it('omits the item path for a primary-key-less table but keeps list + create', () => {
+    const schema = schemaOf([
+      {
+        name: 'event_log',
+        columns: [col('source', 'text'), col('payload', 'text')],
+        primaryKey: [],
+      },
+    ]);
+    const doc = buildOpenApiDocument(schema) as unknown as Doc;
+    // Writable, so list + create stay available...
+    expect(doc.paths['/event_log'].get).toBeDefined();
+    expect(doc.paths['/event_log'].post).toBeDefined();
+    // ...but there is no key to address a single row, so no item path is
+    // advertised (get/patch/delete by id would 400 at runtime).
+    expect(doc.paths['/event_log/{id}']).toBeUndefined();
   });
 
   it('reflects table COMMENTs into the component schema', () => {
@@ -159,12 +177,39 @@ describe('buildOpenApiDocument', () => {
     expect(props.c_relation_select.type).toBe('string');
   });
 
-  it('exposes an embed query parameter on the collection and item GETs', () => {
+  const paramNames = (op: unknown): string[] =>
+    ((op as { parameters?: { name: string }[] }).parameters ?? []).map((p) => p.name);
+
+  it('advertises the embed parameter only where the resource has embeddable relations', () => {
+    const schema = schemaOf([
+      {
+        name: 'books',
+        columns: [col('id', 'uuid', { isPrimaryKey: true }), col('author_id', 'uuid')],
+        primaryKey: ['id'],
+        relations: [relation('author_id', 'authors')],
+      },
+      {
+        name: 'authors',
+        columns: [col('id', 'uuid', { isPrimaryKey: true }), col('display_name', 'text')],
+        primaryKey: ['id'],
+      },
+    ]);
+    const doc = buildOpenApiDocument(schema) as unknown as Doc;
+    // books has a forward (to-one) relation -> embed advertised on list + item.
+    expect(paramNames(doc.paths['/books'].get)).toContain('embed');
+    expect(paramNames(doc.paths['/books/{id}'].get)).toContain('embed');
+    // authors is the reverse (to-many) target -> embed advertised there too.
+    expect(paramNames(doc.paths['/authors'].get)).toContain('embed');
+    expect(paramNames(doc.paths['/authors/{id}'].get)).toContain('embed');
+  });
+
+  it('omits the embed parameter where a resource has no embeddable relations', () => {
     const doc = build();
-    const names = (get: unknown): string[] =>
-      ((get as { parameters?: { name: string }[] }).parameters ?? []).map((p) => p.name);
-    expect(names(doc.paths['/authors'].get)).toContain('embed');
-    expect(names(doc.paths['/authors/{id}'].get)).toContain('embed');
+    // A view exposes no relations -> the embed parameter would only 400.
+    expect(paramNames(doc.paths['/vw_active'].get)).not.toContain('embed');
+    // A relation-less (but PK-backed) table likewise advertises no embed.
+    expect(paramNames(doc.paths['/authors'].get)).not.toContain('embed');
+    expect(paramNames(doc.paths['/authors/{id}'].get)).not.toContain('embed');
   });
 
   it('lists embeddable relations as x-kozou-embeds with a $ref target', () => {

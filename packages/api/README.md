@@ -1,52 +1,159 @@
 # @kozou/api
 
-> **Experimental (Kozou v0.2).** Published to npm as an experimental
-> preview; the API and wire format may change without notice while the
-> package is stabilising.
+> **Stable (Kozou v1.0).** The REST wire format, query grammar, and OpenAPI
+> extensions documented below are a stable contract: they will not change
+> incompatibly without a major release. The one part still evolving is the
+> composite-foreign-key relation shape — see [Stability](#stability).
 
 Kozou's own REST layer. Given a `SchemaContext` (from `@kozou/introspect`
 + `@kozou/core`) and a PostgreSQL connection, it serves the tables and
 views of your database as a REST API, driven entirely by your DDL and
 `COMMENT` metadata — no hand-written route code.
 
-This is the in-house data layer that Kozou v1.0 will make the default
-(see the Kozou v0.2 design spec, §1–§4). The Admin UI talks to it through
-the same `DataAdapter` seam (`@kozou/core`) it already uses, so swapping
-the data layer is not a breaking change for UI code.
+This is the in-house data layer that Kozou v1.0 makes the default backend.
+The Admin UI talks to it through the same `DataAdapter` seam (`@kozou/core`)
+it already uses, so swapping the data layer is not a breaking change for UI
+code.
 
-## Status (v0.2 Phase 1–3 — read + write + OpenAPI)
+## API
 
-Implemented:
+### Service
 
-- `GET /` — service info + the list of available resources.
-- `GET /<resource>` — list rows of a table or view, with:
-  - `page` (1-based) / `pageSize` pagination,
-  - `sort=field.asc,other.desc` ordering,
-  - `search=<text>` free-text `ILIKE` across text columns,
-  - `<column>=<value>` equality filters.
-  Returns `{ rows, total, page, pageSize }`.
+- `GET /` — service info (name, version) and the list of available resources.
+- `GET /openapi.json` — an OpenAPI 3.1 document for the whole API
+  (see [OpenAPI](#openapi)).
+
+### Reading
+
+- `GET /<resource>` — list rows of a table or view. Returns
+  `{ rows, total, page, pageSize }`. Supports:
+  - **pagination** — `page` (1-based) and `pageSize` (`LIMIT` / `OFFSET`, capped);
+  - **sort** — `sort=field.asc,other.desc`;
+  - **filter** — `<column>=<op>.<value>` (see [Filtering](#filtering));
+  - **free-text search** — `search=<text>` (`ILIKE` across text columns);
+  - **embedding** — `embed=<relation-chain>` (see [Embedding](#embedding)).
+- `GET /<resource>/<id>` — fetch a single table row by primary key. For a
+  composite primary key, `<id>` is the key columns in declaration order,
+  comma-joined in one path segment (`/order_lines/42,3`); `embed` is
+  supported here too. Returns the row, or `404`.
 - `GET /<resource>?as=options&label=<col>&fields=<a,b>&q=<text>&limit=<n>`
   — lightweight relation-select lookup. Returns `{ options: [{ id, label }] }`.
-- `GET /<resource>/<id>` — fetch a single table row by its single-column
-  primary key. Returns the row, or `404`.
+
+### Writing
+
 - `POST /<resource>` — create a row from a JSON body; returns `201` + the
   created row. An empty body inserts a row of column defaults.
 - `PATCH /<resource>/<id>` — update the supplied columns; returns the row,
   or `404`.
 - `DELETE /<resource>/<id>` — delete by primary key; returns the deleted
   row, or `404`.
-- `GET /openapi.json` — an OpenAPI 3.1 document for the whole API.
-  Descriptions, `enum`s, and AI notes are sourced from the database
-  `COMMENT`s: table/view/column descriptions become schema `description`s,
-  `@ai:` notes become `x-kozou-ai`, CHECK / ENUM members become `enum`,
-  and the resolved widget becomes `x-kozou-widget`.
 
 Writes are rejected on views (`405`) and on unknown columns (`400`).
 
-Deferred to later phases (Kozou v0.2 design spec §4):
+### Filtering
 
-- Phase 4: a `KozouApiDataAdapter` so the Admin UI can run against this
-  server, plus CLI integration.
+List filters use a `<column>=<op>.<value>` grammar:
+
+| operator | meaning |
+|---|---|
+| `eq` / `neq` | equal / not equal |
+| `gt` / `gte` / `lt` / `lte` | range comparisons |
+| `like` / `ilike` | pattern match (`*` is the wildcard) |
+| `in` | membership — `in.(a,b,c)` |
+| `is` | `is.null` / `is.notnull` / `is.true` / `is.false` |
+
+A bare value (`status=paid`) is shorthand for `eq` and stays backward
+compatible. Repeating a column ANDs its filters (e.g. a `gte` + `lt` range).
+A value that itself looks like an operator can be forced to equality with an
+explicit `eq.` prefix (`name=eq.gt.5`). Operators are a fixed allowlist, the
+column is checked against the schema, and every value is passed as a bound
+parameter — nothing is interpolated into SQL text. Values for the common
+scalar families (integer, numeric / float, boolean) are validated up front
+and rejected with a `400`; values for other types are enforced by
+PostgreSQL.
+
+### Embedding
+
+`embed=<relation-chain>` inlines related rows as nested JSON, on both list
+and item reads:
+
+- forward (to-one) and reverse (to-many) relations, mixed in one request;
+- dot-separated chains up to 5 deep (`embed=order.customer.region`);
+- comma-separated for several relations (`embed=customer,lines`);
+- up to 25 distinct relations per request, and up to 100 child rows inlined
+  per parent for a to-many relation.
+
+To-many embeds are rendered as a JSON array ordered by the child's primary
+key. Many-to-many is expressed by naming the junction explicitly
+(`embed=link.far`); there is no automatic flattening of junction tables.
+
+### OpenAPI
+
+`GET /openapi.json` returns an OpenAPI 3.1 document generated from the
+schema. Database `COMMENT`s drive it: table / view / column descriptions
+become schema `description`s, CHECK / ENUM members become `enum`, and
+Kozou's `@`-annotations become vendor extensions:
+
+- `@ai:` notes → `x-kozou-ai`
+- the resolved widget → `x-kozou-widget`
+- `@policy:` advisories → `x-kozou-policy`
+- embeddable relations → `x-kozou-embeds` (with `cardinality`)
+
+The document models the schema, the `x-kozou-*` metadata, and the list /
+item / CRUD surface. A few runtime behaviors are enforced by the server but
+not yet fully modeled in the generated document: create accepts an empty body
+(column defaults) and `PATCH` accepts a partial column subset, the
+`as=options` relation-select mode shares the collection path, and ambiguous
+embeds are rejected at request time. These are being refined; the wire
+behavior itself is stable.
+
+## Stability
+
+Stable as of Kozou v1.0 (covered by semantic versioning — no incompatible
+change without a major release):
+
+- the REST envelopes — the list `{ rows, total, page, pageSize }`, the item
+  shape, and the create / update / delete return shapes;
+- the query grammar — pagination, `sort`, the `<column>=<op>.<value>` filter
+  grammar, `as=options`, and `embed`;
+- the `GET /openapi.json` document — OpenAPI 3.1 plus the `x-kozou-ai` /
+  `x-kozou-widget` / `x-kozou-policy` / `x-kozou-embeds` extensions;
+- the auth boundary — JWT claims mapped to `SET LOCAL ROLE` (see below).
+
+Still evolving (not yet covered by the stability guarantee):
+
+- the **composite-foreign-key relation shape**. A composite FK is surfaced
+  as a `BuildIssue` rather than silently dropped, but embedding and
+  relation-select over a composite FK are a fast-follow, so the relation
+  shape they will take is not frozen yet.
+- the **`@kozou/codegen`** output (a separate package, still experimental).
+
+## Scope: default coverage vs PostgREST opt-out
+
+`@kozou/api` covers the relational REST surface most schemas need; Kozou
+v1.0 makes it the default backend. Deployments that need a feature in the
+"opt-out" column can stay on (or switch back to) the PostgREST adapter
+(`adapter: postgrest`) — see the migration notes in the `kozou` package. The
+intent is no silent gap: the in-house backend by default, PostgREST as a
+deliberate opt-out.
+
+| Capability | `@kozou/api` (v1.0 default) | Notes |
+|---|---|---|
+| Table CRUD | ✅ (incl. composite primary keys) | item routes (get/update/delete by id) need a primary key — single or composite; a primary-key-less table gets list + create only |
+| Views | ✅ read-only / list | no item-by-id, writes are `405`, no embedding from a view |
+| Embed 1:1 / many-to-1 / 1-to-many | ✅ `embed=` (mixed direction, multi-hop) | forward to-one + reverse to-many |
+| Many-to-many | △ name the junction and chain (`embed=link.far`) | no automatic junction flattening |
+| Relation-select | ✅ `as=options&label=&q=` | composite PK / FK support is a fast-follow |
+| Filter operators | ✅ `eq` / `neq` / `gt` / `gte` / `lt` / `lte` / `like` / `ilike` / `in` / `is` | |
+| Sort / pagination | ✅ | `sort`, `page` / `pageSize` |
+| COMMENT-native OpenAPI 3.1 (`x-kozou-*`) | ✅ | **Kozou's differentiator** — PostgREST treats COMMENTs as opaque text |
+| JWT + RLS (`SET LOCAL ROLE`) | ✅ | |
+| RPC (Postgres functions) | ❌ opt-out | |
+| Full-text search (fts) | ❌ opt-out | approximate with `ilike` |
+| Vertical select (column projection) | ❌ opt-out | always returns all columns |
+| Writable views (`INSTEAD OF`) | ❌ opt-out | views are read-only |
+| Upsert / bulk insert | ❌ opt-out | |
+| Automatic M:N flattening | ❌ opt-out | name the junction instead |
 
 ## Security boundary
 

@@ -115,14 +115,14 @@ The full schema also accepts `server.ui.{port,host}`,
 `create-kozou` writes. `${VAR}` and `${VAR:-default}` are
 expanded from the process environment at load time.
 
-### Authentication (experimental, `--adapter api`)
+### Authentication (`--adapter api`)
 
-> **Experimental, optional companion.** The in-house `@kozou/api` backend is
-> published to npm as an experimental preview (the API and wire format may
-> change without notice). It is **not** bundled with the `kozou` CLI, so
-> install it alongside `kozou` (`npm install kozou @kozou/api`) — or run from
-> a source/workspace checkout. Without it, `kozou dev --adapter api` exits
-> with an explicit error telling you to install it. The default `kozou dev`
+> **Optional companion.** The in-house `@kozou/api` backend ships as a
+> separate npm package; its wire format and OpenAPI are a stable contract as
+> of v1.0. It is **not** bundled with the `kozou` CLI, so install it
+> alongside `kozou` (`npm install kozou @kozou/api`) — or run from a
+> source/workspace checkout. Without it, `kozou dev --adapter api` exits with
+> an explicit error telling you to install it. The default `kozou dev`
 > (PostgREST adapter) is unaffected.
 
 By default the in-house `@kozou/api` backend (`kozou dev --adapter api`)
