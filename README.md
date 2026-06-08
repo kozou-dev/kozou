@@ -17,10 +17,11 @@ v0.2.1 (latest release). The CLI, schema introspection, MCP server (stdio + HTTP
 npx -p kozou create-kozou my-project
 cd my-project
 
-# Bring up PostgreSQL, the REST layer, and the Admin UI. The
-# scaffold's docker-compose includes a `kozou` service that runs
-# `kozou dev` (the bundled SvelteKit Admin UI + MCP HTTP server),
-# so `docker compose up` brings the full stack online.
+# Bring up PostgreSQL and the Admin UI. The scaffold's docker-compose
+# runs a `kozou` service (`kozou dev`: the bundled SvelteKit Admin UI,
+# MCP HTTP server, and Kozou's in-house REST backend, all in-process),
+# so `docker compose up` brings the full stack online — no separate REST
+# container by default.
 cp .env.example .env
 docker compose up
 ```
@@ -39,10 +40,10 @@ For library use (custom hosts, embedded MCP), install the workspace packages fro
 npm install kozou @kozou/core @kozou/introspect @kozou/mcp @kozou/svelte-ui
 ```
 
-`@kozou/api` (Kozou's in-house REST layer — its wire format and OpenAPI are a stable contract as of v1.0) and the experimental `@kozou/codegen` TypeScript codegen ship as optional companions. Install them alongside `kozou` only when you want `kozou dev --adapter api` or `kozou codegen`:
+`@kozou/api` (Kozou's in-house REST layer — its wire format and OpenAPI are a stable contract as of v1.0) is the default `kozou dev` backend and is bundled with `kozou`, so no separate install is needed. The experimental `@kozou/codegen` TypeScript codegen ships as an optional companion — install it alongside `kozou` when you want `kozou codegen`:
 
 ```bash
-npm install kozou @kozou/api @kozou/codegen
+npm install kozou @kozou/codegen
 ```
 
 ## Security
@@ -56,7 +57,7 @@ Designs where tenants in a multi-tenant SaaS can edit DB COMMENT text are **disc
 Runtime requirements for v0.2.1:
 
 - **PostgreSQL 16 or later** — the canonical source of truth
-- **Docker 24 or later** (optional) — recommended for the `docker compose up` stack, which brings up PostgreSQL, PostgREST, and a `kozou` service running `kozou dev` (the bundled Admin UI + MCP HTTP server) from `ghcr.io/kozou-dev/kozou:v0.2.1` (a multi-arch image, native on linux/amd64 and linux/arm64). PostgREST stays a side-by-side container and is **not** bundled inside the Kozou image.
+- **Docker 24 or later** (optional) — recommended for the `docker compose up` stack, which brings up PostgreSQL and a `kozou` service running `kozou dev` (the bundled Admin UI + MCP HTTP server, plus Kozou's in-house REST backend served in-process) from `ghcr.io/kozou-dev/kozou` (a multi-arch image, native on linux/amd64 and linux/arm64). The default stack needs **no separate REST container**; to opt out and use an external PostgREST instead, set `adapter.type: postgrest` and add the (commented) service in the scaffold's `docker-compose.yml`.
 - **Node.js 20 or later** — for running the npm-published packages directly (`npx kozou …`)
 
 Contributors additionally need **pnpm 9 or later**. See [CONTRIBUTING.md](CONTRIBUTING.md) for the development environment setup.

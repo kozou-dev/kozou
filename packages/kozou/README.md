@@ -87,9 +87,12 @@ cp .env.example .env
 docker compose up
 ```
 
-The generated `docker-compose.yml` brings up PostgreSQL, PostgREST,
-and a `kozou` service that runs `kozou dev` to host the Admin UI +
-MCP HTTP server.
+The generated `docker-compose.yml` brings up PostgreSQL and a `kozou`
+service that runs `kozou dev` to host the Admin UI, the MCP HTTP
+server, and Kozou's in-house REST backend (in-process) — no separate
+REST container by default. To opt out and use an external PostgREST
+instead, set `adapter.type: postgrest` and enable the commented service
+in the scaffold's `docker-compose.yml`.
 
 ## Configuration
 
@@ -102,8 +105,9 @@ database:
   schemas: [public]
 
 adapter:
-  type: postgrest
-  url: ${KOZOU_ADAPTER_URL:-http://postgrest:3000}
+  # Default: Kozou's in-house REST backend, served in-process by
+  # `kozou dev`. Set type: postgrest (with url) to use external PostgREST.
+  type: api
 
 uiHints:
   path: ./ui-hints.yaml
@@ -115,17 +119,29 @@ The full schema also accepts `server.ui.{port,host}`,
 `create-kozou` writes. `${VAR}` and `${VAR:-default}` are
 expanded from the process environment at load time.
 
-### Authentication (`--adapter api`)
+### Choosing a backend
 
-> **Optional companion.** The in-house `@kozou/api` backend ships as a
-> separate npm package; its wire format and OpenAPI are a stable contract as
-> of v1.0. It is **not** bundled with the `kozou` CLI, so install it
-> alongside `kozou` (`npm install kozou @kozou/api`) — or run from a
-> source/workspace checkout. Without it, `kozou dev --adapter api` exits with
-> an explicit error telling you to install it. The default `kozou dev`
-> (PostgREST adapter) is unaffected.
+By default the Admin UI runs against **Kozou's in-house REST backend**
+(`@kozou/api`), served in-process by `kozou dev` — no extra container. To use
+an external **PostgREST** instead, set `adapter.type: postgrest` (with its
+`url`) or pass `kozou dev --adapter postgrest`, and run a PostgREST instance
+(the scaffold's `docker-compose.yml` ships a commented service for it). For
+which relational-REST features the in-house backend covers by default and
+which to keep PostgREST for, see the scope table in the `@kozou/api` README.
 
-By default the in-house `@kozou/api` backend (`kozou dev --adapter api`)
+> **Migrating from v0.2.x:** the default backend changed from PostgREST to the
+> in-house `@kozou/api` in v1.0. Projects that relied on the PostgREST default
+> keep working by setting `adapter.type: postgrest` in `kozou.config.yaml`
+> (the value the old scaffold wrote) — nothing else changes.
+
+### Authentication (in-house API backend)
+
+> The in-house `@kozou/api` backend is bundled with the `kozou` CLI and is the
+> default `kozou dev` data backend. Its wire format and OpenAPI are a stable
+> contract as of v1.0. The settings below apply to that backend; the external
+> PostgREST opt-out is unaffected.
+
+By default the in-house `@kozou/api` backend (`kozou dev`)
 runs **unauthenticated** on loopback. Add an `auth` section to require a
 signed JWT on every API request: kozou verifies the token, then runs each
 request under `SET LOCAL ROLE <role-from-claim>` with the claims published
