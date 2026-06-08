@@ -54,9 +54,18 @@ const serverSchema = z
   })
   .prefault({});
 
+// The adapter kinds the Admin UI can run against: the bundled in-house REST
+// backend (`api`, the v1.0 default) or the external PostgREST opt-out. This is
+// the single source of the kind names; the CLI references the list and selects
+// by `=== 'api'` so the opt-out value is never hard-coded outside this module.
+export const ADAPTER_KINDS = ['api', 'postgrest'] as const;
+export type AdapterKind = (typeof ADAPTER_KINDS)[number];
+
 const adapterSchema = z
   .object({
-    type: z.literal('postgrest').default('postgrest'),
+    type: z.enum(ADAPTER_KINDS).default('api'),
+    // Only consumed by the PostgREST opt-out (`type: postgrest`); ignored by
+    // the in-house `api` backend, which serves REST in-process.
     url: z.string().min(1).default('http://postgrest:3000'),
   })
   .prefault({});

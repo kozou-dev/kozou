@@ -86,7 +86,9 @@ describe('buildAdminUiEnv', () => {
     expect(env.HOST).toBe('127.0.0.1');
   });
 
-  it('omits KOZOU_ADAPTER_KIND and uses the config url for the default adapter', async () => {
+  it('omits KOZOU_ADAPTER_KIND and uses the config url for the REST opt-out', async () => {
+    // No apiAdapterUrl -> the external REST opt-out: the UI falls back to its
+    // REST adapter (KOZOU_ADAPTER_KIND unset) and reaches it at the config url.
     const config = await makeConfig();
     const env = buildAdminUiEnv(config, 'http://localhost:3333', {});
     expect(env.KOZOU_ADAPTER_KIND).toBeUndefined();
@@ -122,10 +124,19 @@ describe('buildAdminUiEnv', () => {
     expect(env.KOZOU_ADAPTER_TOKEN).toBeUndefined();
   });
 
-  it('does not touch KOZOU_ADAPTER_TOKEN on the default (non-api) path', async () => {
+  it('clears a stale KOZOU_ADAPTER_TOKEN on the REST opt-out path', async () => {
     const config = await makeConfig();
     const env = buildAdminUiEnv(config, 'http://localhost:3333', { KOZOU_ADAPTER_TOKEN: 'x' });
-    expect(env.KOZOU_ADAPTER_TOKEN).toBe('x');
+    expect(env.KOZOU_ADAPTER_TOKEN).toBeUndefined();
+  });
+
+  it('clears an inherited KOZOU_ADAPTER_KIND=api so the opt-out stays authoritative', async () => {
+    // A stray parent KOZOU_ADAPTER_KIND must not flip the UI onto the api
+    // adapter when the user selected the external REST opt-out.
+    const config = await makeConfig();
+    const env = buildAdminUiEnv(config, 'http://localhost:3333', { KOZOU_ADAPTER_KIND: 'api' });
+    expect(env.KOZOU_ADAPTER_KIND).toBeUndefined();
+    expect(env.KOZOU_ADAPTER_URL).toBe(config.adapter.url);
   });
 });
 

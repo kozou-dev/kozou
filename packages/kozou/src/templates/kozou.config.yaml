@@ -19,8 +19,13 @@ server:
     stdio: false
 
 adapter:
-  type: postgrest
-  url: ${KOZOU_ADAPTER_URL:-http://postgrest:3000}
+  # Backend the Admin UI runs against. Defaults to "api": Kozou's in-house
+  # REST layer, served in-process by `kozou dev` — no extra container needed.
+  type: api
+  # To opt out and use an external PostgREST instead, set type: postgrest, add
+  # a postgrest service (see docker-compose.yml), and point url at it:
+  #   type: postgrest
+  #   url: ${KOZOU_ADAPTER_URL:-http://postgrest:3000}
 
 uiHints:
   path: ./ui-hints.yaml

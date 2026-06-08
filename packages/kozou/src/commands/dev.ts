@@ -21,7 +21,7 @@ import { existsSync } from 'node:fs';
 
 import { SchemaCache, startHttpServer, isLoopbackHost } from '@kozou/mcp';
 
-import { loadConfig, type KozouConfig } from '../config.js';
+import { loadConfig, type KozouConfig, ADAPTER_KINDS, type AdapterKind } from '../config.js';
 import { PACKAGE_VERSION } from '../version.js';
 import {
   buildAdminUiEnv,
@@ -32,9 +32,10 @@ import {
 
 export type DevOptions = {
   config?: string;
-  /** Set to 'api' for the experimental in-house @kozou/api backend; omit for the default REST adapter. */
+  /** Backend override: an adapter kind from `ADAPTER_KINDS`. When omitted, the
+   *  config's `adapter.type` is used (default `api`, the in-house backend). */
   adapter?: string;
-  /** Port for the in-house @kozou/api server (used when adapter === 'api'). */
+  /** Port for the in-house @kozou/api server (used when the backend is `api`). */
   apiPort?: number;
 };
 
@@ -50,20 +51,20 @@ type InhouseApi = { url: string; close: () => Promise<void> };
 
 // Start the in-house @kozou/api server in-process: introspect the
 // configured database, build its SchemaContext, and serve it over a pg
-// pool. @kozou/api is an experimental, optional companion package — not
-// bundled with the kozou CLI — so it is imported dynamically; when it is
-// neither installed alongside kozou nor resolvable from a workspace
-// checkout, the user gets a clear error.
+// pool. @kozou/api is a runtime dependency of the kozou CLI (the default
+// backend), but it is imported dynamically so MCP-only and opt-out runs do
+// not load it; a failed import therefore means a broken install.
 async function startInhouseApi(config: KozouConfig, port: number): Promise<InhouseApi> {
   let apiModule: typeof import('@kozou/api');
   try {
     apiModule = await import('@kozou/api');
   } catch {
     throw new Error(
-      `${PREFIX} --adapter api needs the experimental @kozou/api package, which is ` +
-        'not bundled with the kozou CLI. Install it alongside kozou (npm install ' +
-        '@kozou/api), run kozou from a source / workspace checkout, or drop ' +
-        '--adapter api to use the default REST adapter.',
+      `${PREFIX} could not load @kozou/api, the bundled in-house REST backend ` +
+        '(a dependency of the kozou CLI). This usually means a broken install — ' +
+        'reinstall kozou, or in a workspace checkout build it with ' +
+        '`pnpm --filter @kozou/api run build`. Alternatively select a different ' +
+        'adapter kind via --adapter or the `adapter.type` config field.',
     );
   }
 
@@ -114,14 +115,19 @@ function warnIfPublic(label: string, host: string): void {
 }
 
 export async function devCommand(opts: DevOptions = {}): Promise<void> {
-  if (opts.adapter !== undefined && opts.adapter !== 'api') {
+  if (opts.adapter !== undefined && !(ADAPTER_KINDS as readonly string[]).includes(opts.adapter)) {
     throw new Error(
-      `${PREFIX} unknown --adapter "${opts.adapter}" ` +
-        '(the only supported value is "api"; omit it for the default REST adapter).',
+      `${PREFIX} unknown --adapter "${opts.adapter}" (valid kinds: ${ADAPTER_KINDS.join(', ')}).`,
     );
   }
 
   const config = await loadConfig({ path: opts.config });
+
+  // The Admin UI runs against the in-house @kozou/api backend by default; an
+  // explicit --adapter overrides the config's `adapter.type`. Any kind other
+  // than `api` is the external REST opt-out (the UI talks to it over HTTP).
+  const adapterKind: AdapterKind = (opts.adapter as AdapterKind | undefined) ?? config.adapter.type;
+  const useInhouseApi = adapterKind === 'api';
 
   const adminUiEntry = resolveAdminUiEntry();
   if (!existsSync(adminUiEntry)) {
@@ -132,12 +138,12 @@ export async function devCommand(opts: DevOptions = {}): Promise<void> {
     );
   }
 
-  // Optional in-house @kozou/api backend (--adapter api), started before
-  // the other servers so its URL can be wired into the UI environment.
-  const api: InhouseApi | null =
-    opts.adapter === 'api'
-      ? await startInhouseApi(config, opts.apiPort ?? DEFAULT_API_PORT)
-      : null;
+  // In-house @kozou/api backend (the default), started before the other
+  // servers so its URL can be wired into the UI environment. Skipped for the
+  // external REST opt-out.
+  const api: InhouseApi | null = useInhouseApi
+    ? await startInhouseApi(config, opts.apiPort ?? DEFAULT_API_PORT)
+    : null;
   if (api) {
     process.stderr.write(`${PREFIX} in-house @kozou/api on ${api.url}\n`);
   }

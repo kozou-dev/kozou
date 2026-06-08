@@ -109,11 +109,11 @@ program
   .option('--config <path>', 'path to kozou.config.yaml')
   .option(
     '--adapter <kind>',
-    'set to "api" for the experimental in-house @kozou/api backend (default: the bundled REST adapter)',
+    'backend override (see kozou.config.yaml `adapter.type`); defaults to the in-house @kozou/api REST backend',
   )
   .option(
     '--api-port <n>',
-    'port for the in-house @kozou/api server (with --adapter api)',
+    'port for the in-house @kozou/api server',
     (raw) => parseInt(raw, 10),
   )
   .action(async (flags: DevFlags) => {

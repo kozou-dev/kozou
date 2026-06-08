@@ -43,6 +43,7 @@
     "test:e2e:api:auth": "playwright test --config playwright.kozou-api-auth.config.ts"
   },
   "dependencies": {
+    "@kozou/api": "workspace:*",
     "@kozou/core": "workspace:*",
     "@kozou/introspect": "workspace:*",
     "@kozou/mcp": "workspace:*",
@@ -53,7 +54,6 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
-    "@kozou/api": "workspace:*",
     "@kozou/codegen": "workspace:*",
     "@modelcontextprotocol/sdk": "^1.0.0",
     "@playwright/test": "^1.50.0",

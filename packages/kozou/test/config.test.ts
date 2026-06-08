@@ -27,10 +27,39 @@ describe('loadConfig', () => {
     expect(config.server.ui.host).toBe('0.0.0.0');
     expect(config.server.mcp.http.port).toBe(3334);
     expect(config.server.mcp.stdio).toBe(false);
-    expect(config.adapter.type).toBe('postgrest');
+    expect(config.adapter.type).toBe('api');
     expect(config.adapter.url).toBe('http://postgrest:3000');
     expect(config.uiHints.path).toBeNull();
     expect(config.cache.ttlMs).toBe(60_000);
+  });
+
+  it('accepts the postgrest adapter type as an opt-out', async () => {
+    const dir = await makeTempDir();
+    const file = await writeYaml(
+      dir,
+      `database:
+  url: postgres://u:p@host:5432/db
+adapter:
+  type: postgrest
+  url: http://postgrest:3000
+`,
+    );
+    const config = await loadConfig({ path: file, env: {} });
+    expect(config.adapter.type).toBe('postgrest');
+    expect(config.adapter.url).toBe('http://postgrest:3000');
+  });
+
+  it('rejects an unknown adapter type', async () => {
+    const dir = await makeTempDir();
+    const file = await writeYaml(
+      dir,
+      `database:
+  url: postgres://u:p@host:5432/db
+adapter:
+  type: bogus
+`,
+    );
+    await expect(loadConfig({ path: file, env: {} })).rejects.toBeInstanceOf(KozouConfigError);
   });
 
   it('no file + no DATABASE_URL -> KozouConfigError on database.url', async () => {

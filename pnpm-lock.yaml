@@ -115,6 +115,9 @@ importers:
 
   packages/kozou:
     dependencies:
+      '@kozou/api':
+        specifier: workspace:*
+        version: link:../api
       '@kozou/core':
         specifier: workspace:*
         version: link:../core
@@ -140,9 +143,6 @@ importers:
         specifier: ^4.4.3
         version: 4.4.3
     devDependencies:
-      '@kozou/api':
-        specifier: workspace:*
-        version: link:../api
       '@kozou/codegen':
         specifier: workspace:*
         version: link:../codegen

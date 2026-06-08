@@ -2,11 +2,14 @@
 #
 # Brings up:
 #   - postgres   PostgreSQL 16 (the source of truth)
-#   - postgrest  REST adapter consumed by the Kozou DataAdapter
-#                (MIT-licensed external dependency, not bundled)
-#   - kozou      `kozou dev` - the bundled Admin UI + MCP HTTP server
+#   - kozou      `kozou dev` - the bundled Admin UI + MCP HTTP server, plus
+#                Kozou's in-house REST backend served in-process
 #                (ghcr.io/kozou-dev/kozou). Binds 0.0.0.0 inside the
 #                container so the port mappings below reach your host.
+#
+# The Admin UI talks to Kozou's in-house REST layer by default — no separate
+# REST container is needed. To opt out and use an external PostgREST instead,
+# see the commented service and notes at the bottom of this file.
 #
 # Customize the credentials in .env before running `docker compose up`.
 
@@ -27,27 +30,14 @@ services:
       timeout: 5s
       retries: 10
 
-  postgrest:
-    image: postgrest/postgrest:latest
-    environment:
-      PGRST_DB_URI: postgres://${POSTGRES_USER:-kozou}:${POSTGRES_PASSWORD:-kozou}@postgres:5432/${POSTGRES_DB:-kozou}
-      PGRST_DB_SCHEMA: public
-      PGRST_DB_ANON_ROLE: ${POSTGRES_USER:-kozou}
-    ports:
-      - "3000:3000"
-    depends_on:
-      postgres:
-        condition: service_healthy
-
   kozou:
-    # `kozou dev` spawns the bundled @kozou/svelte-ui Admin UI and the
-    # MCP HTTP server (Kozou v0.1 spec §9.1). Both bind 0.0.0.0 inside
-    # the container so the port mappings below reach your host.
+    # `kozou dev` spawns the bundled @kozou/svelte-ui Admin UI, the MCP HTTP
+    # server, and Kozou's in-house REST backend (all in-process). Each binds
+    # 0.0.0.0 inside the container so the port mappings below reach your host.
     image: ghcr.io/kozou-dev/kozou:v0.2.1
     command: ["dev"]
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER:-kozou}:${POSTGRES_PASSWORD:-kozou}@postgres:5432/${POSTGRES_DB:-kozou}
-      KOZOU_ADAPTER_URL: http://postgrest:3000
       # The Admin UI is a SvelteKit (adapter-node) app. Without ORIGIN
       # it assumes https and rejects every form POST (create / edit /
       # delete) over plain http with a 403 "Cross-site POST forbidden".
@@ -57,8 +47,25 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-      postgrest:
-        condition: service_started
     ports:
       - "3333:3333"   # Admin UI
       - "3334:3334"   # MCP HTTP
+
+# --- PostgREST opt-out -------------------------------------------------------
+# Kozou serves REST in-process by default. To use an external PostgREST
+# instead, set `adapter.type: postgrest` in kozou.config.yaml (with its url),
+# add a service like the one below, and wire the kozou service to it: add
+# `KOZOU_ADAPTER_URL: http://postgrest:3000` to its environment and a
+# `postgrest: { condition: service_started }` entry under its depends_on.
+#
+#   postgrest:
+#     image: postgrest/postgrest:latest
+#     environment:
+#       PGRST_DB_URI: postgres://${POSTGRES_USER:-kozou}:${POSTGRES_PASSWORD:-kozou}@postgres:5432/${POSTGRES_DB:-kozou}
+#       PGRST_DB_SCHEMA: public
+#       PGRST_DB_ANON_ROLE: ${POSTGRES_USER:-kozou}
+#     ports:
+#       - "3000:3000"
+#     depends_on:
+#       postgres:
+#         condition: service_healthy
