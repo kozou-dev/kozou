@@ -52,6 +52,8 @@ Kozou introspects `COMMENT ON` text, view definitions, and type information from
 
 Designs where tenants in a multi-tenant SaaS can edit DB COMMENT text are **discouraged** (prompt-injection risk). See [docs/security.md](docs/security.md) for the threat model and mitigation plans, and [SECURITY.md](SECURITY.md) if you need to report a vulnerability privately.
 
+On the access-control axis, **Kozou is a resource server and enforcement layer, not an identity provider**: with auth enabled it verifies the JWT on each request that carries one — with an optional anonymous-role path for tokenless requests — and runs each under a PostgreSQL role so your own RLS policies decide access. Identity provision (registration, login, passwords and OAuth, token issuance) is delegated to an external provider — Supabase Auth (recommended), Auth0 / Clerk via JWKS, or a minimal self-hosted issuer. See [docs/security.md](docs/security.md#authentication-and-authorization).
+
 ## Requirements
 
 Runtime requirements for v1.0.0:

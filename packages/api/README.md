@@ -157,6 +157,12 @@ deliberate opt-out.
 
 ## Security boundary
 
+Kozou is a **resource server and enforcement layer, not an identity provider**: it
+verifies tokens and switches PostgreSQL role so your RLS decides access, but user
+registration, login, and token *issuance* are delegated to an external provider
+(Supabase Auth recommended; Auth0 / Clerk via the JWKS endpoint below). Shipping a
+user-management / login library is a non-goal.
+
 By default the API ships with **no authentication** and binds to
 `127.0.0.1` (like the MCP HTTP server); it prints a
 loud warning when bound to a non-loopback host. Run the unauthenticated
