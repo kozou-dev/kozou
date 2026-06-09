@@ -57,7 +57,12 @@ export function buildOpenApiDocument(
   for (const t of schema.tables) {
     for (const rel of t.relations ?? []) {
       const parentQN = `${rel.references.schema}.${rel.references.table}`;
-      const entry: ReverseEntry = { childName: t.name, childQN: t.qualifiedName, field: rel.field };
+      const entry: ReverseEntry = {
+        childName: t.name,
+        childQN: t.qualifiedName,
+        field: rel.field,
+        fields: rel.fields ?? [rel.field],
+      };
       const list = reverseByParent.get(parentQN);
       if (list) list.push(entry);
       else reverseByParent.set(parentQN, [entry]);
@@ -169,7 +174,7 @@ function requestInputSchema(resource: ResourceLike, kind: 'create' | 'update'): 
   return schema;
 }
 
-type ReverseEntry = { childName: string; childQN: string; field: string };
+type ReverseEntry = { childName: string; childQN: string; field: string; fields: string[] };
 
 /** Embeddable-relation hints, derived with the same semantics as the runtime
  *  embed resolver (embed.ts) so the document never advertises a relation the
@@ -201,13 +206,30 @@ function embedHints(
   const hints: JsonObject[] = [];
   const taken = new Set<string>();
 
+  // Table names reachable as a forward selector — a reverse embed by child
+  // table name is shadowed by (and so unreachable behind) a forward to the same
+  // table, since matchForward is tried first (embed.ts). Used to avoid
+  // advertising an unreachable reverse below.
+  const forwardTables = new Set(forward.map((r) => r.references.table));
+
   for (const r of forward) {
     const qn = `${r.references.schema}.${r.references.table}`;
     if (!knownQNames.has(qn)) continue;
+    const fields = r.fields ?? [r.field];
+    // A composite FK has no single-column selector, so it is reachable only by
+    // its (unique) referenced table name; if another FK also targets that table
+    // the table-name selector is ambiguous and the composite relation is
+    // unreachable at runtime, so it is dropped here (matchForward in embed.ts).
+    if (fields.length > 1 && forward.filter((x) => x.references.table === r.references.table).length > 1) {
+      continue;
+    }
     const key = pickEmbedKey([r.references.table, stripIdSuffix(r.field), r.field], taken, parentColumns);
     if (key === undefined) continue;
     taken.add(key);
-    hints.push({ field: r.field, key, target: `#/components/schemas/${qn}`, cardinality: 'to-one' });
+    const hint: JsonObject = { field: r.field, key, target: `#/components/schemas/${qn}`, cardinality: 'to-one' };
+    // Composite FKs carry the full column set (the scalar `field` stays `[0]`).
+    if (fields.length > 1) hint.fields = [...fields];
+    hints.push(hint);
   }
 
   // Group reverse entries by child table name; a child with more than one FK
@@ -222,15 +244,21 @@ function embedHints(
     if (entries.length !== 1) continue;
     const e = entries[0];
     if (!knownQNames.has(e.childQN)) continue;
+    // A reverse embed is selected by the child table name. If a forward
+    // relation targets a table of that same name, matchForward (tried first)
+    // shadows the reverse, so it is unreachable — do not advertise it.
+    if (forwardTables.has(e.childName)) continue;
     const key = pickEmbedKey([e.childName, stripIdSuffix(e.field), e.field], taken, parentColumns);
     if (key === undefined) continue;
     taken.add(key);
-    hints.push({
+    const hint: JsonObject = {
       field: e.field,
       key,
       target: `#/components/schemas/${e.childQN}`,
       cardinality: 'to-many',
-    });
+    };
+    if (e.fields.length > 1) hint.fields = [...e.fields];
+    hints.push(hint);
   }
 
   return hints;

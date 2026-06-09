@@ -79,7 +79,8 @@ describe('resolveFkLabels', () => {
       relations: [
         {
           field: 'author_id',
-          references: { schema: 'public', table: 'authors', column: 'id' },
+          fields: ['author_id'],
+          references: { schema: 'public', table: 'authors', column: 'id', columns: ['id'] },
           cardinality: 'many-to-one',
           meaning: null,
         },
@@ -111,7 +112,8 @@ describe('resolveFkLabels', () => {
       relations: [
         {
           field: 'author_id',
-          references: { schema: 'public', table: 'authors', column: 'id' },
+          fields: ['author_id'],
+          references: { schema: 'public', table: 'authors', column: 'id', columns: ['id'] },
           cardinality: 'many-to-one',
           meaning: null,
         },
@@ -146,7 +148,8 @@ describe('resolveFkLabels', () => {
       relations: [
         {
           field: 'author_id',
-          references: { schema: 'public', table: 'authors', column: 'id' },
+          fields: ['author_id'],
+          references: { schema: 'public', table: 'authors', column: 'id', columns: ['id'] },
           cardinality: 'many-to-one',
           meaning: null,
         },
@@ -179,7 +182,8 @@ describe('resolveFkLabels', () => {
       relations: [
         {
           field: 'author_id',
-          references: { schema: 'public', table: 'authors', column: 'id' },
+          fields: ['author_id'],
+          references: { schema: 'public', table: 'authors', column: 'id', columns: ['id'] },
           cardinality: 'many-to-one',
           meaning: null,
         },
@@ -204,7 +208,8 @@ describe('resolveFkLabels', () => {
       relations: [
         {
           field: 'author_id',
-          references: { schema: 'public', table: 'authors', column: 'id' },
+          fields: ['author_id'],
+          references: { schema: 'public', table: 'authors', column: 'id', columns: ['id'] },
           cardinality: 'many-to-one',
           meaning: null,
         },
@@ -230,13 +235,15 @@ describe('resolveFkLabels', () => {
       relations: [
         {
           field: 'author_id',
-          references: { schema: 'public', table: 'authors', column: 'id' },
+          fields: ['author_id'],
+          references: { schema: 'public', table: 'authors', column: 'id', columns: ['id'] },
           cardinality: 'many-to-one',
           meaning: null,
         },
         {
           field: 'edition_id',
-          references: { schema: 'public', table: 'editions', column: 'id' },
+          fields: ['edition_id'],
+          references: { schema: 'public', table: 'editions', column: 'id', columns: ['id'] },
           cardinality: 'many-to-one',
           meaning: null,
         },

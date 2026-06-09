@@ -13,11 +13,15 @@ export function describeTable(input: DescribeTableInput, ctx: SchemaContext): De
     throw new Error(`Table not found: ${parsed.qualifiedName}`);
   }
 
+  // Annotate every FK column with its referenced column. For a composite FK
+  // each member column maps to its positionally-aligned referenced column.
   const referencesByField = new Map<string, { table: string; column: string }>();
   for (const rel of table.relations) {
-    referencesByField.set(rel.field, {
-      table: `${rel.references.schema}.${rel.references.table}`,
-      column: rel.references.column,
+    const refTable = `${rel.references.schema}.${rel.references.table}`;
+    const fields = rel.fields ?? [rel.field];
+    const refCols = rel.references.columns ?? [rel.references.column];
+    fields.forEach((field, i) => {
+      referencesByField.set(field, { table: refTable, column: refCols[i]! });
     });
   }
 
@@ -44,8 +48,10 @@ export function describeTable(input: DescribeTableInput, ctx: SchemaContext): De
     columns,
     relations: table.relations.map((r) => ({
       field: r.field,
+      fields: r.fields ?? [r.field],
       referencesTable: `${r.references.schema}.${r.references.table}`,
       referencesColumn: r.references.column,
+      referencesColumns: r.references.columns ?? [r.references.column],
       meaning: r.meaning,
     })),
     checkConstraints: table.rawTable.checks.map((c) => ({

@@ -171,7 +171,7 @@ describe('buildSchemaContext', () => {
     expect(profiles.relations[0]!.cardinality).toBe('one-to-one');
   });
 
-  it('composite FK -> excluded from relations + warns with a BuildIssue', async () => {
+  it('composite FK -> emitted as a relation with array fields, no warning (v1.1)', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const fk: RawForeignKey = {
       name: 'order_items_order_fkey',
@@ -197,17 +197,23 @@ describe('buildSchemaContext', () => {
     });
     const ctx = await buildSchemaContext({ raw });
     const orderItems = ctx.tables.find((t) => t.name === 'order_items')!;
-    // Composite FK is not emitted as an embeddable relation...
-    expect(orderItems.relations).toHaveLength(0);
-    // ...but its exclusion is surfaced, not silent.
-    expect(warn).toHaveBeenCalledWith(
-      expect.stringMatching(
-        /order_items_order_fkey.*spans multiple columns \(order_id, order_line\)/,
-      ),
+    // Composite FK is now a relation: arrays carry both columns; the scalar
+    // field / column keep [0] for back-compat.
+    expect(orderItems.relations).toHaveLength(1);
+    expect(orderItems.relations[0]).toMatchObject({
+      field: 'order_id',
+      fields: ['order_id', 'order_line'],
+      references: { schema: 'public', table: 'orders', column: 'id', columns: ['id', 'line'] },
+      cardinality: 'many-to-one',
+      meaning: 'Reference to the parent order line',
+    });
+    // It is no longer excluded, so no "spans multiple columns" warning.
+    expect(warn).not.toHaveBeenCalledWith(
+      expect.stringMatching(/spans multiple columns/),
     );
   });
 
-  it('composite FK with strict=true -> KozouBuildError throw', async () => {
+  it('composite FK is valid under strict=true (no exclusion issue) (v1.1)', async () => {
     const fk: RawForeignKey = {
       name: 'order_items_order_fkey',
       columns: ['order_id', 'order_line'],
@@ -220,19 +226,71 @@ describe('buildSchemaContext', () => {
     };
     const raw = makeRaw({
       tables: [
+        makeTable('orders', {
+          columns: [makeCol('id', 'uuid'), makeCol('line', 'int4')],
+          primaryKey: ['id', 'line'],
+        }),
         makeTable('order_items', {
           columns: [makeCol('order_id', 'uuid'), makeCol('order_line', 'int4')],
           foreignKeys: [fk],
         }),
       ],
     });
-    await expect(buildSchemaContext({ raw, strict: true })).rejects.toBeInstanceOf(
-      KozouBuildError,
-    );
+    const ctx = await buildSchemaContext({ raw, strict: true });
+    const orderItems = ctx.tables.find((t) => t.name === 'order_items')!;
+    expect(orderItems.relations.map((r) => r.fields)).toEqual([['order_id', 'order_line']]);
   });
 
-  it('composite FK excluded while a single-column FK on the same table survives', async () => {
+  it('skips a misaligned composite FK (column count != referenced count) with a BuildIssue (v1.1)', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const misaligned: RawForeignKey = {
+      name: 'order_items_order_fkey',
+      columns: ['order_id', 'order_line'],
+      referencedSchema: 'public',
+      referencedTable: 'orders',
+      referencedColumns: ['id'], // only one — not aligned with the two FK columns
+      onDelete: 'NO ACTION',
+      onUpdate: 'NO ACTION',
+      comment: null,
+    };
+    const raw = makeRaw({
+      tables: [
+        makeTable('orders', { columns: [makeCol('id', 'uuid')], primaryKey: ['id'] }),
+        makeTable('order_items', {
+          columns: [makeCol('order_id', 'uuid'), makeCol('order_line', 'int4')],
+          foreignKeys: [misaligned],
+        }),
+      ],
+    });
+    const ctx = await buildSchemaContext({ raw });
+    expect(ctx.tables.find((t) => t.name === 'order_items')!.relations).toHaveLength(0);
+    expect(warn).toHaveBeenCalledWith(expect.stringMatching(/not positionally aligned/));
+  });
+
+  it('misaligned composite FK throws under strict=true (v1.1)', async () => {
+    const misaligned: RawForeignKey = {
+      name: 'order_items_order_fkey',
+      columns: ['order_id', 'order_line'],
+      referencedSchema: 'public',
+      referencedTable: 'orders',
+      referencedColumns: ['id'],
+      onDelete: 'NO ACTION',
+      onUpdate: 'NO ACTION',
+      comment: null,
+    };
+    const raw = makeRaw({
+      tables: [
+        makeTable('orders', { columns: [makeCol('id', 'uuid')], primaryKey: ['id'] }),
+        makeTable('order_items', {
+          columns: [makeCol('order_id', 'uuid'), makeCol('order_line', 'int4')],
+          foreignKeys: [misaligned],
+        }),
+      ],
+    });
+    await expect(buildSchemaContext({ raw, strict: true })).rejects.toBeInstanceOf(KozouBuildError);
+  });
+
+  it('single- and composite-column FKs on one table both become relations (v1.1)', async () => {
     const singleFk: RawForeignKey = {
       name: 'order_items_product_fkey',
       columns: ['product_id'],
@@ -272,16 +330,35 @@ describe('buildSchemaContext', () => {
     });
     const ctx = await buildSchemaContext({ raw });
     const orderItems = ctx.tables.find((t) => t.name === 'order_items')!;
-    // The single-column FK is unaffected by the composite exclusion.
-    expect(orderItems.relations).toHaveLength(1);
-    expect(orderItems.relations[0]).toMatchObject({
-      field: 'product_id',
-      references: { schema: 'public', table: 'products', column: 'id' },
-      cardinality: 'many-to-one',
-    });
-    expect(warn).toHaveBeenCalledWith(
-      expect.stringMatching(/order_items_order_fkey.*spans multiple columns/),
+    // Both FKs are now relations: the single-column product FK and the
+    // composite order FK.
+    expect(orderItems.relations).toHaveLength(2);
+    expect(orderItems.relations).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          field: 'product_id',
+          fields: ['product_id'],
+          references: { schema: 'public', table: 'products', column: 'id', columns: ['id'] },
+          cardinality: 'many-to-one',
+        }),
+        expect.objectContaining({
+          field: 'order_id',
+          fields: ['order_id', 'order_line'],
+          references: { schema: 'public', table: 'orders', column: 'id', columns: ['id', 'line'] },
+          cardinality: 'many-to-one',
+        }),
+      ]),
     );
+    // Widget rework: only the single-column FK column is relation-selectable;
+    // the composite-FK columns keep isForeignKey but get a type-based widget.
+    const widgetOf = (name: string) => orderItems.columns.find((c) => c.name === name)!.widget;
+    expect(widgetOf('product_id')).toBe('relation-select');
+    expect(widgetOf('order_id')).toBe('uuid');
+    expect(widgetOf('order_line')).toBe('number');
+    // All FK columns remain isForeignKey = true (schema truth).
+    for (const name of ['product_id', 'order_id', 'order_line']) {
+      expect(orderItems.columns.find((c) => c.name === name)!.isForeignKey).toBe(true);
+    }
   });
 
   it('CHECK -> enumValues + widget enum-select', async () => {

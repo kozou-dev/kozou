@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import type { WidgetType } from '@kozou/core';
+import type { WidgetType, RelationContext } from '@kozou/core';
 import { buildOpenApiDocument } from '../src/openapi.js';
-import { schemaOf, col, relation } from './helpers.js';
+import { schemaOf, col, relation, compositeRelation } from './helpers.js';
 
 type EmbedHint = { field: string; key: string; target: string; cardinality: string };
 type SchemaObj = {
@@ -526,6 +526,147 @@ describe('buildOpenApiDocument', () => {
     const doc = buildOpenApiDocument(schema) as unknown as Doc;
     expect(doc.components.schemas['public.books']['x-kozou-embeds']).toBeUndefined();
     expect(paramNames(doc.paths['/books'].get)).not.toContain('embed');
+  });
+
+  it('lists a composite forward FK as an embed hint carrying the full column set (v1.1)', () => {
+    const schema = schemaOf([
+      {
+        name: 'orders',
+        columns: [
+          col('id', 'uuid', { isPrimaryKey: true, nullable: false }),
+          col('region', 'text', { isPrimaryKey: true, nullable: false }),
+        ],
+        primaryKey: ['id', 'region'],
+      },
+      {
+        name: 'shipments',
+        columns: [
+          col('id', 'uuid', { isPrimaryKey: true, nullable: false }),
+          col('order_id', 'uuid'),
+          col('order_region', 'text'),
+        ],
+        primaryKey: ['id'],
+        relations: [compositeRelation(['order_id', 'order_region'], 'orders', ['id', 'region'])],
+      },
+    ]);
+    const doc = buildOpenApiDocument(schema) as unknown as Doc;
+    const hint = (doc.components.schemas['public.shipments']['x-kozou-embeds'] ?? [])[0] as EmbedHint & {
+      fields?: string[];
+    };
+    // The scalar field stays [0] for back-compat; `fields` carries both columns.
+    expect(hint.field).toBe('order_id');
+    expect(hint.fields).toEqual(['order_id', 'order_region']);
+    expect(hint.key).toBe('orders');
+    expect(hint.cardinality).toBe('to-one');
+    expect(paramNames(doc.paths['/shipments'].get)).toContain('embed');
+    // The reverse to-many hint on orders also carries the composite columns.
+    const reverse = (doc.components.schemas['public.orders']['x-kozou-embeds'] ?? [])[0] as EmbedHint & {
+      fields?: string[];
+    };
+    expect(reverse.cardinality).toBe('to-many');
+    expect(reverse.fields).toEqual(['order_id', 'order_region']);
+  });
+
+  it('drops a composite forward FK when another FK also targets that table (ambiguous)', () => {
+    // A composite FK has no single-column selector; if another FK also points
+    // at the same table, the table-name selector is ambiguous so the composite
+    // one is unreachable and must not be advertised.
+    const schema = schemaOf([
+      {
+        name: 'orders',
+        columns: [
+          col('id', 'uuid', { isPrimaryKey: true, nullable: false }),
+          col('region', 'text', { isPrimaryKey: true, nullable: false }),
+        ],
+        primaryKey: ['id', 'region'],
+      },
+      {
+        name: 'shipments',
+        columns: [
+          col('id', 'uuid', { isPrimaryKey: true, nullable: false }),
+          col('order_id', 'uuid'),
+          col('order_region', 'text'),
+          col('primary_order_id', 'uuid'),
+        ],
+        primaryKey: ['id'],
+        relations: [
+          compositeRelation(['order_id', 'order_region'], 'orders', ['id', 'region']),
+          relation('primary_order_id', 'orders', { column: 'id' }),
+        ],
+      },
+    ]);
+    const doc = buildOpenApiDocument(schema) as unknown as Doc;
+    const hints = doc.components.schemas['public.shipments']['x-kozou-embeds'] ?? [];
+    // Only the single-column FK (selectable by its field name) survives.
+    expect(hints.map((h) => h.field)).toEqual(['primary_order_id']);
+    expect(hints.every((h) => !('fields' in h && (h as { fields?: string[] }).fields!.length > 1))).toBe(true);
+  });
+
+  it('does not advertise a reverse embed shadowed by a forward to the same table (cyclic)', () => {
+    // p has a composite FK to c; c has the only FK back to p. On p the
+    // table-name selector "c" resolves to the forward (matchForward first), so
+    // the reverse from c is unreachable and must not be advertised.
+    const schema = schemaOf([
+      {
+        name: 'p',
+        columns: [
+          col('id', 'uuid', { isPrimaryKey: true, nullable: false }),
+          col('c_a', 'uuid'),
+          col('c_b', 'uuid'),
+        ],
+        primaryKey: ['id'],
+        relations: [compositeRelation(['c_a', 'c_b'], 'c', ['a', 'b'])],
+      },
+      {
+        name: 'c',
+        columns: [
+          col('a', 'uuid', { isPrimaryKey: true, nullable: false }),
+          col('b', 'uuid', { isPrimaryKey: true, nullable: false }),
+          col('p_id', 'uuid'),
+        ],
+        primaryKey: ['a', 'b'],
+        relations: [relation('p_id', 'p', { column: 'id' })],
+      },
+    ]);
+    const doc = buildOpenApiDocument(schema) as unknown as Doc;
+    const pHints = doc.components.schemas['public.p']['x-kozou-embeds'] ?? [];
+    // Only the forward to-one to c; no shadowed reverse.
+    expect(pHints.map((h) => ({ key: h.key, cardinality: h.cardinality }))).toEqual([
+      { key: 'c', cardinality: 'to-one' },
+    ]);
+  });
+
+  it('builds embed hints from a legacy single-column relation lacking the v1.1 arrays', () => {
+    const legacyRel = {
+      field: 'author_id',
+      references: { schema: 'public', table: 'authors', column: 'id' },
+      cardinality: 'many-to-one',
+      meaning: null,
+    } as RelationContext;
+    const schema = schemaOf([
+      {
+        name: 'books',
+        columns: [col('id', 'uuid', { isPrimaryKey: true, nullable: false }), col('author_id', 'uuid')],
+        primaryKey: ['id'],
+        relations: [legacyRel],
+      },
+      {
+        name: 'authors',
+        columns: [col('id', 'uuid', { isPrimaryKey: true, nullable: false })],
+        primaryKey: ['id'],
+      },
+    ]);
+    const doc = buildOpenApiDocument(schema) as unknown as Doc;
+    // Normalized field -> [field]: a single-column hint, byte-identical to a
+    // relation built with the arrays present (no stray `fields`).
+    expect(doc.components.schemas['public.books']['x-kozou-embeds']).toEqual([
+      {
+        field: 'author_id',
+        key: 'authors',
+        target: '#/components/schemas/public.authors',
+        cardinality: 'to-one',
+      },
+    ]);
   });
 
   it('documents both forward and reverse selectors in the embed parameter', () => {

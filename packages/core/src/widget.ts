@@ -11,16 +11,22 @@ const TEXTAREA_HINT_RE = /html|markdown|body|content/i;
 export type InferWidgetInput = {
   column: RawColumn;
   isForeignKey: boolean;
+  /** Whether this column is the sole column of a single-column foreign key, so
+   *  a relation-select picker has one value to resolve. Composite-FK columns
+   *  are foreign keys (`isForeignKey: true`) but are not relation-selectable on
+   *  their own, so they fall through to a type-based widget. Defaults to
+   *  `isForeignKey` when omitted (back-compat). Added in v1.1. */
+  relationSelectable?: boolean;
   enumValues: string[] | null;
   /** parseCommentTags(column.comment).body */
   commentBody: string;
 };
 
 export function inferWidget(input: InferWidgetInput): WidgetType {
-  const { column, isForeignKey, enumValues, commentBody } = input;
+  const { column, isForeignKey, relationSelectable, enumValues, commentBody } = input;
   const udt = column.udtName;
 
-  if (isForeignKey) return 'relation-select';
+  if (relationSelectable ?? isForeignKey) return 'relation-select';
   if (enumValues !== null && enumValues.length > 0) return 'enum-select';
   if (udt === 'uuid') return 'uuid';
   if (udt === 'bool') return 'boolean';
