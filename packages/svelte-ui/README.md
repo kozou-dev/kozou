@@ -70,10 +70,12 @@ Building before running `pnpm test` exercises the smoke case in
 the build artifacts are absent so a fresh checkout still gets a
 green `pnpm test` run.
 
-## Manual smoke checklist (Step 6 Definition of Done)
+## Manual smoke checklist
 
-Run end-to-end against a real PostgreSQL + PostgREST stack
-(`docker compose up -d` from a `create-kozou` scaffold works):
+Run the standalone dev server end-to-end against a real PostgreSQL and a
+REST backend at `KOZOU_ADAPTER_URL` (default `http://localhost:3000`).
+Standalone, this package's default adapter speaks PostgREST, so bring up
+a PostgreSQL and a PostgREST pointed at it:
 
 1. `pnpm --filter @kozou/svelte-ui run dev` — open
    `http://localhost:5173/`.

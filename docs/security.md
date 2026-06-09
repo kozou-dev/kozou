@@ -61,9 +61,9 @@ server passes through (table names, column names, enum values, ...):
 the database is treated as a trusted source under standard PostgreSQL
 operational practice.
 
-## Mitigation (v0.1.1+ under consideration)
+## Mitigation: under consideration
 
-The following are being considered for v0.1.1 and later:
+The following are under consideration for a future release; none ship today:
 
 1. **`--strict-untrusted-comments` flag**: split COMMENT-derived text
    into a separate field in MCP output so the AI is told "this text
@@ -94,8 +94,9 @@ under that role with empty claims so your policies decide what an anonymous call
 sees; a present-but-invalid token is always `401`. Your own **PostgreSQL
 row-level-security (RLS) policies** decide what each request can read and write. Kozou
 authenticates and
-switches role; it does not write policies. This enforcement is route-independent — the
-same RLS applies to `psql` and any other client, not just Kozou. The roles an
+switches role; it does not write policies. This enforcement is database-level — the
+same RLS policies apply to `psql` and any other client that connects under a role
+subject to them, not just to requests routed through Kozou. The roles an
 application needs (for example admin / editor / author / viewer) are PostgreSQL roles
 plus RLS policies, which Kozou already runs each request under.
 
@@ -129,7 +130,7 @@ future change adds or removes the mitigations above.
 - **When integrating Kozou as an OSS dependency, manage DB schema-edit
   permissions strictly.**
 - **Multi-tenant SaaS designs that let tenants edit schema are
-  discouraged in v0.1.**
+  discouraged.**
 - **Evaluate the risk that malicious COMMENT text could influence the
   AI agent's behaviour before deploying to production.**
 
