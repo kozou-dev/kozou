@@ -39,9 +39,31 @@ export function relation(
   table: string,
   opts: { schema?: string; column?: string; cardinality?: 'many-to-one' | 'one-to-one' } = {},
 ): RelationContext {
+  const schema = opts.schema ?? 'public';
+  const column = opts.column ?? 'id';
   return {
     field,
-    references: { schema: opts.schema ?? 'public', table, column: opts.column ?? 'id' },
+    fields: [field],
+    references: { schema, table, column, columns: [column] },
+    cardinality: opts.cardinality ?? 'many-to-one',
+    meaning: null,
+  };
+}
+
+/** A composite (multi-column) foreign-key relation. `fields` and
+ *  `references.columns` are positionally aligned; the scalar `field` / `column`
+ *  keep `[0]` for back-compat. */
+export function compositeRelation(
+  fields: string[],
+  table: string,
+  refColumns: string[],
+  opts: { schema?: string; cardinality?: 'many-to-one' | 'one-to-one' } = {},
+): RelationContext {
+  const schema = opts.schema ?? 'public';
+  return {
+    field: fields[0]!,
+    fields: [...fields],
+    references: { schema, table, column: refColumns[0]!, columns: [...refColumns] },
     cardinality: opts.cardinality ?? 'many-to-one',
     meaning: null,
   };

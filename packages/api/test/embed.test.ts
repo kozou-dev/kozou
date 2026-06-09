@@ -8,7 +8,8 @@ import {
 } from '../src/embed.js';
 import { buildResourceLookup } from '../src/schema-lookup.js';
 import { KozouApiError } from '../src/errors.js';
-import { schemaOf, col, relation } from './helpers.js';
+import type { RelationContext } from '@kozou/core';
+import { schemaOf, col, relation, compositeRelation } from './helpers.js';
 
 // A forward to-one chain: inventory_items -> editions -> books -> authors.
 const lookup = buildResourceLookup(
@@ -285,5 +286,128 @@ describe('buildEmbedSelectFragment', () => {
 
   it('returns an empty string for an empty spec', () => {
     expect(buildEmbedSelectFragment([], '"public"."books"', { n: 0 })).toBe('');
+  });
+});
+
+describe('composite foreign keys (v1.1)', () => {
+  // orders has a composite primary key (id, region); shipments references it
+  // with a composite FK (order_id, order_region).
+  const composite = buildResourceLookup(
+    schemaOf([
+      {
+        name: 'orders',
+        columns: [
+          col('id', 'uuid', { isPrimaryKey: true }),
+          col('region', 'text', { isPrimaryKey: true }),
+        ],
+        primaryKey: ['id', 'region'],
+      },
+      {
+        name: 'shipments',
+        columns: [
+          col('id', 'uuid', { isPrimaryKey: true }),
+          col('order_id', 'uuid'),
+          col('order_region', 'text'),
+        ],
+        primaryKey: ['id'],
+        relations: [compositeRelation(['order_id', 'order_region'], 'orders', ['id', 'region'])],
+      },
+    ]),
+  );
+  const shipments = composite.resolve('shipments')!;
+  const orders = composite.resolve('orders')!;
+
+  it('resolves a composite forward relation by referenced table name', () => {
+    const spec = resolveEmbedSpec(shipments, parseEmbedParam('orders'), composite);
+    expect(spec).toHaveLength(1);
+    expect(spec[0].kind).toBe('to-one');
+    expect(spec[0].relation.fields).toEqual(['order_id', 'order_region']);
+  });
+
+  it('does not resolve a composite forward relation by a single FK column name', () => {
+    expect400(
+      () => resolveEmbedSpec(shipments, parseEmbedParam('order_id'), composite),
+      /Unknown embed relation "order_id"/,
+    );
+  });
+
+  it('joins a composite forward embed on all column pairs with AND', () => {
+    const spec = resolveEmbedSpec(shipments, parseEmbedParam('orders'), composite);
+    const frag = buildEmbedSelectFragment(spec, '"public"."shipments"', { n: 0 });
+    expect(frag).toContain(
+      'WHERE e1."id" = "public"."shipments"."order_id" AND e1."region" = "public"."shipments"."order_region"',
+    );
+  });
+
+  it('joins a composite reverse embed on all column pairs with AND', () => {
+    const spec = resolveEmbedSpec(orders, parseEmbedParam('shipments'), composite);
+    expect(spec[0].kind).toBe('to-many');
+    const frag = buildEmbedSelectFragment(spec, '"public"."orders"', { n: 0 });
+    expect(frag).toContain(
+      'WHERE e1."order_id" = "public"."orders"."id" AND e1."order_region" = "public"."orders"."region"',
+    );
+  });
+
+  it('a forward composite FK shadows a reverse to the same table (cyclic, table-name selector)', () => {
+    // p has a composite FK to c; c has the only FK back to p. `embed=c` on p
+    // matches the forward first (matchForward), so it resolves to-one — the
+    // same forward-before-reverse precedence single-column FKs already have.
+    const cyc = buildResourceLookup(
+      schemaOf([
+        {
+          name: 'p',
+          columns: [col('id', 'uuid', { isPrimaryKey: true }), col('c_a', 'uuid'), col('c_b', 'uuid')],
+          primaryKey: ['id'],
+          relations: [compositeRelation(['c_a', 'c_b'], 'c', ['a', 'b'])],
+        },
+        {
+          name: 'c',
+          columns: [
+            col('a', 'uuid', { isPrimaryKey: true }),
+            col('b', 'uuid', { isPrimaryKey: true }),
+            col('p_id', 'uuid'),
+          ],
+          primaryKey: ['a', 'b'],
+          relations: [relation('p_id', 'p', { column: 'id' })],
+        },
+      ]),
+    );
+    const p = cyc.resolve('p')!;
+    const spec = resolveEmbedSpec(p, parseEmbedParam('c'), cyc);
+    expect(spec[0].kind).toBe('to-one');
+    expect(spec[0].relation.fields).toEqual(['c_a', 'c_b']);
+  });
+});
+
+describe('legacy single-column relations without the v1.1 arrays', () => {
+  // A relation shaped like a v1.0 RelationContext: only `field` /
+  // `references.column`, no `fields` / `references.columns`. Readers normalize.
+  const legacyRel = {
+    field: 'author_id',
+    references: { schema: 'public', table: 'authors', column: 'id' },
+    cardinality: 'many-to-one',
+    meaning: null,
+  } as RelationContext;
+  const lk = buildResourceLookup(
+    schemaOf([
+      {
+        name: 'books',
+        columns: [col('id', 'uuid', { isPrimaryKey: true }), col('author_id', 'uuid')],
+        relations: [legacyRel],
+      },
+      {
+        name: 'authors',
+        columns: [col('id', 'uuid', { isPrimaryKey: true }), col('name', 'text')],
+        relations: [],
+      },
+    ]),
+  );
+
+  it('resolves and joins a legacy relation by normalizing field -> [field]', () => {
+    const b = lk.resolve('books')!;
+    const spec = resolveEmbedSpec(b, parseEmbedParam('authors'), lk);
+    expect(spec).toHaveLength(1);
+    const frag = buildEmbedSelectFragment(spec, '"public"."books"', { n: 0 });
+    expect(frag).toContain('WHERE e1."id" = "public"."books"."author_id"');
   });
 });

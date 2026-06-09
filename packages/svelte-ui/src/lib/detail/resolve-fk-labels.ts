@@ -49,6 +49,10 @@ export async function resolveFkLabels(
   const lookups: Promise<void>[] = [];
 
   for (const relation of table.relations) {
+    // Composite (multi-column) foreign keys cannot be resolved by a single
+    // column value; their label resolution is deferred (the raw values render
+    // as-is). Single-column relations resolve as before.
+    if ((relation.fields ?? [relation.field]).length > 1) continue;
     const rawValue = row[relation.field];
     if (rawValue === null || rawValue === undefined) continue;
     if (typeof rawValue !== 'string' && typeof rawValue !== 'number') continue;

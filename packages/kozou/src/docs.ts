@@ -121,13 +121,26 @@ function renderEnum(e: EnumContext): string {
 }
 
 function renderColumnsTable(columns: ColumnContext[], relations: RelationContext[]): string {
-  const fkByField = new Map<string, RelationContext>();
-  for (const rel of relations) fkByField.set(rel.field, rel);
+  // Map each FK column to its positionally-aligned referenced column. A
+  // composite FK contributes every member column (not just the first), so the
+  // Markdown agrees with the API / MCP relation metadata.
+  const fkRefByColumn = new Map<string, { schema: string; table: string; column: string }>();
+  for (const rel of relations) {
+    const fields = rel.fields ?? [rel.field];
+    const refCols = rel.references.columns ?? [rel.references.column];
+    fields.forEach((field, i) => {
+      fkRefByColumn.set(field, {
+        schema: rel.references.schema,
+        table: rel.references.table,
+        column: refCols[i]!,
+      });
+    });
+  }
 
   const header = '| Column | Type | Null | Default | Key | Description |';
   const divider = '| --- | --- | --- | --- | --- | --- |';
   const rows = columns.map((c) => {
-    const key = columnKey(c, fkByField.get(c.name));
+    const key = columnKey(c, fkRefByColumn.get(c.name));
     const def = c.defaultExpr ? code(c.defaultExpr) : '';
     const desc = columnDescription(c);
     return `| ${code(c.name)} | ${escapeCell(c.dataType)} | ${c.nullable ? 'yes' : 'no'} | ${def} | ${key} | ${desc} |`;
@@ -135,11 +148,13 @@ function renderColumnsTable(columns: ColumnContext[], relations: RelationContext
   return [header, divider, ...rows].join('\n');
 }
 
-function columnKey(column: ColumnContext, fk: RelationContext | undefined): string {
+function columnKey(
+  column: ColumnContext,
+  ref: { schema: string; table: string; column: string } | undefined,
+): string {
   const parts: string[] = [];
   if (column.isPrimaryKey) parts.push('PK');
-  if (fk) {
-    const ref = fk.references;
+  if (ref) {
     parts.push(`FK → ${escapeCell(`${ref.schema}.${ref.table}.${ref.column}`)}`);
   } else if (column.isForeignKey) {
     parts.push('FK');

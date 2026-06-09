@@ -112,8 +112,10 @@ describe('describe_table schemas', () => {
         relations: [
           {
             field: 'parent_id',
+            fields: ['parent_id'],
             referencesTable: 'public.parents',
             referencesColumn: 'id',
+            referencesColumns: ['id'],
             meaning: null,
           },
         ],

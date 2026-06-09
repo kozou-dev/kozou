@@ -83,14 +83,25 @@ export type WidgetType =
   | 'currency';
 
 export type RelationContext = {
-  /** Column on this side of the relation. A relation maps a single column;
-   *  composite (multi-column) foreign keys are not yet embeddable, so they
-   *  are excluded here and reported as a build issue (see buildSchemaContext). */
+  /** First foreign-key column on this side. Retained for back-compat; for a
+   *  composite (multi-column) foreign key it is `fields[0]`, so prefer `fields`
+   *  for the full set. */
   field: string;
+  /** All foreign-key columns on this side, in declaration order. A single-column
+   *  FK has one entry (`[field]`); a composite FK has several. Added in v1.1,
+   *  when composite foreign keys became embeddable. Optional for back-compat:
+   *  `buildSchemaContext` always populates it, but a v1.0-shaped relation may
+   *  omit it, so readers normalize with `fields ?? [field]`. */
+  fields?: string[];
   references: {
     schema: string;
     table: string;
+    /** First referenced column. Back-compat; for a composite key it is
+     *  `columns[0]`, so prefer `columns`. */
     column: string;
+    /** All referenced columns, positionally aligned with `fields`. Added in v1.1.
+     *  Optional for back-compat; normalize with `columns ?? [column]`. */
+    columns?: string[];
   };
   /** v0.1 supports only these two */
   cardinality: 'many-to-one' | 'one-to-one';

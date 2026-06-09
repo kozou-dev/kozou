@@ -96,7 +96,8 @@ function insertPath(
     (s) =>
       s.kind === resolved.kind &&
       s.target.qualifiedName === resolved.target.qualifiedName &&
-      s.relation.field === resolved.relation.field,
+      (s.relation.fields ?? [s.relation.field]).join(',') ===
+        (resolved.relation.fields ?? [resolved.relation.field]).join(','),
   );
   if (node === undefined) {
     if (counter.n >= MAX_EMBED_RELATIONS) {
@@ -129,10 +130,13 @@ function resolveSegment(parent: Resource, selector: string, lookup: ResourceLook
   throw badRequest(`Unknown embed relation "${selector}" on resource "${parent.name}".`);
 }
 
-/** Match a forward to-one relation by FK field name, or by referenced table
- *  name when exactly one FK targets it. */
+/** Match a forward to-one relation by FK field name (single-column FKs only —
+ *  a composite FK has no single column name, so it is selected by table name),
+ *  or by referenced table name when exactly one FK targets it. */
 function matchForward(parent: Resource, selector: string): RelationContext | undefined {
-  const byField = parent.relations.find((r) => r.field === selector);
+  const byField = parent.relations.find(
+    (r) => (r.fields ?? [r.field]).length === 1 && r.field === selector,
+  );
   if (byField !== undefined) return byField;
   const byTable = parent.relations.filter((r) => r.references.table === selector);
   if (byTable.length === 1) return byTable[0];
@@ -220,15 +224,28 @@ export function buildEmbedSelectFragment(
         ? node.target.columns.map((c) => quoteIdent(c.name)).join(', ')
         : '*';
     const children = buildEmbedSelectFragment(node.children, alias, counter);
-    const fkField = quoteIdent(node.relation.field);
-    const refCol = quoteIdent(node.relation.references.column);
+
+    // The FK columns on this side (`relation.fields`) align positionally with
+    // the referenced columns (`relation.references.columns`). A composite key
+    // joins on all pairs with AND; a single-column key is the one-pair case.
+    // Normalize the v1.1 arrays against the back-compat scalar fields.
+    const fkFields = node.relation.fields ?? [node.relation.field];
+    const refCols = node.relation.references.columns ?? [node.relation.references.column];
 
     if (node.kind === 'to-one') {
-      const inner = `SELECT ${cols}${children} FROM ${qualified(node.target)} ${alias} WHERE ${alias}.${refCol} = ${parentRef}.${fkField}`;
+      // Forward: parent holds the FK -> match target.refCol = parent.fkField.
+      const on = fkFields
+        .map((fk, i) => `${alias}.${quoteIdent(refCols[i]!)} = ${parentRef}.${quoteIdent(fk)}`)
+        .join(' AND ');
+      const inner = `SELECT ${cols}${children} FROM ${qualified(node.target)} ${alias} WHERE ${on}`;
       out += `, (SELECT to_jsonb(${alias}) FROM (${inner}) ${alias}) AS ${quoteIdent(node.key)}`;
     } else {
+      // Reverse: child holds the FK -> match child.fkField = parent.refCol.
+      const on = fkFields
+        .map((fk, i) => `${alias}.${quoteIdent(fk)} = ${parentRef}.${quoteIdent(refCols[i]!)}`)
+        .join(' AND ');
       const order = orderByPrimaryKey(node.target, alias);
-      const inner = `SELECT ${cols}${children} FROM ${qualified(node.target)} ${alias} WHERE ${alias}.${fkField} = ${parentRef}.${refCol}${order} LIMIT ${MAX_EMBED_CHILDREN}`;
+      const inner = `SELECT ${cols}${children} FROM ${qualified(node.target)} ${alias} WHERE ${on}${order} LIMIT ${MAX_EMBED_CHILDREN}`;
       out += `, (SELECT coalesce(jsonb_agg(to_jsonb(${alias})${order}), '[]'::jsonb) FROM (${inner}) ${alias}) AS ${quoteIdent(node.key)}`;
     }
   }

@@ -24,9 +24,14 @@ const columnSchema = z.object({
 });
 
 const relationSchema = z.object({
+  /** First FK column / referenced column; kept for back-compat. Prefer the
+   *  `fields` / `referencesColumns` arrays, which carry the full (possibly
+   *  composite) key. */
   field: z.string(),
+  fields: z.array(z.string()),
   referencesTable: z.string(),
   referencesColumn: z.string(),
+  referencesColumns: z.array(z.string()),
   meaning: z.string().nullable(),
 });
 

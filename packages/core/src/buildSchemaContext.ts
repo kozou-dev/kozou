@@ -58,10 +58,14 @@ function buildColumn(input: {
   column: RawColumn;
   primaryKey: string[];
   foreignKeyColumns: Set<string>;
+  /** Columns that are the sole column of a single-column FK — relation-select
+   *  eligible. A composite-FK column is in `foreignKeyColumns` but not here. */
+  singleColumnForeignKeyColumns: Set<string>;
   enumValues: string[] | null;
   hints: ColumnHints | undefined;
 }): ColumnContext {
-  const { column, primaryKey, foreignKeyColumns, enumValues, hints } = input;
+  const { column, primaryKey, foreignKeyColumns, singleColumnForeignKeyColumns, enumValues, hints } =
+    input;
   const parsed = parseCommentTags(column.comment);
   const isPrimaryKey = primaryKey.includes(column.name);
   const isForeignKey = foreignKeyColumns.has(column.name);
@@ -72,6 +76,9 @@ function buildColumn(input: {
     inferWidget({
       column,
       isForeignKey,
+      // Only a single-column FK backs a usable relation-select; composite-FK
+      // columns keep isForeignKey but get a type-based widget instead.
+      relationSelectable: singleColumnForeignKeyColumns.has(column.name),
       enumValues,
       commentBody: parsed.body,
     });
@@ -108,39 +115,51 @@ function buildRelations(table: RawTable, issues: BuildIssue[]): RelationContext[
 
   const relations: RelationContext[] = [];
   for (const fk of table.foreignKeys) {
-    if (fk.columns.length === 1) {
-      const fkKey = fk.columns.slice().sort().join(',');
-      const cardinality: RelationContext['cardinality'] = uniqueColumnSets.has(fkKey)
-        ? 'one-to-one'
-        : 'many-to-one';
-      relations.push({
-        field: fk.columns[0]!,
-        references: {
-          schema: fk.referencedSchema,
-          table: fk.referencedTable,
-          column: fk.referencedColumns[0] ?? 'id',
-        },
-        cardinality,
-        meaning: fk.comment,
-      });
-      continue;
-    }
-    // Composite (multi-column) foreign keys are not yet embeddable:
-    // RelationContext models a single-column relation (`field` /
-    // `references.column`). Record the exclusion as a BuildIssue instead of
-    // dropping it silently, so MCP / CLI consumers can see why the relation
-    // is missing from `relations` and `relation-select`.
-    if (fk.columns.length > 1) {
+    // A zero-column foreign key cannot come from real PostgreSQL introspection;
+    // skip the degenerate case silently, matching the prior behaviour.
+    if (fk.columns.length === 0) continue;
+
+    // Resolve the referenced columns, enforcing positional alignment with the
+    // FK columns. A single-column FK with no referenced column keeps the legacy
+    // `['id']` fallback; any other length mismatch is malformed input — record a
+    // BuildIssue and skip, rather than emit a misaligned relation that would
+    // break composite embed JOIN construction (which indexes columns[i]).
+    let refColumns: string[];
+    if (fk.referencedColumns.length === fk.columns.length) {
+      refColumns = fk.referencedColumns.slice();
+    } else if (fk.columns.length === 1 && fk.referencedColumns.length === 0) {
+      refColumns = ['id'];
+    } else {
       issues.push({
         path: `tables.${table.name}.relations.${fk.name}`,
         message:
-          `Foreign key "${fk.name}" on "${table.schema}.${table.name}" spans multiple columns ` +
-          `(${fk.columns.join(', ')}); composite foreign keys are not yet embeddable and are ` +
-          `excluded from relations / relation-select.`,
+          `Foreign key "${fk.name}" on "${table.schema}.${table.name}" has ${fk.columns.length} ` +
+          `column(s) (${fk.columns.join(', ')}) but ${fk.referencedColumns.length} referenced ` +
+          `column(s); the relation is skipped because the columns are not positionally aligned.`,
       });
+      continue;
     }
-    // A zero-column foreign key cannot come from real PostgreSQL introspection;
-    // the degenerate case is skipped silently, matching the prior behaviour.
+
+    // Single- and composite-column foreign keys are both modelled, since v1.1:
+    // `fields` / `references.columns` carry the full (possibly multi-column)
+    // set, and the scalar `field` / `references.column` keep `[0]` for
+    // back-compat. The cardinality check uses the whole column set.
+    const fkKey = fk.columns.slice().sort().join(',');
+    const cardinality: RelationContext['cardinality'] = uniqueColumnSets.has(fkKey)
+      ? 'one-to-one'
+      : 'many-to-one';
+    relations.push({
+      field: fk.columns[0]!,
+      fields: fk.columns.slice(),
+      references: {
+        schema: fk.referencedSchema,
+        table: fk.referencedTable,
+        column: refColumns[0]!,
+        columns: refColumns,
+      },
+      cardinality,
+      meaning: fk.comment,
+    });
   }
   return relations;
 }
@@ -155,8 +174,10 @@ function buildTableContext(input: {
   const parsed = parseCommentTags(table.comment);
   const enumMap = extractCheckEnums(table.checks);
   const fkColumns = new Set<string>();
+  const singleFkColumns = new Set<string>();
   for (const fk of table.foreignKeys) {
     for (const col of fk.columns) fkColumns.add(col);
+    if (fk.columns.length === 1) singleFkColumns.add(fk.columns[0]!);
   }
 
   const columns = table.columns.map((c) =>
@@ -164,6 +185,7 @@ function buildTableContext(input: {
       column: c,
       primaryKey: table.primaryKey,
       foreignKeyColumns: fkColumns,
+      singleColumnForeignKeyColumns: singleFkColumns,
       enumValues: enumMap.get(c.name) ?? null,
       hints: hints?.columns?.[c.name],
     }),

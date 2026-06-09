@@ -110,6 +110,64 @@ describe('emitMarkdown', () => {
     expect(md).toContain('FK → public.authors.id');
   });
 
+  it('documents every member column of a composite foreign key (v1.1)', async () => {
+    const raw: RawIntrospection = {
+      serverVersion: '16.2',
+      introspectedAt: '2026-01-01T00:00:00.000Z',
+      schemas: ['public'],
+      enums: [],
+      functions: [],
+      tables: [
+        {
+          schema: 'public',
+          name: 'orders',
+          comment: null,
+          primaryKey: ['id', 'region'],
+          foreignKeys: [],
+          checks: [],
+          indexes: [],
+          rowCountEstimate: null,
+          columns: [
+            col('id', 'uuid', { nullable: false }),
+            col('region', 'text', { nullable: false }),
+          ],
+        },
+        {
+          schema: 'public',
+          name: 'shipments',
+          comment: null,
+          primaryKey: ['id'],
+          foreignKeys: [
+            {
+              name: 'shipments_order_fkey',
+              columns: ['order_id', 'order_region'],
+              referencedSchema: 'public',
+              referencedTable: 'orders',
+              referencedColumns: ['id', 'region'],
+              onDelete: 'NO ACTION',
+              onUpdate: 'NO ACTION',
+              comment: null,
+            },
+          ],
+          checks: [],
+          indexes: [],
+          rowCountEstimate: null,
+          columns: [
+            col('id', 'uuid', { nullable: false }),
+            col('order_id', 'uuid', { nullable: false }),
+            col('order_region', 'text', { nullable: false }),
+          ],
+        },
+      ],
+      views: [],
+    };
+    const md = emitMarkdown(await buildSchemaContext({ raw }));
+    // Both composite member columns document their aligned referenced column —
+    // not just the first, and no bare "FK" fallback.
+    expect(md).toContain('FK → public.orders.id');
+    expect(md).toContain('FK → public.orders.region');
+  });
+
   it('appends the enum domain to a CHECK-constrained column', async () => {
     const md = emitMarkdown(await buildSchemaContext({ raw: makeRaw() }));
     expect(md).toContain('One of: `draft`, `published`.');
