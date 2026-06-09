@@ -3,17 +3,38 @@ import type { WidgetType } from '@kozou/core';
 import { buildOpenApiDocument } from '../src/openapi.js';
 import { schemaOf, col, relation } from './helpers.js';
 
+type EmbedHint = { field: string; key: string; target: string; cardinality: string };
 type SchemaObj = {
   type?: unknown;
   format?: string;
   enum?: unknown[];
   description?: string;
   required?: string[];
+  minProperties?: number;
   properties?: Record<string, SchemaObj>;
+  additionalProperties?: boolean;
+  items?: SchemaObj;
+  oneOf?: SchemaObj[];
+  $ref?: string;
   'x-kozou-ai'?: string;
   'x-kozou-policy'?: string[];
   'x-kozou-widget'?: string;
+  'x-kozou-embeds'?: EmbedHint[];
 };
+
+/** The `$ref` an operation's JSON request body points at, if any. */
+function requestBodyRef(op: unknown): string | undefined {
+  return (
+    op as { requestBody?: { content?: Record<string, { schema?: { $ref?: string } }> } }
+  ).requestBody?.content?.['application/json']?.schema?.$ref;
+}
+
+/** The schema of an operation's 200 `application/json` response. */
+function okSchema(op: unknown): SchemaObj {
+  return (
+    op as { responses: Record<string, { content: Record<string, { schema: SchemaObj }> }> }
+  ).responses['200'].content['application/json'].schema;
+}
 type Doc = {
   openapi: string;
   info: { title: string; version: string; description: string };
@@ -268,5 +289,267 @@ describe('buildOpenApiDocument', () => {
       'x-kozou-embeds'?: unknown;
     };
     expect(vw['x-kozou-embeds']).toBeUndefined();
+  });
+
+  // --- Request bodies (issue #83.1) --------------------------------------
+
+  it('uses a create-input schema that only requires NOT NULL columns without a default', () => {
+    const schema = schemaOf([
+      {
+        name: 'products',
+        columns: [
+          col('id', 'uuid', { isPrimaryKey: true, nullable: false, defaultExpr: 'gen_random_uuid()' }),
+          col('name', 'text', { nullable: false }),
+          col('status', 'text', { nullable: false, defaultExpr: "'draft'::text" }),
+          col('note', 'textarea', { nullable: true }),
+        ],
+        primaryKey: ['id'],
+      },
+    ]);
+    const doc = buildOpenApiDocument(schema) as unknown as Doc;
+
+    // POST references a dedicated create-input schema, not the response row.
+    expect(requestBodyRef(doc.paths['/products'].post)).toBe(
+      '#/components/schemas/public.products.CreateInput',
+    );
+    const create = doc.components.schemas['public.products.CreateInput'];
+    // Only the NOT NULL column with no default is required; id (default) and
+    // status (default) and note (nullable) may be omitted -> empty body is valid.
+    expect(create.required).toEqual(['name']);
+    expect(create.additionalProperties).toBe(false);
+    expect(Object.keys(create.properties ?? {})).toEqual(['id', 'name', 'status', 'note']);
+  });
+
+  it('uses a partial update-input schema with no required columns', () => {
+    const schema = schemaOf([
+      {
+        name: 'products',
+        columns: [
+          col('id', 'uuid', { isPrimaryKey: true, nullable: false }),
+          col('name', 'text', { nullable: false }),
+        ],
+        primaryKey: ['id'],
+      },
+    ]);
+    const doc = buildOpenApiDocument(schema) as unknown as Doc;
+    expect(requestBodyRef(doc.paths['/products/{id}'].patch)).toBe(
+      '#/components/schemas/public.products.UpdateInput',
+    );
+    const update = doc.components.schemas['public.products.UpdateInput'];
+    expect(update.required).toBeUndefined();
+    // The runtime rejects an empty update (400 "No fields to update"), so the
+    // schema requires at least one column.
+    expect(update.minProperties).toBe(1);
+    expect(update.additionalProperties).toBe(false);
+    expect(Object.keys(update.properties ?? {})).toEqual(['id', 'name']);
+  });
+
+  it('emits a create-input but no update-input schema for a primary-key-less table', () => {
+    const schema = schemaOf([
+      { name: 'event_log', columns: [col('source', 'text'), col('payload', 'text')], primaryKey: [] },
+    ]);
+    const doc = buildOpenApiDocument(schema) as unknown as Doc;
+    expect(doc.components.schemas['public.event_log.CreateInput']).toBeDefined();
+    // No item path (no PK) -> no PATCH -> no update-input schema.
+    expect(doc.components.schemas['public.event_log.UpdateInput']).toBeUndefined();
+    expect(requestBodyRef(doc.paths['/event_log'].post)).toBe(
+      '#/components/schemas/public.event_log.CreateInput',
+    );
+  });
+
+  // --- Relation-select as=options (issue #83.2) --------------------------
+
+  it('documents the as=options relation-select mode on a single-PK collection', () => {
+    const schema = schemaOf([
+      {
+        name: 'products',
+        columns: [col('id', 'uuid', { isPrimaryKey: true, nullable: false }), col('name', 'text')],
+        primaryKey: ['id'],
+      },
+    ]);
+    const doc = buildOpenApiDocument(schema) as unknown as Doc;
+    expect(paramNames(doc.paths['/products'].get)).toEqual(
+      expect.arrayContaining(['as', 'label', 'fields', 'q', 'limit']),
+    );
+    // The 200 offers both the list page and the { options } shape.
+    const resp = okSchema(doc.paths['/products'].get);
+    expect(resp.oneOf).toHaveLength(2);
+    const optionsShape = (resp.oneOf ?? []).find((s) => s.properties?.options);
+    expect(optionsShape?.properties?.options?.items?.required).toEqual(['id', 'label']);
+  });
+
+  it('omits as=options where there is no single-column primary key', () => {
+    const schema = schemaOf(
+      [
+        {
+          name: 'line_items',
+          columns: [
+            col('order_id', 'uuid', { isPrimaryKey: true, nullable: false }),
+            col('sku', 'text', { isPrimaryKey: true, nullable: false }),
+          ],
+          primaryKey: ['order_id', 'sku'],
+        },
+        { name: 'event_log', columns: [col('payload', 'text')], primaryKey: [] },
+      ],
+      [{ name: 'vw_x', columns: [col('id', 'uuid')] }],
+    );
+    const doc = buildOpenApiDocument(schema) as unknown as Doc;
+    for (const seg of ['/line_items', '/event_log', '/vw_x']) {
+      expect(paramNames(doc.paths[seg].get)).not.toContain('as');
+      expect(okSchema(doc.paths[seg].get).oneOf).toBeUndefined();
+    }
+  });
+
+  it('merges (not duplicates) an options control into a colliding filter parameter', () => {
+    const schema = schemaOf([
+      {
+        name: 'tags',
+        columns: [col('id', 'uuid', { isPrimaryKey: true, nullable: false }), col('label', 'text')],
+        primaryKey: ['id'],
+      },
+    ]);
+    const doc = buildOpenApiDocument(schema) as unknown as Doc;
+    const params =
+      (doc.paths['/tags'].get as { parameters: { name: string; description: string }[] }).parameters;
+    // Exactly one `label` parameter — emitting two would be invalid OpenAPI.
+    const labelParams = params.filter((p) => p.name === 'label');
+    expect(labelParams).toHaveLength(1);
+    // ...and its description carries both the filter and the as=options meaning.
+    expect(labelParams[0].description).toContain('Filter on `label`');
+    expect(labelParams[0].description).toContain('as=options');
+  });
+
+  // --- Faithful embed hints (issue #83.3) --------------------------------
+
+  it('drops reverse embeds when a child has multiple foreign keys to the parent', () => {
+    // messages has two FKs to users (sender_id, recipient_id): the reverse
+    // selector "messages" is ambiguous, so the runtime rejects it (400) and the
+    // document must not advertise it on users.
+    const schema = schemaOf([
+      { name: 'users', columns: [col('id', 'uuid', { isPrimaryKey: true, nullable: false })], primaryKey: ['id'] },
+      {
+        name: 'messages',
+        columns: [
+          col('id', 'uuid', { isPrimaryKey: true, nullable: false }),
+          col('sender_id', 'uuid'),
+          col('recipient_id', 'uuid'),
+        ],
+        primaryKey: ['id'],
+        relations: [relation('sender_id', 'users'), relation('recipient_id', 'users')],
+      },
+    ]);
+    const doc = buildOpenApiDocument(schema) as unknown as Doc;
+    const users = doc.components.schemas['public.users'];
+    expect(users['x-kozou-embeds']).toBeUndefined();
+    expect(paramNames(doc.paths['/users'].get)).not.toContain('embed');
+
+    // messages keeps both forward relations (selectable by FK field) with
+    // distinct, non-colliding keys.
+    const keys = (doc.components.schemas['public.messages']['x-kozou-embeds'] ?? []).map((h) => h.key);
+    expect(keys).toEqual(['users', 'recipient']);
+  });
+
+  it('derives an embed key that avoids colliding with a parent column', () => {
+    const schema = schemaOf([
+      {
+        name: 'books',
+        // a column literally named "authors" (the target table name) forces the
+        // key to fall back to the stripped FK field.
+        columns: [
+          col('id', 'uuid', { isPrimaryKey: true, nullable: false }),
+          col('author_id', 'uuid'),
+          col('authors', 'number'),
+        ],
+        primaryKey: ['id'],
+        relations: [relation('author_id', 'authors')],
+      },
+      { name: 'authors', columns: [col('id', 'uuid', { isPrimaryKey: true, nullable: false })], primaryKey: ['id'] },
+    ]);
+    const doc = buildOpenApiDocument(schema) as unknown as Doc;
+    const hint = (doc.components.schemas['public.books']['x-kozou-embeds'] ?? [])[0];
+    expect(hint).toEqual({
+      field: 'author_id',
+      key: 'author',
+      target: '#/components/schemas/public.authors',
+      cardinality: 'to-one',
+    });
+  });
+
+  it('falls back to the raw child FK field for a reverse embed key (mirrors chooseKey)', () => {
+    // The parent's columns shadow both the child table name and the stripped
+    // FK, but the raw FK field lives on the child, so it is a usable key — the
+    // runtime (chooseKey) would accept it, so the document must advertise it.
+    const schema = schemaOf([
+      {
+        name: 'authors',
+        columns: [
+          col('id', 'uuid', { isPrimaryKey: true, nullable: false }),
+          col('books', 'number'),
+          col('author', 'text'),
+        ],
+        primaryKey: ['id'],
+      },
+      {
+        name: 'books',
+        columns: [col('id', 'uuid', { isPrimaryKey: true, nullable: false }), col('author_id', 'uuid')],
+        primaryKey: ['id'],
+        relations: [relation('author_id', 'authors')],
+      },
+    ]);
+    const doc = buildOpenApiDocument(schema) as unknown as Doc;
+    const hint = (doc.components.schemas['public.authors']['x-kozou-embeds'] ?? [])[0];
+    expect(hint).toEqual({
+      field: 'author_id',
+      key: 'author_id',
+      target: '#/components/schemas/public.books',
+      cardinality: 'to-many',
+    });
+  });
+
+  it('drops an embed whose every key candidate collides with a parent column', () => {
+    const schema = schemaOf([
+      {
+        name: 'books',
+        // both "authors" (target name) and "author" (stripped FK) are columns,
+        // so no usable key exists -> the runtime would 400, so no hint/param.
+        columns: [
+          col('id', 'uuid', { isPrimaryKey: true, nullable: false }),
+          col('author_id', 'uuid'),
+          col('authors', 'number'),
+          col('author', 'text'),
+        ],
+        primaryKey: ['id'],
+        relations: [relation('author_id', 'authors')],
+      },
+      { name: 'authors', columns: [col('id', 'uuid', { isPrimaryKey: true, nullable: false })], primaryKey: ['id'] },
+    ]);
+    const doc = buildOpenApiDocument(schema) as unknown as Doc;
+    expect(doc.components.schemas['public.books']['x-kozou-embeds']).toBeUndefined();
+    expect(paramNames(doc.paths['/books'].get)).not.toContain('embed');
+  });
+
+  it('documents both forward and reverse selectors in the embed parameter', () => {
+    const schema = schemaOf([
+      { name: 'authors', columns: [col('id', 'uuid', { isPrimaryKey: true, nullable: false })], primaryKey: ['id'] },
+      {
+        name: 'books',
+        columns: [col('id', 'uuid', { isPrimaryKey: true, nullable: false }), col('author_id', 'uuid')],
+        primaryKey: ['id'],
+        relations: [relation('author_id', 'authors')],
+      },
+    ]);
+    const doc = buildOpenApiDocument(schema) as unknown as Doc;
+    const embedDesc = (op: unknown): string =>
+      (op as { parameters: { name: string; description: string }[] }).parameters.find(
+        (p) => p.name === 'embed',
+      )?.description ?? '';
+    // authors is reverse-only (its only embeddable relation is the to-many
+    // "books") -> the embed parameter must document the array + child-table
+    // selector, not just forward objects.
+    const authorsDesc = embedDesc(doc.paths['/authors'].get);
+    expect(authorsDesc).toMatch(/to-many|array/);
+    expect(authorsDesc).toMatch(/child table/);
+    // and the forward (to-one nested object) case is still documented.
+    expect(embedDesc(doc.paths['/books'].get)).toMatch(/to-one|nested object/);
   });
 });
