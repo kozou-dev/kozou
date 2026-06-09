@@ -68,14 +68,37 @@ export function buildOpenApiDocument(
   const schemas: JsonObject = {};
 
   for (const { resource, writable } of resources) {
-    const ref = `#/components/schemas/${resource.qualifiedName}`;
+    const qn = resource.qualifiedName;
+    const ref = `#/components/schemas/${qn}`;
     const relations: RelationContext[] = 'relations' in resource ? resource.relations : [];
-    const reverse = reverseByParent.get(resource.qualifiedName) ?? [];
-    const embeds = embedHints(relations, reverse, knownQNames);
-    schemas[resource.qualifiedName] = resourceSchema(resource, embeds);
+    const reverse = reverseByParent.get(qn) ?? [];
+    const parentColumns = new Set(resource.columns.map((c) => c.name));
+    const embeds = embedHints(relations, reverse, knownQNames, parentColumns);
+    schemas[qn] = resourceSchema(resource, embeds);
+
+    // Request-body schemas are distinct from the response row schema: a create
+    // input does not require columns the database can supply, and a partial
+    // update requires nothing (see requestInputSchema).
+    let createRef: string | undefined;
+    let updateRef: string | undefined;
+    if (writable) {
+      const createName = `${qn}.CreateInput`;
+      schemas[createName] = requestInputSchema(resource, 'create');
+      createRef = `#/components/schemas/${createName}`;
+      const pk = 'primaryKey' in resource ? resource.primaryKey : [];
+      if (pk.length >= 1) {
+        const updateName = `${qn}.UpdateInput`;
+        schemas[updateName] = requestInputSchema(resource, 'update');
+        updateRef = `#/components/schemas/${updateName}`;
+      }
+    }
+
     Object.assign(
       paths,
-      resourcePaths(resource, segmentFor(resource), ref, writable, embeds.length > 0),
+      resourcePaths(resource, segmentFor(resource), ref, writable, embeds.length > 0, {
+        create: createRef,
+        update: updateRef,
+      }),
     );
   }
 
@@ -114,34 +137,121 @@ function resourceSchema(resource: ResourceLike, embeds: JsonObject[]): JsonObjec
   return schema;
 }
 
+/** The request-body schema for `POST` (`create`) or `PATCH` (`update`).
+ *  Distinct from the response row schema because the contract differs:
+ *  - `create`: only columns that are NOT NULL *and* have no database default
+ *    are required (the rest the server / PostgreSQL can supply); an empty body
+ *    is valid when nothing is required.
+ *  - `update`: a partial — any subset of columns, so no row-level `required`,
+ *    but at least one column (the runtime rejects an empty update with 400),
+ *    modelled as `minProperties: 1`.
+ *  Both reject unknown columns at runtime (400), modelled as
+ *  `additionalProperties: false`. */
+function requestInputSchema(resource: ResourceLike, kind: 'create' | 'update'): JsonObject {
+  const label = resource.label || resource.name;
+  const properties: JsonObject = {};
+  const required: string[] = [];
+  for (const column of resource.columns) {
+    properties[column.name] = columnSchema(column);
+    if (kind === 'create' && !column.nullable && column.defaultExpr === null) {
+      required.push(column.name);
+    }
+  }
+
+  const schema: JsonObject = { type: 'object', properties, additionalProperties: false };
+  if (kind === 'create') {
+    schema.description = `Create input for ${label}. Columns with a database default or a server-generated value may be omitted.`;
+    if (required.length > 0) schema.required = required;
+  } else {
+    schema.description = `Partial update for ${label}. Supply at least one of the columns to change.`;
+    schema.minProperties = 1;
+  }
+  return schema;
+}
+
 type ReverseEntry = { childName: string; childQN: string; field: string };
 
+/** Embeddable-relation hints, derived with the same semantics as the runtime
+ *  embed resolver (embed.ts) so the document never advertises a relation the
+ *  request handler would reject:
+ *
+ *  - A forward (to-one) relation is selectable by its FK column name, so it is
+ *    always embeddable (even when several FKs point at the same table).
+ *  - A reverse (to-many) relation is selectable only by the child table name,
+ *    and only when that child has exactly one FK back to this parent; multiple
+ *    reverse FKs from one child are not yet resolvable (a 400 at runtime), so
+ *    they are dropped here.
+ *  - The result `key` is chosen the way embed.ts's `chooseKey` does — the
+ *    target table name, then the FK field with a trailing id-suffix stripped,
+ *    then the raw FK field — skipping any candidate that collides with a parent
+ *    column or a key already assigned to an earlier hint. (The raw field is a
+ *    parent column for a forward relation, so it only ever helps a reverse one,
+ *    whose FK lives on the child.) A relation with no usable key (every
+ *    candidate collides) would 400 at runtime, so it is dropped too.
+ *
+ *  `key` reflects the assignment when the whole advertised set is embedded
+ *  together; embedding a subset may yield a simpler key, but `field` (forward)
+ *  / the target table name (reverse) is always a valid `?embed=` selector. */
 function embedHints(
   forward: RelationContext[],
   reverse: ReverseEntry[],
   knownQNames: Set<string>,
+  parentColumns: Set<string>,
 ): JsonObject[] {
   const hints: JsonObject[] = [];
+  const taken = new Set<string>();
+
   for (const r of forward) {
     const qn = `${r.references.schema}.${r.references.table}`;
     if (!knownQNames.has(qn)) continue;
-    hints.push({
-      field: r.field,
-      key: r.references.table,
-      target: `#/components/schemas/${qn}`,
-      cardinality: 'to-one',
-    });
+    const key = pickEmbedKey([r.references.table, stripIdSuffix(r.field), r.field], taken, parentColumns);
+    if (key === undefined) continue;
+    taken.add(key);
+    hints.push({ field: r.field, key, target: `#/components/schemas/${qn}`, cardinality: 'to-one' });
   }
+
+  // Group reverse entries by child table name; a child with more than one FK
+  // back to this parent is ambiguous (unreachable) and dropped.
+  const byChild = new Map<string, ReverseEntry[]>();
   for (const e of reverse) {
+    const list = byChild.get(e.childName);
+    if (list) list.push(e);
+    else byChild.set(e.childName, [e]);
+  }
+  for (const entries of byChild.values()) {
+    if (entries.length !== 1) continue;
+    const e = entries[0];
     if (!knownQNames.has(e.childQN)) continue;
+    const key = pickEmbedKey([e.childName, stripIdSuffix(e.field), e.field], taken, parentColumns);
+    if (key === undefined) continue;
+    taken.add(key);
     hints.push({
       field: e.field,
-      key: e.childName,
+      key,
       target: `#/components/schemas/${e.childQN}`,
       cardinality: 'to-many',
     });
   }
+
   return hints;
+}
+
+/** First candidate key that is non-empty and collides with neither a parent
+ *  column nor an already-assigned key. Mirrors embed.ts `chooseKey`. */
+function pickEmbedKey(
+  candidates: string[],
+  taken: Set<string>,
+  parentColumns: Set<string>,
+): string | undefined {
+  for (const key of candidates) {
+    if (key.length > 0 && !taken.has(key) && !parentColumns.has(key)) return key;
+  }
+  return undefined;
+}
+
+function stripIdSuffix(field: string): string {
+  const stripped = field.replace(/_(id|uuid|fk|key)$/i, '');
+  return stripped.length > 0 ? stripped : field;
 }
 
 function columnSchema(column: ColumnContext): JsonObject {
@@ -193,29 +303,60 @@ function resourcePaths(
   ref: string,
   writable: boolean,
   hasEmbeds: boolean,
+  requestRefs: { create?: string; update?: string },
 ): JsonObject {
   const rowRef = { $ref: ref };
   const label = resource.label || resource.name;
+  const primaryKey = 'primaryKey' in resource ? resource.primaryKey : [];
+  // The relation-select (`as=options`) mode needs a single-column primary key
+  // (its option `id` is that key); the handler rejects it otherwise (400). Only
+  // advertise the mode where it actually works.
+  const hasOptions = primaryKey.length === 1;
 
   // The `embed` parameter is only advertised where the resource has at least
   // one embeddable relation; a non-empty `embed` on a relation-less resource
   // (e.g. a view) is rejected with 400, so listing it would be misleading.
   const embedParams = hasEmbeds ? [embedParam()] : [];
 
+  // List/filter/embed parameters first; relation-select controls are folded in
+  // afterwards. A column named like an options control (`as`, `label`, ...)
+  // would collide, so rather than emit a duplicate (invalid) or silently drop
+  // the control, merge its meaning into the colliding filter's description.
+  const collectionParams: JsonObject[] = [
+    ...listParameters(),
+    ...filterParameters(resource),
+    ...embedParams,
+  ];
+  if (hasOptions) {
+    for (const control of optionsParameters()) {
+      const clash = collectionParams.find((p) => p.name === control.name);
+      if (clash) {
+        clash.description = `${clash.description ?? ''} In \`as=options\` mode this parameter is the relation-select control instead — ${control.description as string}`;
+      } else {
+        collectionParams.push(control);
+      }
+    }
+  }
+
   const collection: JsonObject = {
     get: {
       summary: `List ${label}`,
       description: resource.description ?? undefined,
-      parameters: [...listParameters(), ...filterParameters(resource), ...embedParams],
+      parameters: collectionParams,
       responses: {
-        '200': jsonResponse(`A page of ${label}.`, listResultSchema(rowRef)),
+        '200': hasOptions
+          ? jsonResponse(
+              `A page of ${label}; or relation-select options when \`as=options\`.`,
+              { oneOf: [listResultSchema(rowRef), optionsResultSchema()] },
+            )
+          : jsonResponse(`A page of ${label}.`, listResultSchema(rowRef)),
       },
     },
   };
   if (writable) {
     collection.post = {
       summary: `Create a ${label} row`,
-      requestBody: jsonBody(rowRef),
+      requestBody: jsonBody(requestRefs.create ? { $ref: requestRefs.create } : rowRef),
       responses: {
         '201': jsonResponse('The created row.', rowRef),
         '400': errorResponse('Validation error.'),
@@ -229,7 +370,6 @@ function resourcePaths(
   // Views and primary-key-less tables cannot be fetched/updated/deleted by id
   // (the request handler rejects such reads with 400), so the document must
   // not advertise an item path for them.
-  const primaryKey = 'primaryKey' in resource ? resource.primaryKey : [];
   if (primaryKey.length >= 1) {
     const idParam = itemIdParam(resource);
     const item: JsonObject = {
@@ -246,7 +386,7 @@ function resourcePaths(
       item.patch = {
         summary: `Update a ${label} row`,
         parameters: [idParam],
-        requestBody: jsonBody(rowRef),
+        requestBody: jsonBody(requestRefs.update ? { $ref: requestRefs.update } : rowRef),
         responses: {
           '200': jsonResponse('The updated row.', rowRef),
           '404': errorResponse('No such row.'),
@@ -297,6 +437,40 @@ function listParameters(): JsonObject[] {
   ];
 }
 
+/** Query parameters for the relation-select (`as=options`) mode of the
+ *  collection `GET`. OpenAPI cannot express a response that depends on a query
+ *  parameter value, so the alternate `{ options }` shape is offered as a
+ *  `oneOf` on the same 200 and these controls are documented as optional. */
+function optionsParameters(): JsonObject[] {
+  return [
+    queryParam(
+      'as',
+      { type: 'string', enum: ['options'] },
+      'Set to `options` to switch this endpoint to relation-select mode: it returns `{ id, label }` pairs (see the alternate 200 schema) instead of full rows.',
+    ),
+    queryParam(
+      'label',
+      { type: 'string' },
+      'Relation-select (`as=options`) only — required in that mode: the column whose value is each option\'s display `label`. It is not searched by `q` unless you also list it in `fields`.',
+    ),
+    queryParam(
+      'fields',
+      { type: 'string' },
+      'Relation-select only: comma-separated columns that `q` is matched against. To search the label column, include it here.',
+    ),
+    queryParam(
+      'q',
+      { type: 'string' },
+      'Relation-select only: free-text query, matched with ILIKE against the columns listed in `fields`. It has no effect when `fields` is empty.',
+    ),
+    queryParam(
+      'limit',
+      { type: 'integer', minimum: 1 },
+      'Relation-select only: maximum number of options to return.',
+    ),
+  ];
+}
+
 /** Operators accepted by the `<column>=<op>.<value>` filter grammar. */
 const FILTER_OPERATORS_DOC = 'eq, neq, gt, gte, lt, lte, like, ilike, in, is';
 
@@ -326,7 +500,15 @@ function embedParam(): JsonObject {
   return queryParam(
     'embed',
     { type: 'string' },
-    'Comma-separated forward to-one relations to inline as nested objects; dot for depth (e.g. "author,editions.books.authors"). Each segment is a foreign-key column name or its referenced table name.',
+    'Comma-separated relations to inline in each row; use a dot for depth ' +
+      '(e.g. "author,reviews.user"). A forward (to-one) relation — selected by ' +
+      'its foreign-key column name or the referenced table name — is inlined as a ' +
+      'nested object (or null). A reverse (to-many) relation — selected by the ' +
+      'child table name, when that child has exactly one foreign key back — is ' +
+      'inlined as an array. Each relation appears under the `key` shown in ' +
+      '`x-kozou-embeds`; when several relations compete for a key (e.g. multiple ' +
+      'foreign keys to one table), embedding only a subset may place one under a ' +
+      'simpler key, so treat the selector — not the key — as the stable identifier.',
   );
 }
 
@@ -340,6 +522,27 @@ function listResultSchema(rowRef: JsonObject): JsonObject {
       pageSize: { type: 'integer' },
     },
     required: ['rows', 'total', 'page', 'pageSize'],
+  };
+}
+
+/** The `as=options` response: `{ options: [{ id, label }] }`. */
+function optionsResultSchema(): JsonObject {
+  return {
+    type: 'object',
+    properties: {
+      options: {
+        type: 'array',
+        items: {
+          type: 'object',
+          properties: {
+            id: { type: ['string', 'number'] },
+            label: { type: 'string' },
+          },
+          required: ['id', 'label'],
+        },
+      },
+    },
+    required: ['options'],
   };
 }
 
