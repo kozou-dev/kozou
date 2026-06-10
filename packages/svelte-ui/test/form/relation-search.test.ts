@@ -135,6 +135,49 @@ describe('createRelationSearch', () => {
     }
   });
 
+  it('ignores an in-flight result that resolves after a newer search fired', async () => {
+    vi.useFakeTimers();
+    try {
+      const resolvers: Array<(rows: RelationOption[]) => void> = [];
+      const adapter = {
+        list: vi.fn(),
+        get: vi.fn(),
+        create: vi.fn(),
+        update: vi.fn(),
+        delete: vi.fn(),
+        searchRelation: vi.fn(
+          () =>
+            new Promise<RelationOption[]>((resolve) => {
+              resolvers.push(resolve);
+            }),
+        ),
+      } as DataAdapter & { searchRelation: ReturnType<typeof vi.fn> };
+      const search = createRelationSearch({
+        adapter,
+        resource: 'authors',
+        labelField: 'name',
+        searchFields: ['name'],
+        debounceMs: 50,
+      });
+
+      const first = search.search('a');
+      await vi.advanceTimersByTimeAsync(50); // first request is now in flight
+      const second = search.search('ab');
+      await vi.advanceTimersByTimeAsync(50); // second request is now in flight
+
+      expect(adapter.searchRelation).toHaveBeenCalledTimes(2);
+
+      // The older request resolves last; it must not win.
+      resolvers[1]([{ id: 2, label: 'AB' }]);
+      resolvers[0]([{ id: 1, label: 'A' }]);
+
+      await expect(second).resolves.toEqual([{ id: 2, label: 'AB' }]);
+      await expect(first).rejects.toBeInstanceOf(RelationSearchCancelledError);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('uses injected timer hooks so adapter calls do not fire when the timer never advances', async () => {
     const adapter = makeAdapter([]);
     const setTimeoutFn = vi.fn(() => 'handle');

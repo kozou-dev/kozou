@@ -93,4 +93,29 @@ describe('buildMutationPayload', () => {
     });
     expect(payload.display_name).toBe('');
   });
+
+  it('clears a relation-select to null when no option is selected', () => {
+    const withFk = makeTable([
+      makeColumn({ name: 'id', widget: 'uuid', defaultExpr: 'gen_random_uuid()' }),
+      makeColumn({
+        name: 'author_id',
+        widget: 'relation-select',
+        dataType: 'uuid',
+        nullable: true,
+        isForeignKey: true,
+      }),
+    ]);
+
+    // An empty selection must become null (the uuid FK column cannot store "").
+    expect(buildMutationPayload(withFk, { id: '', author_id: '' }).author_id).toBeNull();
+    // An explicit null passes through unchanged.
+    expect(buildMutationPayload(withFk, { id: '', author_id: null }).author_id).toBeNull();
+    // A real selection is forwarded verbatim.
+    expect(
+      buildMutationPayload(withFk, {
+        id: '',
+        author_id: '22222222-2222-2222-2222-222222222222',
+      }).author_id,
+    ).toBe('22222222-2222-2222-2222-222222222222');
+  });
 });

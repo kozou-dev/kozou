@@ -10,6 +10,10 @@
 // owns are passed through untouched, including explicit nulls so a
 // nullable column can be cleared.
 //
+// A relation-select with no selection is normalized to null: its foreign-key
+// column (a uuid / integer / ...) cannot store an empty string, so an empty
+// value means "clear the relation".
+//
 // See Kozou v0.1 design spec §8.3.3 (create) / §8.3.5 (update).
 
 import type { TableContext } from '@kozou/core';
@@ -30,6 +34,11 @@ export function buildMutationPayload(
     const column = byName.get(key);
     if (column && dbCanSupplyColumn(column) && isEmpty(value)) {
       // Drop it so the database default / generated value applies.
+      continue;
+    }
+    if (column?.widget === 'relation-select' && value === '') {
+      // No selection: clear the foreign key rather than submit "".
+      payload[key] = null;
       continue;
     }
     payload[key] = value;

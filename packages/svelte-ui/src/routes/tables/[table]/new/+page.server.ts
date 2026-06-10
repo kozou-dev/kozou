@@ -12,9 +12,14 @@ import { zod4 } from 'sveltekit-superforms/adapters';
 import type { TableContext } from '@kozou/core';
 
 import { buildMutationPayload } from '$lib/form/mutation-payload.js';
+import {
+  demoteUnpickableRelations,
+  relationFieldConfigs,
+} from '$lib/form/relation-field-config.js';
 import { zodFromTable } from '$lib/form/zod-from-table.js';
 import { rowIdSegment } from '$lib/resource-id.js';
 import { getAdapter } from '$lib/server/adapter.js';
+import { loadInitialRelationOptions } from '$lib/server/relation-options.js';
 
 import type { Actions, PageServerLoad } from './$types';
 
@@ -25,6 +30,9 @@ function findTable(
   return tables.find((t) => t.qualifiedName === slug) ?? null;
 }
 
+// `table` is expected to already carry demoted widgets (see
+// demoteUnpickableRelations), so the rendered widget matches the validation
+// schema built from the same table.
 function tableViewModel(table: TableContext) {
   return {
     qualifiedName: table.qualifiedName,
@@ -47,9 +55,19 @@ export const load: PageServerLoad = async ({ params, locals }) => {
   if (!table) {
     throw error(404, `Unknown table: ${params.table}`);
   }
-  const schema = zodFromTable(table);
-  const form = await superValidate(zod4(schema));
-  return { table: tableViewModel(table), form };
+  const relations = relationFieldConfigs(table, locals.schema);
+  const formTable = demoteUnpickableRelations(table, relations);
+  const form = await superValidate(zod4(zodFromTable(formTable)));
+  const initialOptions = await loadInitialRelationOptions(
+    getAdapter(locals.schema),
+    relations,
+  );
+  return {
+    table: tableViewModel(formTable),
+    form,
+    relations,
+    initialOptions,
+  };
 };
 
 export const actions: Actions = {
@@ -58,13 +76,16 @@ export const actions: Actions = {
     if (!table) {
       throw error(404, `Unknown table: ${params.table}`);
     }
-    const schema = zodFromTable(table);
-    const form = await superValidate(request, zod4(schema));
+    const formTable = demoteUnpickableRelations(
+      table,
+      relationFieldConfigs(table, locals.schema),
+    );
+    const form = await superValidate(request, zod4(zodFromTable(formTable)));
     if (!form.valid) {
       return fail(400, { form });
     }
     const payload = buildMutationPayload(
-      table,
+      formTable,
       form.data as Record<string, unknown>,
     );
     const created = await getAdapter(locals.schema).create(
