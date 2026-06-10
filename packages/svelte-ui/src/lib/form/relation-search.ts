@@ -10,7 +10,11 @@ const DEFAULT_DEBOUNCE_MS = 200;
 const CANCELLED_REASON = 'relation-search:cancelled';
 
 export interface RelationSearchOptions {
-  adapter: DataAdapter;
+  /** Only `searchRelation` is used, so a browser-side fetch shim (or a full
+   *  DataAdapter on the server) satisfies it. Narrowed to `Pick` so the
+   *  picker can drive the same debounced helper through the
+   *  `/relation-options` endpoint without owning a real adapter. */
+  adapter: Pick<DataAdapter, 'searchRelation'>;
   resource: string;
   labelField: string;
   searchFields: string[];
@@ -45,8 +49,14 @@ export function createRelationSearch(
 
   let pendingHandle: unknown = null;
   let pendingReject: ((reason: Error) => void) | null = null;
+  // Monotonic generation. Each search() / cancel() bumps it; a request only
+  // applies its result if it is still the latest, so a slow earlier request
+  // that resolves after a newer one cannot overwrite the picker (the debounce
+  // alone does not cover an already-fired request that is still in flight).
+  let latestSeq = 0;
 
   function cancelInternal(): void {
+    latestSeq += 1;
     if (pendingHandle !== null) {
       clearTimeoutFn(pendingHandle);
       pendingHandle = null;
@@ -60,6 +70,7 @@ export function createRelationSearch(
   return {
     search(query: string): Promise<RelationOption[]> {
       cancelInternal();
+      const seq = latestSeq;
       return new Promise<RelationOption[]>((resolve, reject) => {
         pendingReject = reject;
         pendingHandle = setTimeoutFn(() => {
@@ -72,7 +83,16 @@ export function createRelationSearch(
               searchFields: opts.searchFields,
               limit: opts.limit,
             })
-            .then(resolve, reject);
+            .then(
+              (rows) =>
+                seq === latestSeq
+                  ? resolve(rows)
+                  : reject(new RelationSearchCancelledError()),
+              (err) =>
+                seq === latestSeq
+                  ? reject(err)
+                  : reject(new RelationSearchCancelledError()),
+            );
         }, debounceMs);
       });
     },

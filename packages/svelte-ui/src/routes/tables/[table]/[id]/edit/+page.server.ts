@@ -11,9 +11,17 @@ import { zod4 } from 'sveltekit-superforms/adapters';
 import type { TableContext } from '@kozou/core';
 
 import { buildMutationPayload } from '$lib/form/mutation-payload.js';
+import {
+  demoteUnpickableRelations,
+  relationFieldConfigs,
+} from '$lib/form/relation-field-config.js';
 import { zodFromTable } from '$lib/form/zod-from-table.js';
 import { encodeResourceId, parseResourceId } from '$lib/resource-id.js';
 import { getAdapter } from '$lib/server/adapter.js';
+import {
+  ensureSelectedOptions,
+  loadInitialRelationOptions,
+} from '$lib/server/relation-options.js';
 
 import type { Actions, PageServerLoad } from './$types';
 
@@ -24,6 +32,9 @@ function findTable(
   return tables.find((t) => t.qualifiedName === slug) ?? null;
 }
 
+// `table` is expected to already carry demoted widgets (see
+// demoteUnpickableRelations), so the rendered widget matches the validation
+// schema built from the same table.
 function tableViewModel(table: TableContext) {
   return {
     qualifiedName: table.qualifiedName,
@@ -46,11 +57,24 @@ export const load: PageServerLoad = async ({ params, locals }) => {
   if (!table) {
     throw error(404, `Unknown table: ${params.table}`);
   }
+  const adapter = getAdapter(locals.schema);
   const id = parseResourceId(params.id, table.primaryKey);
-  const row = await getAdapter(locals.schema).get(table.qualifiedName, id);
-  const schema = zodFromTable(table);
-  const form = await superValidate(row, zod4(schema));
-  return { table: tableViewModel(table), form, id: encodeResourceId(id) };
+  const row = await adapter.get(table.qualifiedName, id);
+  const relations = relationFieldConfigs(table, locals.schema);
+  const formTable = demoteUnpickableRelations(table, relations);
+  const form = await superValidate(row, zod4(zodFromTable(formTable)));
+  const initialOptions = await loadInitialRelationOptions(adapter, relations);
+  // Make sure the row's current foreign keys are selectable even when they
+  // fall outside the first page, so saving without changing the relation
+  // cannot drop the value.
+  await ensureSelectedOptions(adapter, relations, row, initialOptions);
+  return {
+    table: tableViewModel(formTable),
+    form,
+    id: encodeResourceId(id),
+    relations,
+    initialOptions,
+  };
 };
 
 export const actions: Actions = {
@@ -59,13 +83,16 @@ export const actions: Actions = {
     if (!table) {
       throw error(404, `Unknown table: ${params.table}`);
     }
-    const schema = zodFromTable(table);
-    const form = await superValidate(request, zod4(schema));
+    const formTable = demoteUnpickableRelations(
+      table,
+      relationFieldConfigs(table, locals.schema),
+    );
+    const form = await superValidate(request, zod4(zodFromTable(formTable)));
     if (!form.valid) {
       return fail(400, { form });
     }
     const payload = buildMutationPayload(
-      table,
+      formTable,
       form.data as Record<string, unknown>,
     );
     const id = parseResourceId(params.id, table.primaryKey);

@@ -23,6 +23,11 @@
 
   let query = $state('');
 
+  // Associate the visible label with the <select> (the value control) via
+  // for/id. The search box is a second control under the same field, so it
+  // carries its own aria-label instead of competing for the field label.
+  const selectId = $derived(`relation-${name}`);
+
   function handleInput(event: Event): void {
     const target = event.target as HTMLInputElement;
     query = target.value;
@@ -30,19 +35,23 @@
   }
 </script>
 
-<label class="block">
-  <span class="mb-1 block text-sm font-medium">
+<div class="block">
+  <label for={selectId} class="mb-1 block text-sm font-medium">
     {label}{#if required}<span class="text-destructive" aria-hidden="true"> *</span>{/if}
-  </span>
-  <input
-    type="text"
-    placeholder="Search…"
-    value={query}
-    oninput={handleInput}
-    disabled={readonly}
-    class="mb-2 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-  />
+  </label>
+  {#if onsearch}
+    <input
+      type="text"
+      placeholder="Search…"
+      aria-label={`Search ${label}`}
+      value={query}
+      oninput={handleInput}
+      disabled={readonly}
+      class="mb-2 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+    />
+  {/if}
   <select
+    id={selectId}
     {name}
     {required}
     disabled={readonly}
@@ -50,10 +59,12 @@
     class="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
   >
     {#if !required}
-      <option value="">--</option>
+      <!-- Clearing an optional relation must submit null, not "" — the FK
+           column (uuid / integer / ...) cannot store an empty string. -->
+      <option value={null}>--</option>
     {/if}
     {#each options as option (option.id)}
       <option value={option.id}>{option.label}</option>
     {/each}
   </select>
-</label>
+</div>
