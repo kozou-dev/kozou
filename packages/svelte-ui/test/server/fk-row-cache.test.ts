@@ -60,4 +60,27 @@ describe('FkRowCache', () => {
     await cache.get('public.authors', 'a', loader);
     expect(loader).toHaveBeenCalledTimes(2);
   });
+
+  it('caches a composite id and re-uses the entry for an equal id', async () => {
+    const loader = vi.fn(async () => ({ order_id: 'o1', line_no: 2 }));
+    const cache = new FkRowCache({ ttlMs: 1_000, now: () => 0 });
+
+    const first = await cache.get('public.order_lines', ['o1', 2], loader);
+    const second = await cache.get('public.order_lines', ['o1', 2], loader);
+
+    expect(first).toEqual({ order_id: 'o1', line_no: 2 });
+    expect(second).toEqual(first);
+    expect(loader).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not collide a composite id with a scalar id containing a comma', async () => {
+    const loader = vi.fn(async (_qn, id) => ({ got: id }));
+    const cache = new FkRowCache({ ttlMs: 1_000, now: () => 0 });
+
+    await cache.get('public.things', ['a', 'b'], loader);
+    await cache.get('public.things', 'a,b', loader);
+
+    expect(loader).toHaveBeenCalledTimes(2);
+    expect(cache.size()).toBe(2);
+  });
 });

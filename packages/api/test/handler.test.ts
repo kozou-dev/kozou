@@ -193,6 +193,29 @@ describe('handleApiRequest — routing', () => {
     expect(r.status).toBe(400);
   });
 
+  it('GET /<table>?as=options returns array ids for a composite-key table', async () => {
+    const lines = tableResource(
+      'order_lines',
+      [
+        col('order_id', 'uuid', { isPrimaryKey: true, nullable: false }),
+        col('line_no', 'number', { dataType: 'integer', isPrimaryKey: true, nullable: false }),
+        col('note', 'text'),
+      ],
+      ['order_id', 'line_no'],
+    );
+    const { db, calls } = recordingDb(() => ({
+      rows: [{ order_id: 'o1', line_no: 2, note: 'second line' }],
+      rowCount: 1,
+    }));
+    const deps: ApiHandlerDeps = { db, lookup: lookupOf([lines]) };
+    const r = await handleApiRequest(deps, reqOf('GET', '/order_lines', 'as=options&label=note'));
+    expect(r.status).toBe(200);
+    // The id components follow primary-key declaration order, forming a
+    // valid item id for the resource.
+    expect(r.body).toEqual({ options: [{ id: ['o1', 2], label: 'second line' }] });
+    expect(calls[0].text).toContain('SELECT "order_id", "line_no", "note"');
+  });
+
   it('returns 404 for a path deeper than two segments', async () => {
     const { deps } = depsWith(() => ({ rows: [], rowCount: 0 }));
     const r = await handleApiRequest(deps, reqOf('GET', '/authors/abc/extra'));

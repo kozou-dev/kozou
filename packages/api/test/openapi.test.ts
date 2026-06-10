@@ -11,6 +11,8 @@ type SchemaObj = {
   description?: string;
   required?: string[];
   minProperties?: number;
+  minItems?: number;
+  maxItems?: number;
   properties?: Record<string, SchemaObj>;
   additionalProperties?: boolean;
   items?: SchemaObj;
@@ -378,23 +380,37 @@ describe('buildOpenApiDocument', () => {
     expect(optionsShape?.properties?.options?.items?.required).toEqual(['id', 'label']);
   });
 
-  it('omits as=options where there is no single-column primary key', () => {
+  it('advertises as=options for a composite-key table with an array id schema', () => {
+    const schema = schemaOf([
+      {
+        name: 'line_items',
+        columns: [
+          col('order_id', 'uuid', { isPrimaryKey: true, nullable: false }),
+          col('sku', 'text', { isPrimaryKey: true, nullable: false }),
+        ],
+        primaryKey: ['order_id', 'sku'],
+      },
+    ]);
+    const doc = buildOpenApiDocument(schema) as unknown as Doc;
+    expect(paramNames(doc.paths['/line_items'].get)).toContain('as');
+    const resp = okSchema(doc.paths['/line_items'].get);
+    const optionsShape = (resp.oneOf ?? []).find((s) => s.properties?.options);
+    const id = optionsShape?.properties?.options?.items?.properties?.id;
+    // The option id is an array of key components, one per primary-key column.
+    expect(id?.type).toBe('array');
+    expect(id?.minItems).toBe(2);
+    expect(id?.maxItems).toBe(2);
+    expect(id?.description).toContain('order_id');
+    expect(id?.description).toContain('sku');
+  });
+
+  it('omits as=options where there is no primary key', () => {
     const schema = schemaOf(
-      [
-        {
-          name: 'line_items',
-          columns: [
-            col('order_id', 'uuid', { isPrimaryKey: true, nullable: false }),
-            col('sku', 'text', { isPrimaryKey: true, nullable: false }),
-          ],
-          primaryKey: ['order_id', 'sku'],
-        },
-        { name: 'event_log', columns: [col('payload', 'text')], primaryKey: [] },
-      ],
+      [{ name: 'event_log', columns: [col('payload', 'text')], primaryKey: [] }],
       [{ name: 'vw_x', columns: [col('id', 'uuid')] }],
     );
     const doc = buildOpenApiDocument(schema) as unknown as Doc;
-    for (const seg of ['/line_items', '/event_log', '/vw_x']) {
+    for (const seg of ['/event_log', '/vw_x']) {
       expect(paramNames(doc.paths[seg].get)).not.toContain('as');
       expect(okSchema(doc.paths[seg].get).oneOf).toBeUndefined();
     }

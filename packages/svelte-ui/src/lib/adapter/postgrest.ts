@@ -203,14 +203,18 @@ export class PostgrestDataAdapter implements DataAdapter {
     params: SearchRelationParams,
   ): Promise<RelationOption[]> {
     const { schema, table } = splitResource(resource, this.defaultSchema);
-    // relation-select targets a single-column key in v1.0 (a composite key as
-    // a relation target is a fast-follow, Kozou v1.0 dev spec §3.5 / §5.2), so
-    // the option id uses the first key column.
-    const primaryKey = keyColumns(this.resolvePrimaryKey(resource))[0];
+    // The option id is the target's key: a scalar for a single-column key, an
+    // array of components — in key declaration order — for a composite key,
+    // so an option id is always a valid item id for the target (Kozou v1.0
+    // dev spec §3.5 / §5.2).
+    const primaryKey = keyColumns(this.resolvePrimaryKey(resource));
     const limit = params.limit ?? DEFAULT_RELATION_LIMIT;
 
     const query = new URLSearchParams();
-    query.set('select', `${primaryKey},${params.labelField}`);
+    const selectFields = primaryKey.includes(params.labelField)
+      ? primaryKey
+      : [...primaryKey, params.labelField];
+    query.set('select', selectFields.join(','));
     if (params.query.length > 0 && params.searchFields.length > 0) {
       const orExpr = params.searchFields
         .map((field) => `${field}.ilike.*${params.query}*`)
@@ -230,7 +234,10 @@ export class PostgrestDataAdapter implements DataAdapter {
     await assertOk(response, url);
     const rows = (await readJson(response, url)) as Record<string, unknown>[];
     return rows.map((row) => ({
-      id: row[primaryKey] as string | number,
+      id:
+        primaryKey.length === 1
+          ? (row[primaryKey[0]] as string | number)
+          : primaryKey.map((column) => row[column] as string | number),
       label: String(row[params.labelField] ?? ''),
     }));
   }
@@ -304,9 +311,18 @@ function makePrimaryKeyResolver(
   return () => pk;
 }
 
-/** Normalize a resolver result to the ordered list of key columns. */
+/** Normalize a resolver result to the ordered list of key columns. An empty
+ *  list is rejected loudly: a key-less resource cannot be addressed by id —
+ *  silently accepting it would, e.g., let a zero-column key match a
+ *  zero-component id and emit an unfiltered (table-wide) mutation. */
 function keyColumns(pk: string | string[]): string[] {
-  return Array.isArray(pk) ? pk : [pk];
+  const columns = Array.isArray(pk) ? pk : [pk];
+  if (columns.length === 0) {
+    throw adapterConfigError(
+      'PostgrestDataAdapter: the primaryKey resolver returned no key columns.',
+    );
+  }
+  return columns;
 }
 
 /** Normalize a ResourceId to the ordered list of key values. */

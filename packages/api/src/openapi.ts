@@ -336,10 +336,12 @@ function resourcePaths(
   const rowRef = { $ref: ref };
   const label = resource.label || resource.name;
   const primaryKey = 'primaryKey' in resource ? resource.primaryKey : [];
-  // The relation-select (`as=options`) mode needs a single-column primary key
-  // (its option `id` is that key); the handler rejects it otherwise (400). Only
-  // advertise the mode where it actually works.
-  const hasOptions = primaryKey.length === 1;
+  // The relation-select (`as=options`) mode builds its option `id` from the
+  // primary key (a scalar for a single-column key, an array of components for
+  // a composite key); the handler rejects a key-less resource (a view, or a
+  // table without a primary key) with 400. Only advertise the mode where it
+  // actually works.
+  const hasOptions = primaryKey.length >= 1;
 
   // The `embed` parameter is only advertised where the resource has at least
   // one embeddable relation; a non-empty `embed` on a relation-less resource
@@ -375,7 +377,7 @@ function resourcePaths(
         '200': hasOptions
           ? jsonResponse(
               `A page of ${label}; or relation-select options when \`as=options\`.`,
-              { oneOf: [listResultSchema(rowRef), optionsResultSchema()] },
+              { oneOf: [listResultSchema(rowRef), optionsResultSchema(primaryKey)] },
             )
           : jsonResponse(`A page of ${label}.`, listResultSchema(rowRef)),
       },
@@ -553,8 +555,21 @@ function listResultSchema(rowRef: JsonObject): JsonObject {
   };
 }
 
-/** The `as=options` response: `{ options: [{ id, label }] }`. */
-function optionsResultSchema(): JsonObject {
+/** The `as=options` response: `{ options: [{ id, label }] }`. A
+ *  single-column key yields a scalar `id`; a composite key yields an array of
+ *  key components in primary-key declaration order (a valid item id for the
+ *  resource). */
+function optionsResultSchema(primaryKey: string[]): JsonObject {
+  const id: JsonObject =
+    primaryKey.length > 1
+      ? {
+          type: 'array',
+          items: { type: ['string', 'number'] },
+          minItems: primaryKey.length,
+          maxItems: primaryKey.length,
+          description: `Composite key components, in declaration order: ${primaryKey.join(', ')}.`,
+        }
+      : { type: ['string', 'number'] };
   return {
     type: 'object',
     properties: {
@@ -563,7 +578,7 @@ function optionsResultSchema(): JsonObject {
         items: {
           type: 'object',
           properties: {
-            id: { type: ['string', 'number'] },
+            id,
             label: { type: 'string' },
           },
           required: ['id', 'label'],

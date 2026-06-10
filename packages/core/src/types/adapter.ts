@@ -74,6 +74,16 @@ export type SearchRelationParams = {
 };
 
 export type RelationOption = {
-  id: string | number;
+  /**
+   * Identifier of the candidate target row. A scalar when the target has a
+   * single-column primary key; an array — in the target's `primaryKey`
+   * declaration order — when the target's primary key is composite, so an
+   * option id is always a valid {@link ResourceId} for the target resource.
+   * Widening the scalar form to also allow an array is runtime-compatible —
+   * single-column targets keep producing scalars unchanged — though
+   * TypeScript consumers that read `id` as a bare scalar must widen their
+   * reads.
+   */
+  id: ResourceId;
   label: string;
 };
