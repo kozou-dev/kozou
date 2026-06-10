@@ -3,6 +3,7 @@
 
   import { fetchRelationOptions } from '$lib/form/relation-options-client.js';
   import { createRelationSearch } from '$lib/form/relation-search.js';
+  import { encodeResourceId } from '$lib/resource-id.js';
 
   import RelationSelect from './relation-select.svelte';
 
@@ -45,10 +46,12 @@
 
   // Remember every label seen so the currently-selected row stays in the
   // dropdown even after a search narrows the results to rows that exclude it
-  // — otherwise saving an unchanged record could drop its foreign key.
-  const known = new Map<string | number, string>();
+  // — otherwise saving an unchanged record could drop its foreign key. Keys
+  // are the canonical encoded id, so a scalar and a composite array id both
+  // key consistently.
+  const known = new Map<string, string>();
   // svelte-ignore state_referenced_locally
-  for (const option of initialOptions) known.set(option.id, option.label);
+  for (const option of initialOptions) known.set(encodeResourceId(option.id), option.label);
 
   // svelte-ignore state_referenced_locally
   const search = createRelationSearch({
@@ -65,8 +68,9 @@
   function withSelected(results: RelationOption[]): RelationOption[] {
     if (value === '' || value === null || value === undefined) return results;
     const selected = value as string | number;
-    if (results.some((option) => option.id === selected)) return results;
-    const selectedLabel = known.get(selected);
+    const selectedKey = encodeResourceId(selected);
+    if (results.some((option) => encodeResourceId(option.id) === selectedKey)) return results;
+    const selectedLabel = known.get(selectedKey);
     if (selectedLabel === undefined) return results;
     return [{ id: selected, label: selectedLabel }, ...results];
   }
@@ -74,7 +78,7 @@
   async function handleSearch(query: string): Promise<void> {
     try {
       const results = await search.search(query);
-      for (const option of results) known.set(option.id, option.label);
+      for (const option of results) known.set(encodeResourceId(option.id), option.label);
       options = withSelected(results);
     } catch {
       // A superseded search rejects (RelationSearchCancelledError); a network

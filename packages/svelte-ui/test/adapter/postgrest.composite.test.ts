@@ -115,6 +115,66 @@ describe('PostgrestDataAdapter composite primary keys', () => {
       code: 'config',
     });
   });
+
+  it('searchRelation selects every key column and returns array ids', async () => {
+    const { calls, fetch } = makeFetch(() =>
+      jsonResponse([{ order_id: 100, line_no: 2, note: 'second line' }]),
+    );
+    const adapter = new PostgrestDataAdapter({
+      baseUrl: 'http://api.example',
+      fetch,
+      primaryKey: compositePk,
+    });
+
+    const options = await adapter.searchRelation('order_lines', {
+      query: '',
+      labelField: 'note',
+      searchFields: ['note'],
+    });
+
+    const url = new URL(calls[0].url);
+    expect(url.searchParams.get('select')).toBe('order_id,line_no,note');
+    // The id components follow key declaration order — a valid item id.
+    expect(options).toEqual([{ id: [100, 2], label: 'second line' }]);
+  });
+
+  it('searchRelation does not select the label twice when it is a key column', async () => {
+    const { calls, fetch } = makeFetch(() =>
+      jsonResponse([{ order_id: 100, line_no: 2 }]),
+    );
+    const adapter = new PostgrestDataAdapter({
+      baseUrl: 'http://api.example',
+      fetch,
+      primaryKey: compositePk,
+    });
+
+    const options = await adapter.searchRelation('order_lines', {
+      query: '',
+      labelField: 'line_no',
+      searchFields: [],
+    });
+
+    expect(new URL(calls[0].url).searchParams.get('select')).toBe('order_id,line_no');
+    expect(options).toEqual([{ id: [100, 2], label: '2' }]);
+  });
+
+  it('rejects a primaryKey resolver that returns no key columns', async () => {
+    const { fetch } = makeFetch(() => jsonResponse([]));
+    const adapter = new PostgrestDataAdapter({
+      baseUrl: 'http://api.example',
+      fetch,
+      primaryKey: () => [],
+    });
+
+    // A key-less resource must fail loudly everywhere a key is required —
+    // a zero-column key would otherwise emit empty option ids from
+    // searchRelation and unfiltered mutations from update / delete.
+    await expect(
+      adapter.searchRelation('event_log', { query: '', labelField: 'payload', searchFields: [] }),
+    ).rejects.toMatchObject({ code: 'config' });
+    await expect(adapter.get('event_log', [])).rejects.toMatchObject({ code: 'config' });
+    await expect(adapter.delete('event_log', [])).rejects.toMatchObject({ code: 'config' });
+  });
 });
 
 describe('PostgrestDataAdapter filter operators', () => {

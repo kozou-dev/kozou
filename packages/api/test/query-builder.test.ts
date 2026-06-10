@@ -650,6 +650,53 @@ describe('buildRelationOptionsQuery', () => {
       buildRelationOptionsQuery(r, { labelField: 'name', searchFields: ['name'], query: 'x' }),
     ).not.toThrow();
   });
+
+  it('selects every primary-key column for a composite-key resource', () => {
+    const lines = tableResource(
+      'order_lines',
+      [
+        col('order_id', 'uuid', { isPrimaryKey: true, nullable: false }),
+        col('line_no', 'number', { dataType: 'integer', isPrimaryKey: true, nullable: false }),
+        col('note', 'text'),
+      ],
+      ['order_id', 'line_no'],
+    );
+    const q = buildRelationOptionsQuery(lines, {
+      labelField: 'note',
+      searchFields: ['note'],
+      query: 'x',
+    });
+    expect(q.text).toBe(
+      'SELECT "order_id", "line_no", "note" FROM "public"."order_lines" WHERE ("note" ILIKE $1) LIMIT $2',
+    );
+    expect(q.primaryKeys).toEqual(['order_id', 'line_no']);
+    expect(q.primaryKey).toBe('order_id');
+  });
+
+  it('does not select the label twice when it is a composite-key component', () => {
+    const lines = tableResource(
+      'order_lines',
+      [
+        col('order_id', 'uuid', { isPrimaryKey: true, nullable: false }),
+        col('line_no', 'number', { dataType: 'integer', isPrimaryKey: true, nullable: false }),
+      ],
+      ['order_id', 'line_no'],
+    );
+    const q = buildRelationOptionsQuery(lines, { labelField: 'line_no', searchFields: [] });
+    expect(q.text).toBe('SELECT "order_id", "line_no" FROM "public"."order_lines" LIMIT $1');
+  });
+
+  it('rejects a key-less resource with 400', () => {
+    const view = viewResource('vw_active', [col('id', 'uuid'), col('label', 'text')]);
+    try {
+      buildRelationOptionsQuery(view, { labelField: 'label', searchFields: [] });
+      expect.unreachable('expected a 400');
+    } catch (err) {
+      expect(err).toBeInstanceOf(KozouApiError);
+      expect((err as KozouApiError).status).toBe(400);
+      expect((err as KozouApiError).message).toMatch(/has no primary key/);
+    }
+  });
 });
 
 describe('embed in read queries', () => {

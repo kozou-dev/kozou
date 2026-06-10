@@ -539,6 +539,22 @@ describe('@kozou/api integration (generic fixture)', () => {
     expect(gone.status).toBe(404);
   });
 
+  it('returns composite array ids via ?as=options that round-trip as item ids', async () => {
+    const { status, body } = await getJson<{
+      options: { id: (string | number)[]; label: string }[];
+    }>('/order_lines?as=options&label=qty');
+    expect(status).toBe(200);
+    // The untouched sibling row (ORDER_A, line 2, qty 20) is offered with its
+    // key components in primary-key declaration order.
+    const option = body.options.find((o) => o.id[0] === ORDER_A && o.id[1] === 2);
+    expect(option).toBeDefined();
+    expect(option?.label).toBe('20');
+    // The array id, comma-joined, addresses the same row as an item id.
+    const item = await getJson<{ qty: number }>(`/order_lines/${option!.id.join(',')}`);
+    expect(item.status).toBe(200);
+    expect(item.body.qty).toBe(20);
+  });
+
   it('documents the composite key format in the OpenAPI {id} parameter', async () => {
     const { body } = await getJson<{
       paths: Record<string, { get?: { parameters?: { name: string; description?: string }[] } }>;

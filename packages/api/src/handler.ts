@@ -207,8 +207,15 @@ async function relationOptions(
     limit: parsePositiveInt(query.get('limit')),
   });
   const result = await deps.db.query<Record<string, unknown>>(built.text, built.values);
+  // A single-column key yields a scalar id; a composite key yields an array
+  // of components in primary-key declaration order (a valid item id for the
+  // target resource).
+  const keyColumns = built.primaryKeys ?? [built.primaryKey];
   const options = result.rows.map((row) => ({
-    id: row[built.primaryKey] as string | number,
+    id:
+      keyColumns.length === 1
+        ? (row[keyColumns[0]] as string | number)
+        : keyColumns.map((column) => row[column] as string | number),
     label: String(row[built.labelField] ?? ''),
   }));
   return { status: 200, body: { options } };

@@ -14,6 +14,10 @@
 // value rather than re-issuing the failing request; the TTL is short
 // enough (default 60s) that transient failures self-heal.
 
+import type { ResourceId } from '@kozou/core';
+
+import { encodeResourceId } from '$lib/resource-id.js';
+
 export interface FkRowCacheOptions {
   /** Cache lifetime per entry, in milliseconds. Defaults to 60_000
    *  to match the SchemaCache TTL so a single render cycle re-uses
@@ -25,7 +29,7 @@ export interface FkRowCacheOptions {
 
 export type FkRowLoader = (
   qualifiedName: string,
-  id: string | number,
+  id: ResourceId,
 ) => Promise<Record<string, unknown> | null>;
 
 interface CacheEntry {
@@ -49,7 +53,7 @@ export class FkRowCache {
    *  so callers see a uniform value-or-null contract. */
   async get(
     qualifiedName: string,
-    id: string | number,
+    id: ResourceId,
     loader: FkRowLoader,
   ): Promise<Record<string, unknown> | null> {
     const key = makeKey(qualifiedName, id);
@@ -75,6 +79,8 @@ export class FkRowCache {
   }
 }
 
-function makeKey(qualifiedName: string, id: string | number): string {
-  return `${qualifiedName}:${String(id)}`;
+// The canonical encoded id keeps a composite key (raw-comma joined) distinct
+// from a scalar that happens to contain a comma (percent-encoded).
+function makeKey(qualifiedName: string, id: ResourceId): string {
+  return `${qualifiedName}:${encodeResourceId(id)}`;
 }

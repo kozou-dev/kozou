@@ -10,8 +10,13 @@ vi.mock('$lib/adapter/index.js', () => ({
   PostgrestDataAdapter: class {
     readonly kind = 'postgrest';
     readonly baseUrl: string;
-    constructor(opts: { baseUrl: string }) {
+    readonly primaryKey: ((resource: string) => string | string[]) | undefined;
+    constructor(opts: {
+      baseUrl: string;
+      primaryKey?: (resource: string) => string | string[];
+    }) {
       this.baseUrl = opts.baseUrl;
+      this.primaryKey = opts.primaryKey;
     }
   },
   KozouApiDataAdapter: class {
@@ -126,5 +131,36 @@ describe('getAdapter — KOZOU_ADAPTER_KIND switch', () => {
     process.env.KOZOU_ADAPTER_KIND = 'api';
     process.env.KOZOU_ADAPTER_TOKEN = '';
     expect(headersOf(getAdapter())).toBeUndefined();
+  });
+
+  it('resolves known tables to their schema primary key — preserving an empty key', () => {
+    const schema = {
+      meta: { serverVersion: 'test', builtAt: '2026-06-11T00:00:00Z', sourceSchemas: ['public'] },
+      tables: [
+        { qualifiedName: 'public.order_lines', primaryKey: ['order_id', 'line_no'] },
+        { qualifiedName: 'public.event_log', primaryKey: [] },
+      ],
+      views: [],
+      enums: [],
+      concepts: [],
+    } as unknown as Parameters<typeof getAdapter>[0];
+    const resolver = (
+      getAdapter(schema) as unknown as {
+        primaryKey?: (resource: string) => string | string[];
+      }
+    ).primaryKey;
+
+    expect(resolver?.('public.order_lines')).toEqual(['order_id', 'line_no']);
+    // A known key-less table keeps its empty key list so the adapter's
+    // key-column guard rejects by-id operations loudly, instead of filtering
+    // on a possibly non-unique 'id' column.
+    expect(resolver?.('public.event_log')).toEqual([]);
+    // A bare resource name resolves against the default schema, matching the
+    // adapter's own normalization — it must not bypass the empty-key guard.
+    expect(resolver?.('order_lines')).toEqual(['order_id', 'line_no']);
+    expect(resolver?.('event_log')).toEqual([]);
+    // Unknown resources keep the adapter default.
+    expect(resolver?.('public.not_in_schema')).toBe('id');
+    expect(resolver?.('not_in_schema')).toBe('id');
   });
 });

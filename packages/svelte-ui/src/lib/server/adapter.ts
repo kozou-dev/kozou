@@ -61,16 +61,27 @@ export function getAdapter(schema?: SchemaContext): DataAdapter {
   return cached;
 }
 
+// Mirrors the REST adapter's default schema: the factory above never sets
+// `defaultSchema`, so a bare resource name resolves against this schema.
+const DEFAULT_RESOLVER_SCHEMA = 'public';
+
 /** Build a primary-key resolver from the schema: each resource maps to its
- *  ordered key columns. Falls back to the adapter default ('id') for unknown
- *  resources or when no schema is available. */
+ *  ordered key columns. A bare (schema-less) resource name is matched
+ *  against the default schema, the same normalization the adapter applies.
+ *  A known key-less table keeps its empty key list so the adapter rejects
+ *  by-id operations loudly instead of filtering on a possibly non-unique
+ *  'id' column (wrong-row reads / mutations). The 'id' fallback applies
+ *  only to unknown resources or when no schema is available. */
 function primaryKeyResolver(
   schema: SchemaContext | undefined,
 ): ((resource: string) => string | string[]) | undefined {
   if (schema === undefined) return undefined;
   return (resource: string) => {
-    const table = schema.tables.find((t) => t.qualifiedName === resource);
-    if (table !== undefined && table.primaryKey.length > 0) {
+    const qualified = resource.includes('.')
+      ? resource
+      : `${DEFAULT_RESOLVER_SCHEMA}.${resource}`;
+    const table = schema.tables.find((t) => t.qualifiedName === qualified);
+    if (table !== undefined) {
       return table.primaryKey;
     }
     return 'id';

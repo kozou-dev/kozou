@@ -621,17 +621,25 @@ export type RelationOptionsParams = {
 export type BuiltRelationOptions = {
   text: string;
   values: unknown[];
+  /** First primary-key column. For a composite-key resource this is only the
+   *  first component — read {@link primaryKeys} instead. */
   primaryKey: string;
+  /** All primary-key columns, in declaration order. Optional so pre-composite
+   *  object shapes stay valid; readers normalize with `?? [primaryKey]`. */
+  primaryKeys?: string[];
   labelField: string;
 };
 
-function singlePrimaryKey(resource: Resource): string {
-  if (resource.primaryKey.length !== 1) {
+/** Primary-key columns for the relation-options (`as=options`) mode. The
+ *  option `id` is built from the key, so a key-less resource (a view, or a
+ *  table without a primary key) has no options to offer. */
+function relationKeyColumns(resource: Resource): string[] {
+  if (resource.primaryKey.length === 0) {
     throw badRequest(
-      `Resource "${resource.name}" does not have a single-column primary key.`,
+      `Resource "${resource.name}" has no primary key; relation options are unavailable.`,
     );
   }
-  return resource.primaryKey[0];
+  return resource.primaryKey;
 }
 
 function assertKnownColumns(resource: Resource, keys: string[]): void {
@@ -705,7 +713,7 @@ export function buildRelationOptionsQuery(
   resource: Resource,
   params: RelationOptionsParams,
 ): BuiltRelationOptions {
-  const pk = singlePrimaryKey(resource);
+  const keyColumns = relationKeyColumns(resource);
   assertKnownColumns(resource, [params.labelField, ...params.searchFields]);
 
   // `searchFields` is request-controlled (`?as=options&fields=`); each is
@@ -734,11 +742,17 @@ export function buildRelationOptionsQuery(
   values.push(clampRelationLimit(params.limit));
   const limitParam = `$${values.length}`;
 
-  const cols =
-    params.labelField === pk
-      ? quoteIdent(pk)
-      : `${quoteIdent(pk)}, ${quoteIdent(params.labelField)}`;
+  const selectFields = keyColumns.includes(params.labelField)
+    ? keyColumns
+    : [...keyColumns, params.labelField];
+  const cols = selectFields.map(quoteIdent).join(', ');
   const text = `SELECT ${cols} FROM ${qualified(resource)}${where} LIMIT ${limitParam}`;
 
-  return { text, values, primaryKey: pk, labelField: params.labelField };
+  return {
+    text,
+    values,
+    primaryKey: keyColumns[0],
+    primaryKeys: keyColumns,
+    labelField: params.labelField,
+  };
 }
