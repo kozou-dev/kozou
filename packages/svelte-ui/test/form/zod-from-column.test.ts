@@ -99,6 +99,35 @@ describe('zodFromColumn', () => {
     expect(schema.safeParse('value').success).toBe(true);
   });
 
+  it('rejects the empty selection but accepts an id for a required relation-select', () => {
+    // The multi-type union carries an explicit '' default so the superforms
+    // adapter accepts it and form init resolves an absent field to '' (a bare
+    // string|number union makes superValidate throw). A *submitted* empty
+    // value, however, must fail: buildMutationPayload would turn it into null,
+    // which a NOT NULL FK refuses at the database.
+    const schema = zodFromColumn(
+      makeColumn({ widget: 'relation-select', nullable: false }),
+    );
+    expect(schema.parse(undefined)).toBe(''); // form-init default
+    expect(schema.safeParse('').success).toBe(false); // submitted empty rejected
+    expect(
+      schema.safeParse('11111111-1111-1111-1111-111111111111').success,
+    ).toBe(true);
+    expect(schema.safeParse(42).success).toBe(true);
+    expect(schema.safeParse(null).success).toBe(false);
+  });
+
+  it('also accepts null for a nullable relation-select', () => {
+    const schema = zodFromColumn(
+      makeColumn({ widget: 'relation-select', nullable: true }),
+    );
+    expect(schema.safeParse('').success).toBe(true);
+    expect(schema.safeParse('abc').success).toBe(true);
+    expect(schema.safeParse(7).success).toBe(true);
+    expect(schema.safeParse(null).success).toBe(true);
+    expect(schema.parse(undefined)).toBe('');
+  });
+
   it('coerces boolean widget values from string inputs (form submissions)', () => {
     const schema = zodFromColumn(
       makeColumn({ widget: 'boolean', dataType: 'boolean', nullable: false }),

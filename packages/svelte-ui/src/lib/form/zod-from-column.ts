@@ -23,6 +23,31 @@ export function dbCanSupplyColumn(column: ColumnContext): boolean {
 }
 
 export function zodFromColumn(column: ColumnContext): ZodTypeAny {
+  // A relation-select holds a scalar foreign-key id (string | number) or the
+  // empty "unselected" state. Accept '' via a literal union member so
+  // superforms can infer a default for the otherwise multi-type union — a bare
+  // `string | number` union has no default and `superValidate` throws
+  // ("Multi-type unions must have a default value ..."). A nullable foreign key
+  // also accepts null. An empty submission is turned into null (or dropped for
+  // a DB-supplied column) by buildMutationPayload.
+  if (column.widget === 'relation-select') {
+    // The FK id is string | number — a genuine multi-type union, which the
+    // superforms zod adapter rejects unless it carries an explicit default
+    // ("Multi-type unions must have a default value ..."), so default to '',
+    // the unselected state. `.default('')` only fills an absent field on form
+    // init; a submitted value is still validated.
+    //
+    // A required FK (NOT NULL, no DB default) must reject the empty selection:
+    // buildMutationPayload turns a relation-select '' into null, which a NOT
+    // NULL column would refuse at the database with an opaque error, so the
+    // string member requires a non-empty id and the empty submission fails
+    // form validation instead. A nullable FK accepts '' (cleared to null) and
+    // null; a DB-supplied FK accepts '' (dropped so the default applies).
+    const required = !column.nullable && !dbCanSupplyColumn(column);
+    const id = z.union([required ? z.string().min(1) : z.string(), z.number()]);
+    return (column.nullable ? id.nullable() : id).default('');
+  }
+
   const base = pickBase(column);
 
   // A column the database can fill on its own must not be a required
@@ -71,8 +96,6 @@ function pickBase(column: ColumnContext): ZodTypeAny {
         return z.enum(column.enumValues as [string, ...string[]]);
       }
       return z.string();
-    case 'relation-select':
-      return z.union([z.string(), z.number()]);
     case 'uuid':
       // PostgreSQL's `uuid` type accepts any 8-4-4-4-12 hex string and does
       // not enforce the RFC version/variant bits. zod 4's `z.uuid()` does
