@@ -20,9 +20,15 @@
 
 import { error } from '@sveltejs/kit';
 
-import type { DataAdapter, RelationOption, SchemaContext } from '@kozou/core';
+import type {
+  DataAdapter,
+  RelationOption,
+  ResourceId,
+  SchemaContext,
+} from '@kozou/core';
 
 import type { RelationFieldConfig } from '$lib/form/relation-field-config.js';
+import { encodeResourceId } from '$lib/resource-id.js';
 
 /** First-page size for the pre-rendered picker; the live search re-queries
  *  with its own limit through the endpoint. */
@@ -122,7 +128,10 @@ export async function loadInitialRelationOptions(
 
 /** Ensure each relation's currently-stored value is selectable by prepending
  *  it (with a resolved label) when the first page does not already include
- *  it. Mutates `options` in place. */
+ *  it. A composite relation assembles its current value from every component
+ *  column — in key order, so it doubles as the target's item id — and is
+ *  skipped when any component is missing (a partially-null composite foreign
+ *  key is not a reference). Mutates `options` in place. */
 export async function ensureSelectedOptions(
   adapter: Pick<DataAdapter, 'get'>,
   relations: RelationFieldConfig[],
@@ -131,14 +140,33 @@ export async function ensureSelectedOptions(
 ): Promise<void> {
   await Promise.all(
     relations.map(async (relation) => {
-      const current = row[relation.field];
-      if (current === null || current === undefined) return;
-      if (typeof current !== 'string' && typeof current !== 'number') return;
+      const keyFields = relation.keyFields ?? [relation.field];
+      const components: Array<string | number> = [];
+      for (const field of keyFields) {
+        const value = row[field];
+        if (value === null || value === undefined) return;
+        if (typeof value !== 'string' && typeof value !== 'number') return;
+        // '' is the picker's unselected sentinel; a current value holding an
+        // empty-string component cannot round-trip, so it is not seeded as a
+        // selectable option (a documented limitation).
+        if (value === '') return;
+        components.push(value);
+      }
+      const current: ResourceId =
+        keyFields.length === 1 ? components[0] : components;
+      const currentKey = encodeResourceId(current);
 
       const existing = options[relation.field] ?? [];
-      if (existing.some((option) => option.id === current)) return;
+      // Compare by the canonical encoded id, so a scalar and a composite
+      // array id both match consistently (and a numeric id matches its
+      // serialized form).
+      if (
+        existing.some((option) => encodeResourceId(option.id) === currentKey)
+      ) {
+        return;
+      }
 
-      let label = String(current);
+      let label = components.map(String).join(', ');
       try {
         const target = await adapter.get(relation.resource, current);
         const projected = target[relation.labelField];

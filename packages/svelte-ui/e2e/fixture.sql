@@ -75,6 +75,27 @@ CREATE TABLE order_lines (
 );
 COMMENT ON TABLE order_lines IS 'Line items on an order (composite primary key).';
 
+-- A composite-key target with a text display column ("name" satisfies the
+-- displayField heuristic), plus a child whose composite FOREIGN KEY points at
+-- it, so the suite can exercise the composite relation picker (Kozou v1.0 dev
+-- spec §5.2 Stage 2b) and the composite detail-page label.
+CREATE TABLE warehouse_bins (
+  aisle integer NOT NULL,
+  shelf integer NOT NULL,
+  name text NOT NULL,
+  PRIMARY KEY (aisle, shelf)
+);
+COMMENT ON TABLE warehouse_bins IS 'Warehouse storage bins (composite primary key).';
+
+CREATE TABLE bin_assignments (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  aisle integer NOT NULL,
+  shelf integer NOT NULL,
+  note text,
+  FOREIGN KEY (aisle, shelf) REFERENCES warehouse_bins (aisle, shelf)
+);
+COMMENT ON TABLE bin_assignments IS 'Assignments of stock to a warehouse bin (composite foreign key).';
+
 CREATE VIEW vw_inventory_for_sale AS
   SELECT i.id, i.edition_id, i.selling_price, e.book_id, b.title AS book_title, b.author_id, a.display_name AS author_name
   FROM inventory_items i
@@ -113,6 +134,15 @@ INSERT INTO order_lines (order_id, line_no, product, qty) VALUES
   (100, 1, 'Widget', 3),
   (100, 2, 'Gadget', 5),
   (200, 1, 'Sprocket', 2);
+
+INSERT INTO warehouse_bins (aisle, shelf, name) VALUES
+  (1, 1, 'Bin A1-S1'),
+  (1, 2, 'Bin A1-S2'),
+  (2, 1, 'Bin A2-S1');
+
+-- A stable assignment so the no-JS (native form) spec can edit a known row.
+INSERT INTO bin_assignments (id, aisle, shelf, note) VALUES
+  ('00000000-0000-0000-0000-000000000040', 1, 1, 'Seeded assignment');
 
 -- ---------------------------------------------------------------------------
 -- Grants required for the PostgREST anonymous role to read + write.

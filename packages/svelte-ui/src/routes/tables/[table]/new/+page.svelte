@@ -2,6 +2,8 @@
   import type { Writable } from 'svelte/store';
   import { superForm } from 'sveltekit-superforms';
 
+  import type { RelationFieldConfig } from '$lib/form/relation-field-config.js';
+  import RelationSelectCompositeField from '$lib/form/widgets/relation-select-composite-field.svelte';
   import RelationSelectField from '$lib/form/widgets/relation-select-field.svelte';
   import { resolveWidget } from '$lib/form/widget-registry.js';
 
@@ -10,8 +12,32 @@
   // Derived so same-route client navigation (new data.relations) recomputes
   // the lookup instead of reusing the first load's stale relation config.
   const relationByField = $derived(
-    new Map(data.relations.map((r) => [r.field, r] as const)),
+    new Map(
+      data.relations
+        .filter((r) => (r.fields ?? [r.field]).length === 1)
+        .map((r) => [r.field, r] as const),
+    ),
   );
+
+  // A composite relation renders ONE picker — at the group's first column in
+  // table order — and suppresses the remaining component columns (the picker
+  // writes every component through the form store).
+  const compositeLayout = $derived.by(() => {
+    const hostByField = new Map<string, RelationFieldConfig>();
+    const memberFields = new Set<string>();
+    for (const config of data.relations) {
+      const fields = config.fields ?? [config.field];
+      if (fields.length < 2) continue;
+      const grouped = new Set(fields);
+      const ordered = data.table.columns
+        .filter((c) => grouped.has(c.name))
+        .map((c) => c.name);
+      if (ordered.length !== fields.length) continue;
+      hostByField.set(ordered[0], config);
+      for (const field of ordered.slice(1)) memberFields.add(field);
+    }
+    return { hostByField, memberFields };
+  });
 
   // svelte-ignore state_referenced_locally
   const { form, errors, enhance, submitting } = superForm(data.form, {
@@ -24,6 +50,30 @@
   const relationForm = form as unknown as Writable<
     Record<string, string | number | null>
   >;
+
+  function memberColumns(config: RelationFieldConfig) {
+    const grouped = new Set(config.fields ?? [config.field]);
+    return data.table.columns.filter((c) => grouped.has(c.name));
+  }
+
+  // Write a picked option's components into every foreign-key column of the
+  // group, in key order. A clear writes the relation-select '' sentinel —
+  // the same value the native path's deleted fields default to — so
+  // buildMutationPayload treats both paths identically (null for a plain
+  // nullable column, dropped for a DB-supplied one).
+  function applyComposite(
+    config: RelationFieldConfig,
+    components: Array<string | number> | null,
+  ): void {
+    const keyFields = config.keyFields ?? [config.field];
+    relationForm.update((current) => {
+      const next = { ...current };
+      keyFields.forEach((field, i) => {
+        next[field] = components === null ? '' : components[i];
+      });
+      return next;
+    });
+  }
 </script>
 
 <h1 class="mb-1 text-2xl font-semibold">New {data.table.label}</h1>
@@ -33,8 +83,59 @@
   {#each data.table.columns as col (col.name)}
     {@const required = !col.nullable && !col.readonly && !col.isPrimaryKey}
     {@const relation = relationByField.get(col.name)}
+    {@const composite = compositeLayout.hostByField.get(col.name)}
     <div>
-      {#if col.widget === 'relation-select' && relation}
+      {#if compositeLayout.memberFields.has(col.name)}
+        <!-- Written by the composite picker rendered at the group's first
+             column; no input of its own. -->
+      {:else if composite}
+        {@const members = memberColumns(composite)}
+        {@const groupRequired = members.some(
+          (c) => !c.nullable && !c.readonly && !c.isPrimaryKey,
+        )}
+        {@const groupReadonly = members.some((c) => c.readonly)}
+        <!-- Re-create the picker when its target config changes so a reused
+             component (same-route client navigation) cannot keep searching a
+             stale resource. -->
+        {#key `${composite.resource}|${composite.labelField}|${composite.searchFields.join(',')}`}
+          <RelationSelectCompositeField
+            name={composite.field}
+            label={members.map((c) => c.label).join(', ')}
+            resource={composite.resource}
+            labelField={composite.labelField}
+            searchFields={composite.searchFields}
+            initialOptions={data.initialOptions[composite.field] ?? []}
+            values={(composite.keyFields ?? [composite.field]).map(
+              (field) => $relationForm[field],
+            )}
+            onpick={(components) => applyComposite(composite, components)}
+            required={groupRequired}
+            readonly={groupReadonly}
+          />
+        {/key}
+        <!-- Server-rendered baseline: a native (no-JS) submission must keep
+             the current component values on an untouched save — the member
+             inputs are suppressed and a disabled (readonly) select submits
+             nothing. A pick or an explicit clear overrides these
+             server-side; the enhanced path ignores DOM fields entirely. -->
+        {#each members as member (member.name)}
+          <input
+            type="hidden"
+            name={member.name}
+            value={$relationForm[member.name] === null ||
+            $relationForm[member.name] === undefined
+              ? ''
+              : String($relationForm[member.name])}
+          />
+        {/each}
+        {#each members as member (member.name)}
+          {#if $errors[member.name]}
+            <p class="mt-1 text-sm text-destructive">
+              {member.label}: {$errors[member.name]}
+            </p>
+          {/if}
+        {/each}
+      {:else if col.widget === 'relation-select' && relation}
         <!-- Re-create the picker when its target config changes so a reused
              component (same-route client navigation) cannot keep searching a
              stale resource. -->
@@ -62,7 +163,7 @@
           readonly={col.readonly}
         />
       {/if}
-      {#if $errors[col.name]}
+      {#if !composite && !compositeLayout.memberFields.has(col.name) && $errors[col.name]}
         <p class="mt-1 text-sm text-destructive">{$errors[col.name]}</p>
       {/if}
     </div>

@@ -27,18 +27,28 @@ function isEmpty(value: unknown): boolean {
 export function buildMutationPayload(
   table: TableContext,
   data: Record<string, unknown>,
+  mode: 'create' | 'update' = 'create',
 ): Record<string, unknown> {
   const byName = new Map(table.columns.map((c) => [c.name, c]));
   const payload: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(data)) {
     const column = byName.get(key);
+    if (column?.widget === 'relation-select' && value === '') {
+      // No selection. On create, a DB-suppliable column is dropped below so
+      // its DEFAULT can apply. On update, an empty relation-select means
+      // "cleared" — dropping a defaulted component instead would silently
+      // keep its old value and leave a composite key half-cleared.
+      // Read-only (server-generated) columns are still dropped: they cannot
+      // be written at all.
+      const dropForDb =
+        dbCanSupplyColumn(column) && (mode === 'create' || column.readonly);
+      if (!dropForDb) {
+        payload[key] = null;
+        continue;
+      }
+    }
     if (column && dbCanSupplyColumn(column) && isEmpty(value)) {
       // Drop it so the database default / generated value applies.
-      continue;
-    }
-    if (column?.widget === 'relation-select' && value === '') {
-      // No selection: clear the foreign key rather than submit "".
-      payload[key] = null;
       continue;
     }
     payload[key] = value;
