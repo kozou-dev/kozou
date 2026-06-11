@@ -1,6 +1,6 @@
 {
   "name": "@kozou/introspect",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "PostgreSQL DDL / COMMENT / VIEW introspection.",
   "license": "Apache-2.0",
   "repository": {

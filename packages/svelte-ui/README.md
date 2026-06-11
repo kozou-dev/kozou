@@ -32,6 +32,26 @@ the default is Kozou's bundled in-house REST backend (`@kozou/api`).
 | `/tables/[table]/[id]/edit` | Edit record |
 | `/views/[view]` | Read-only view listing |
 
+## Relation pickers
+
+The create / edit forms render a searchable picker for foreign-key columns:
+
+- a **single-column FK** gets a picker when it references the target's
+  single-column primary key and the target's label column is
+  text-searchable; otherwise the column stays a plain scalar input the
+  operator types.
+- a **composite (multi-column) FK** becomes ONE picker that fills every key
+  column at once, when it references the target's primary key (any column
+  order), the target's label is text-searchable, and none of its columns is
+  shared with another foreign key. Ineligible relations keep scalar inputs.
+- the forms also work without JavaScript: the picker submits natively and an
+  untouched save keeps the current values.
+
+Known limitation: a key containing an **empty-string component** cannot be
+picked or round-tripped through the form — `''` is the picker contract's
+unselected sentinel (shared with the single-column picker). Such rows remain
+manageable through the API.
+
 Query parameters on the list / view routes:
 
 - `?q=<text>` — case-insensitive search across the resolved
