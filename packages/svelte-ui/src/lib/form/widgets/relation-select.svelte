@@ -59,9 +59,12 @@
     class="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
   >
     {#if !required}
-      <!-- Clearing an optional relation must submit null, not "" — the FK
-           column (uuid / integer / ...) cannot store an empty string. -->
-      <option value={null}>--</option>
+      <!-- Clearing an optional relation uses the canonical '' sentinel:
+           buildMutationPayload normalizes a relation-select '' to null (the
+           FK column cannot store an empty string). A null option value would
+           drop the value attribute in SSR, so a native (no-JS) clear would
+           submit the option TEXT ('--') as the foreign key instead. -->
+      <option value="">--</option>
     {/if}
     {#each options as option (option.id)}
       <option value={option.id}>{option.label}</option>

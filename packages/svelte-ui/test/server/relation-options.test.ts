@@ -231,6 +231,101 @@ describe('ensureSelectedOptions', () => {
 
     expect(options.author_id).toEqual([{ id: 'a9', label: 'Octavia Butler' }]);
   });
+
+  const binRelation: RelationFieldConfig = {
+    field: 'aisle',
+    fields: ['aisle', 'shelf'],
+    keyFields: ['aisle', 'shelf'],
+    resource: 'public.warehouse_bins',
+    labelField: 'name',
+    searchFields: ['name'],
+  };
+
+  it('prepends a composite current value as an array id with a resolved label', async () => {
+    const get = vi.fn(async () => ({ aisle: 2, shelf: 1, name: 'Bin A2-S1' }));
+    const options: Record<string, RelationOption[]> = {
+      aisle: [{ id: [1, 1], label: 'Bin A1-S1' }],
+    };
+
+    await ensureSelectedOptions(
+      { get },
+      [binRelation],
+      { id: 's1', aisle: 2, shelf: 1 },
+      options,
+    );
+
+    expect(options.aisle).toEqual([
+      { id: [2, 1], label: 'Bin A2-S1' },
+      { id: [1, 1], label: 'Bin A1-S1' },
+    ]);
+    // The components — in key order — double as the target's item id.
+    expect(get).toHaveBeenCalledWith('public.warehouse_bins', [2, 1]);
+  });
+
+  it('matches a composite current value already in the page by encoded id', async () => {
+    const get = vi.fn();
+    const options: Record<string, RelationOption[]> = {
+      aisle: [{ id: [2, 1], label: 'Bin A2-S1' }],
+    };
+
+    await ensureSelectedOptions(
+      { get },
+      [binRelation],
+      { id: 's1', aisle: 2, shelf: 1 },
+      options,
+    );
+
+    expect(options.aisle).toEqual([{ id: [2, 1], label: 'Bin A2-S1' }]);
+    expect(get).not.toHaveBeenCalled();
+  });
+
+  it('skips a composite relation when any component is missing', async () => {
+    const get = vi.fn();
+    const options: Record<string, RelationOption[]> = { aisle: [] };
+
+    await ensureSelectedOptions(
+      { get },
+      [binRelation],
+      { id: 's1', aisle: 2, shelf: null },
+      options,
+    );
+
+    expect(options.aisle).toEqual([]);
+    expect(get).not.toHaveBeenCalled();
+  });
+
+  it('does not seed a current value holding an empty-string component', async () => {
+    // '' collides with the picker contract's unselected sentinel — such a
+    // key cannot round-trip, so it is not offered as a selectable option.
+    const get = vi.fn();
+    const options: Record<string, RelationOption[]> = { aisle: [] };
+
+    await ensureSelectedOptions(
+      { get },
+      [binRelation],
+      { id: 's1', aisle: 'A', shelf: '' },
+      options,
+    );
+
+    expect(options.aisle).toEqual([]);
+    expect(get).not.toHaveBeenCalled();
+  });
+
+  it('falls back to comma-joined components when the composite lookup fails', async () => {
+    const get = vi.fn(async () => {
+      throw new Error('unreachable');
+    });
+    const options: Record<string, RelationOption[]> = { aisle: [] };
+
+    await ensureSelectedOptions(
+      { get },
+      [binRelation],
+      { id: 's1', aisle: 2, shelf: 1 },
+      options,
+    );
+
+    expect(options.aisle).toEqual([{ id: [2, 1], label: '2, 1' }]);
+  });
 });
 
 describe('searchRelationOptions', () => {

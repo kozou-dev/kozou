@@ -4,6 +4,7 @@ import type { ColumnContext, SchemaContext, TableContext } from '@kozou/core';
 
 import {
   demoteUnpickableRelations,
+  isPickableOption,
   relationFieldConfigs,
   scalarWidgetForDataType,
 } from '../../src/lib/form/relation-field-config.js';
@@ -122,7 +123,7 @@ describe('relationFieldConfigs', () => {
     ]);
   });
 
-  it('skips composite (multi-column) foreign keys', () => {
+  it('maps a composite foreign key to one picker config with key-ordered fields', () => {
     const target = makeTable('order_lines', {
       primaryKey: ['order_id', 'line_no'],
       displayField: 'product',
@@ -151,7 +152,233 @@ describe('relationFieldConfigs', () => {
 
     expect(
       relationFieldConfigs(shipments, makeSchema([target, shipments])),
+    ).toEqual([
+      {
+        field: 'order_id',
+        fields: ['order_id', 'line_no'],
+        keyFields: ['order_id', 'line_no'],
+        resource: 'public.order_lines',
+        labelField: 'product',
+        searchFields: ['product'],
+      },
+    ]);
+  });
+
+  it('reorders keyFields when the foreign key lists the key columns permuted', () => {
+    const target = makeTable('order_lines', {
+      primaryKey: ['order_id', 'line_no'],
+      displayField: 'product',
+      columns: [
+        makeColumn('order_id', { isPrimaryKey: true, dataType: 'integer' }),
+        makeColumn('line_no', { isPrimaryKey: true, dataType: 'integer' }),
+        makeColumn('product', { dataType: 'text' }),
+      ],
+    });
+    const shipments = makeTable('shipments', {
+      relations: [
+        {
+          // FK declaration order is reversed relative to the target key.
+          field: 'src_line',
+          fields: ['src_line', 'src_order'],
+          references: {
+            schema: 'public',
+            table: 'order_lines',
+            column: 'line_no',
+            columns: ['line_no', 'order_id'],
+          },
+          cardinality: 'many-to-one',
+          meaning: null,
+        },
+      ],
+    });
+
+    const configs = relationFieldConfigs(
+      shipments,
+      makeSchema([target, shipments]),
+    );
+    // keyFields follow the TARGET key order (order_id, line_no), so option-id
+    // components fan out positionally.
+    expect(configs[0]?.keyFields).toEqual(['src_order', 'src_line']);
+    expect(configs[0]?.fields).toEqual(['src_line', 'src_order']);
+  });
+
+  it('skips a composite relation that does not cover the target primary key', () => {
+    const target = makeTable('order_lines', {
+      primaryKey: ['id'],
+      displayField: 'product',
+      columns: [
+        makeColumn('id', { isPrimaryKey: true }),
+        makeColumn('order_id', { dataType: 'integer' }),
+        makeColumn('line_no', { dataType: 'integer' }),
+        makeColumn('product', { dataType: 'text' }),
+      ],
+    });
+    const shipments = makeTable('shipments', {
+      relations: [
+        {
+          field: 'order_id',
+          fields: ['order_id', 'line_no'],
+          references: {
+            schema: 'public',
+            table: 'order_lines',
+            column: 'order_id',
+            columns: ['order_id', 'line_no'],
+          },
+          cardinality: 'many-to-one',
+          meaning: null,
+        },
+      ],
+    });
+
+    expect(
+      relationFieldConfigs(shipments, makeSchema([target, shipments])),
     ).toEqual([]);
+  });
+
+  it('skips a composite relation whose label column is not text-searchable', () => {
+    const target = makeTable('order_lines', {
+      primaryKey: ['order_id', 'line_no'],
+      // No display column: the fallback label is the first key column, an
+      // integer — not searchable, so the picker would strand values.
+      displayField: 'order_id',
+      columns: [
+        makeColumn('order_id', { isPrimaryKey: true, dataType: 'integer' }),
+        makeColumn('line_no', { isPrimaryKey: true, dataType: 'integer' }),
+      ],
+    });
+    const shipments = makeTable('shipments', {
+      relations: [
+        {
+          field: 'order_id',
+          fields: ['order_id', 'line_no'],
+          references: {
+            schema: 'public',
+            table: 'order_lines',
+            column: 'order_id',
+            columns: ['order_id', 'line_no'],
+          },
+          cardinality: 'many-to-one',
+          meaning: null,
+        },
+      ],
+    });
+
+    expect(
+      relationFieldConfigs(shipments, makeSchema([target, shipments])),
+    ).toEqual([]);
+  });
+
+  it('drops composite configs whose columns collide with another picker', () => {
+    const orders = makeTable('orders', {
+      primaryKey: ['tenant_id', 'order_no'],
+      displayField: 'title',
+      columns: [
+        makeColumn('tenant_id', { isPrimaryKey: true }),
+        makeColumn('order_no', { isPrimaryKey: true, dataType: 'integer' }),
+        makeColumn('title', { dataType: 'text' }),
+      ],
+    });
+    const products = makeTable('products', {
+      primaryKey: ['tenant_id', 'sku'],
+      displayField: 'name',
+      columns: [
+        makeColumn('tenant_id', { isPrimaryKey: true }),
+        makeColumn('sku', { isPrimaryKey: true, dataType: 'text' }),
+        makeColumn('name', { dataType: 'text' }),
+      ],
+    });
+    const shipments = makeTable('shipments', {
+      relations: [
+        {
+          field: 'tenant_id',
+          fields: ['tenant_id', 'order_no'],
+          references: {
+            schema: 'public',
+            table: 'orders',
+            column: 'tenant_id',
+            columns: ['tenant_id', 'order_no'],
+          },
+          cardinality: 'many-to-one',
+          meaning: null,
+        },
+        {
+          field: 'tenant_id',
+          fields: ['tenant_id', 'sku'],
+          references: {
+            schema: 'public',
+            table: 'products',
+            column: 'tenant_id',
+            columns: ['tenant_id', 'sku'],
+          },
+          cardinality: 'many-to-one',
+          meaning: null,
+        },
+      ],
+    });
+
+    // Both composite pickers would write tenant_id; writing it from two
+    // pickers would race, so both are dropped (scalar inputs remain).
+    expect(
+      relationFieldConfigs(shipments, makeSchema([orders, products, shipments])),
+    ).toEqual([]);
+  });
+
+  it('keeps a single-column picker when a composite sharing its column is dropped', () => {
+    const tenants = makeTable('tenants', {
+      displayField: 'name',
+      columns: [
+        makeColumn('id', { isPrimaryKey: true }),
+        makeColumn('name', { dataType: 'text' }),
+      ],
+    });
+    const orders = makeTable('orders', {
+      primaryKey: ['tenant_id', 'order_no'],
+      displayField: 'title',
+      columns: [
+        makeColumn('tenant_id', { isPrimaryKey: true }),
+        makeColumn('order_no', { isPrimaryKey: true, dataType: 'integer' }),
+        makeColumn('title', { dataType: 'text' }),
+      ],
+    });
+    const shipments = makeTable('shipments', {
+      columns: [
+        makeColumn('id', { isPrimaryKey: true }),
+        makeColumn('tenant_id', {
+          isForeignKey: true,
+          widget: 'relation-select',
+        }),
+        makeColumn('order_no', { dataType: 'integer' }),
+      ],
+      relations: [
+        {
+          field: 'tenant_id',
+          fields: ['tenant_id'],
+          references: { schema: 'public', table: 'tenants', column: 'id', columns: ['id'] },
+          cardinality: 'many-to-one',
+          meaning: null,
+        },
+        {
+          field: 'tenant_id',
+          fields: ['tenant_id', 'order_no'],
+          references: {
+            schema: 'public',
+            table: 'orders',
+            column: 'tenant_id',
+            columns: ['tenant_id', 'order_no'],
+          },
+          cardinality: 'many-to-one',
+          meaning: null,
+        },
+      ],
+    });
+
+    const configs = relationFieldConfigs(
+      shipments,
+      makeSchema([tenants, orders, shipments]),
+    );
+    expect(configs).toHaveLength(1);
+    expect(configs[0]?.resource).toBe('public.tenants');
+    expect(configs[0]?.fields).toBeUndefined();
   });
 
   it('skips a relation whose target table is absent from the schema', () => {
@@ -343,5 +570,67 @@ describe('demoteUnpickableRelations', () => {
     expect(table.columns.find((c) => c.name === 'edition_isbn')?.widget).toBe(
       'relation-select',
     );
+  });
+});
+
+describe('relationFieldConfigs — ownership against non-picker relations', () => {
+  it('drops a composite whose column is shared with an unpickable relation', () => {
+    const orders = makeTable('orders', {
+      primaryKey: ['tenant_id', 'order_no'],
+      displayField: 'title',
+      columns: [
+        makeColumn('tenant_id', { isPrimaryKey: true }),
+        makeColumn('order_no', { isPrimaryKey: true, dataType: 'integer' }),
+        makeColumn('title', { dataType: 'text' }),
+      ],
+    });
+    const shipments = makeTable('shipments', {
+      relations: [
+        {
+          field: 'tenant_id',
+          fields: ['tenant_id', 'order_no'],
+          references: {
+            schema: 'public',
+            table: 'orders',
+            column: 'tenant_id',
+            columns: ['tenant_id', 'order_no'],
+          },
+          cardinality: 'many-to-one',
+          meaning: null,
+        },
+        {
+          // Shares tenant_id but is NOT picker-eligible (its target table is
+          // absent from the schema). Rewriting tenant_id from the picker
+          // would leave this relation's other component stale.
+          field: 'tenant_id',
+          fields: ['tenant_id', 'region'],
+          references: {
+            schema: 'public',
+            table: 'tenancy_regions',
+            column: 'tenant_id',
+            columns: ['tenant_id', 'region'],
+          },
+          cardinality: 'many-to-one',
+          meaning: null,
+        },
+      ],
+    });
+
+    expect(
+      relationFieldConfigs(shipments, makeSchema([orders, shipments])),
+    ).toEqual([]);
+  });
+});
+
+describe('isPickableOption', () => {
+  it('accepts normal scalar and composite ids', () => {
+    expect(isPickableOption({ id: 'a1', label: 'A' })).toBe(true);
+    expect(isPickableOption({ id: 0, label: 'zero' })).toBe(true);
+    expect(isPickableOption({ id: ['o1', 2], label: 'line' })).toBe(true);
+  });
+
+  it("rejects ids containing an empty-string component (the '' sentinel)", () => {
+    expect(isPickableOption({ id: '', label: 'empty' })).toBe(false);
+    expect(isPickableOption({ id: ['A', ''], label: 'partial' })).toBe(false);
   });
 });

@@ -14,11 +14,13 @@ import type { TableContext } from '@kozou/core';
 import { buildMutationPayload } from '$lib/form/mutation-payload.js';
 import {
   demoteUnpickableRelations,
+  promoteCompositeMemberWidgets,
   relationFieldConfigs,
 } from '$lib/form/relation-field-config.js';
 import { zodFromTable } from '$lib/form/zod-from-table.js';
 import { rowIdSegment } from '$lib/resource-id.js';
 import { getAdapter } from '$lib/server/adapter.js';
+import { readFormWithCompositePicks } from '$lib/server/composite-form.js';
 import { loadInitialRelationOptions } from '$lib/server/relation-options.js';
 
 import type { Actions, PageServerLoad } from './$types';
@@ -56,7 +58,10 @@ export const load: PageServerLoad = async ({ params, locals }) => {
     throw error(404, `Unknown table: ${params.table}`);
   }
   const relations = relationFieldConfigs(table, locals.schema);
-  const formTable = demoteUnpickableRelations(table, relations);
+  const formTable = promoteCompositeMemberWidgets(
+    demoteUnpickableRelations(table, relations),
+    relations,
+  );
   const form = await superValidate(zod4(zodFromTable(formTable)));
   const initialOptions = await loadInitialRelationOptions(
     getAdapter(locals.schema),
@@ -76,11 +81,23 @@ export const actions: Actions = {
     if (!table) {
       throw error(404, `Unknown table: ${params.table}`);
     }
-    const formTable = demoteUnpickableRelations(
-      table,
-      relationFieldConfigs(table, locals.schema),
+    const relations = relationFieldConfigs(table, locals.schema);
+    const formTable = promoteCompositeMemberWidgets(
+      demoteUnpickableRelations(table, relations),
+      relations,
     );
-    const form = await superValidate(request, zod4(zodFromTable(formTable)));
+    // A native (non-enhanced) submission carries each composite pick as one
+    // encoded control; decode it into the component fields first. A
+    // malformed control (crafted / corrupted) is rejected outright — letting
+    // it fall through to the schema defaults would silently clear an
+    // optional relation.
+    const submission = await readFormWithCompositePicks(request, relations);
+    if (submission === null) {
+      return fail(400, {
+        form: await superValidate(zod4(zodFromTable(formTable))),
+      });
+    }
+    const form = await superValidate(submission, zod4(zodFromTable(formTable)));
     if (!form.valid) {
       return fail(400, { form });
     }
