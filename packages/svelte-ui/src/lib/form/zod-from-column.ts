@@ -67,7 +67,13 @@ export function zodFromColumn(column: ColumnContext): ZodTypeAny {
   //     crashes the form on client-side navigation to /new and /edit.
   if (dbCanSupplyColumn(column)) {
     const inner = column.nullable ? base.nullable() : base;
-    return z.union([z.literal(''), inner]);
+    // The default must be EXPLICIT: superforms infers a default from a union
+    // only when its members share one base type, so `literal('') | string`
+    // worked but `literal('') | enum / number / date` threw "Multi-type
+    // unions must have a default value" while building the form — a 500 on
+    // /new and /edit for ANY table with a defaulted non-text column. Same
+    // medicine as the relation-select branch above.
+    return z.union([z.literal(''), inner]).default('');
   }
 
   // Nullable (no default) columns allow null but NOT undefined, so the

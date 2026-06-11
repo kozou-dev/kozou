@@ -83,6 +83,10 @@
 
 <form method="POST" use:enhance class="space-y-4">
   {#each data.table.columns as col (col.name)}
+    <!-- Unlike the create form, a defaulted NOT NULL column stays REQUIRED
+         on edit: an UPDATE cannot express "reset to DEFAULT", so an empty
+         value would be dropped and the old value silently kept — offering a
+         clear that does nothing. The create-only relaxation is #95. -->
     {@const required = !col.nullable && !col.readonly && !col.isPrimaryKey}
     {@const relation = relationByField.get(col.name)}
     {@const composite = compositeLayout.hostByField.get(col.name)}
@@ -92,6 +96,10 @@
              column; no input of its own. -->
       {:else if composite}
         {@const members = memberColumns(composite)}
+        <!-- Deliberately ignores dbCanSupply: clearing a composite picker
+             empties EVERY component, which is only valid when all of them
+             are nullable — a defaulted NOT NULL component cannot be nulled,
+             so the group keeps its required marker (no clear option). -->
         {@const groupRequired = members.some(
           (c) => !c.nullable && !c.readonly && !c.isPrimaryKey,
         )}

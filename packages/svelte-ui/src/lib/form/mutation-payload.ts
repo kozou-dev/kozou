@@ -33,15 +33,28 @@ export function buildMutationPayload(
   const payload: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(data)) {
     const column = byName.get(key);
+    if (column?.readonly) {
+      // A read-only (server-generated / hint-locked) column is never
+      // writable through the form, whatever value the submission carries —
+      // the UI disables the control, and on edit the hydrated current value
+      // would otherwise be PATCHed back (a hard error for a generated
+      // column). Dropping it also closes the forged-value path through the
+      // form action.
+      continue;
+    }
     if (column?.widget === 'relation-select' && value === '') {
       // No selection. On create, a DB-suppliable column is dropped below so
-      // its DEFAULT can apply. On update, an empty relation-select means
-      // "cleared" — dropping a defaulted component instead would silently
-      // keep its old value and leave a composite key half-cleared.
-      // Read-only (server-generated) columns are still dropped: they cannot
-      // be written at all.
+      // its DEFAULT can apply. On update, an empty NULLABLE relation-select
+      // means "cleared" — dropping a defaulted nullable component instead
+      // would silently keep its old value and leave a composite key
+      // half-cleared. A NON-nullable DB-suppliable column cannot hold null,
+      // so its empty value is dropped (the stored value is kept; SQL has no
+      // way to say "reset to DEFAULT" through a plain update payload).
+      // Read-only (server-generated) columns are likewise dropped: they
+      // cannot be written at all.
       const dropForDb =
-        dbCanSupplyColumn(column) && (mode === 'create' || column.readonly);
+        dbCanSupplyColumn(column) &&
+        (mode === 'create' || column.readonly || !column.nullable);
       if (!dropForDb) {
         payload[key] = null;
         continue;
