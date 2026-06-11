@@ -17,6 +17,7 @@ import {
   promoteCompositeMemberWidgets,
   relationFieldConfigs,
 } from '$lib/form/relation-field-config.js';
+import { dbCanSupplyColumn } from '$lib/form/zod-from-column.js';
 import { zodFromTable } from '$lib/form/zod-from-table.js';
 import { rowIdSegment } from '$lib/resource-id.js';
 import { getAdapter } from '$lib/server/adapter.js';
@@ -46,6 +47,10 @@ function tableViewModel(table: TableContext) {
       widget: c.widget,
       enumValues: c.enumValues ?? [],
       nullable: c.nullable,
+      // The schema treats a DB-suppliable column (DEFAULT / generated) as
+      // optional — the empty value is dropped so the default applies — and
+      // the rendered `required` marker must match it (issue #95).
+      dbCanSupply: dbCanSupplyColumn(c),
       readonly: c.readonly || (c.isPrimaryKey && c.defaultExpr !== null),
       isPrimaryKey: c.isPrimaryKey,
     })),

@@ -29,7 +29,7 @@
     {placeholder}
     {readonly}
     bind:value
-    pattern="[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
+    pattern={'[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}'}
     class="w-full rounded-md border border-input bg-background px-3 py-2 font-mono text-xs"
   />
 </label>

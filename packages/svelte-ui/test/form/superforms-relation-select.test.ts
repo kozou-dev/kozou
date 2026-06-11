@@ -95,3 +95,52 @@ describe('superValidate over a relation-select form schema', () => {
     expect(form.data.parent_id).toBe('');
   });
 });
+
+describe('superValidate over DB-suppliable non-text columns', () => {
+  // The db-supplied union (literal('') | base) needs an EXPLICIT default:
+  // superforms only infers one when the union members share a base type, so
+  // a defaulted enum / number / datetime column made superValidate throw
+  // while building the form — a 500 on /new and /edit for any table with a
+  // defaulted non-text column (surfaced by the issue #95 e2e).
+  it('initializes defaulted enum / number / datetime columns without throwing', async () => {
+    const table = makeTable([
+      makeColumn({
+        name: 'id',
+        widget: 'uuid',
+        dataType: 'uuid',
+        defaultExpr: 'gen_random_uuid()',
+      }),
+      makeColumn({
+        name: 'visibility',
+        widget: 'enum-select',
+        enumValues: ['public', 'private'],
+        defaultExpr: "'public'::text",
+      }),
+      makeColumn({
+        name: 'qty',
+        widget: 'number',
+        dataType: 'integer',
+        defaultExpr: '1',
+      }),
+      makeColumn({
+        name: 'created_at',
+        widget: 'datetime',
+        dataType: 'timestamptz',
+        defaultExpr: 'now()',
+      }),
+    ]);
+
+    const form = await superValidate(zod4(zodFromTable(table)));
+    expect(form.data.visibility).toBe('');
+    expect(form.data.qty).toBe('');
+    expect(form.data.created_at).toBe('');
+
+    // The empty submission still validates (the payload drops the empties
+    // so the database defaults apply).
+    const submitted = await superValidate(
+      { id: '', visibility: '', qty: '', created_at: '' },
+      zod4(zodFromTable(table)),
+    );
+    expect(submitted.valid).toBe(true);
+  });
+});

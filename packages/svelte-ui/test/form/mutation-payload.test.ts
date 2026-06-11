@@ -59,15 +59,20 @@ describe('buildMutationPayload', () => {
     expect('slug' in payload).toBe(false);
   });
 
-  it('keeps a real value for a DB-suppliable column (e.g. edit submit)', () => {
+  it('keeps a real value for a defaulted column but always drops read-only ones', () => {
     const payload = buildMutationPayload(table, {
       id: '11111111-1111-1111-1111-111111111111',
       display_name: 'Ada Lovelace',
       deleted_at: null,
       slug: 'ada',
     });
+    // A defaulted (but operator-editable) column keeps its real value.
     expect(payload.id).toBe('11111111-1111-1111-1111-111111111111');
-    expect(payload.slug).toBe('ada');
+    // A read-only column is never writable through the form: the edit
+    // submission carries the hydrated current value, and PATCHing it back
+    // would hard-error on a generated column (it also closes the
+    // forged-value path through the form action).
+    expect('slug' in payload).toBe(false);
   });
 
   it('keeps explicit nulls for non-default nullable columns', () => {
@@ -117,5 +122,56 @@ describe('buildMutationPayload', () => {
         author_id: '22222222-2222-2222-2222-222222222222',
       }).author_id,
     ).toBe('22222222-2222-2222-2222-222222222222');
+  });
+
+  it('keeps the stored value for an empty defaulted NOT NULL relation-select on update', () => {
+    // A non-nullable DB-suppliable FK cannot hold null and SQL cannot say
+    // "reset to DEFAULT" through a plain update payload, so the empty value
+    // is dropped — the stored value is kept (#95 / update-mode semantics).
+    const withDefaultedFk = makeTable([
+      makeColumn({ name: 'id', widget: 'uuid', defaultExpr: 'gen_random_uuid()' }),
+      makeColumn({
+        name: 'owner_id',
+        widget: 'relation-select',
+        dataType: 'uuid',
+        nullable: false,
+        defaultExpr: 'current_owner()',
+        isForeignKey: true,
+      }),
+    ]);
+
+    const updated = buildMutationPayload(
+      withDefaultedFk,
+      { id: '', owner_id: '' },
+      'update',
+    );
+    expect('owner_id' in updated).toBe(false);
+
+    // On create the same empty value is also dropped, so the DEFAULT applies.
+    const created = buildMutationPayload(withDefaultedFk, { id: '', owner_id: '' });
+    expect('owner_id' in created).toBe(false);
+  });
+
+  it('still clears an empty nullable defaulted relation-select to null on update', () => {
+    const withNullableDefaultedFk = makeTable([
+      makeColumn({ name: 'id', widget: 'uuid', defaultExpr: 'gen_random_uuid()' }),
+      makeColumn({
+        name: 'group_id',
+        widget: 'relation-select',
+        dataType: 'uuid',
+        nullable: true,
+        defaultExpr: 'default_group()',
+        isForeignKey: true,
+      }),
+    ]);
+
+    // Dropping it instead would silently keep the old value — the operator
+    // cleared the picker, so the update must write null.
+    const updated = buildMutationPayload(
+      withNullableDefaultedFk,
+      { id: '', group_id: '' },
+      'update',
+    );
+    expect(updated.group_id).toBeNull();
   });
 });

@@ -52,6 +52,14 @@ picked or round-tripped through the form — `''` is the picker contract's
 unselected sentinel (shared with the single-column picker). Such rows remain
 manageable through the API.
 
+Picker eligibility and the all-or-nothing composite write are **UI-level
+conveniences, not an enforcement boundary**: the form actions validate
+per-column shapes and forward the payload through the configured adapter
+(including service-token mode under `kozou dev`), and the same composite
+component columns are individually editable wherever the relation is not
+picker-eligible. Row-level invariants belong to PostgreSQL constraints and
+RLS — the project's enforcement posture.
+
 Query parameters on the list / view routes:
 
 - `?q=<text>` — case-insensitive search across the resolved

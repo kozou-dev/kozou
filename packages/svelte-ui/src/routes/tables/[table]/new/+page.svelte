@@ -81,7 +81,13 @@
 
 <form method="POST" use:enhance class="space-y-4">
   {#each data.table.columns as col (col.name)}
-    {@const required = !col.nullable && !col.readonly && !col.isPrimaryKey}
+    <!-- Mirrors the schema's required predicate: a DB-suppliable column
+         (DEFAULT / generated) accepts the empty value — the payload drops it
+         so the default applies — and must not be rendered required (#95).
+         CREATE-only: on edit an UPDATE cannot express "reset to DEFAULT",
+         so the edit form keeps such columns required. -->
+    {@const required =
+      !col.nullable && !col.readonly && !col.isPrimaryKey && !col.dbCanSupply}
     {@const relation = relationByField.get(col.name)}
     {@const composite = compositeLayout.hostByField.get(col.name)}
     <div>
@@ -90,6 +96,10 @@
              column; no input of its own. -->
       {:else if composite}
         {@const members = memberColumns(composite)}
+        <!-- Deliberately ignores dbCanSupply: clearing a composite picker
+             empties EVERY component, which is only valid when all of them
+             are nullable — a defaulted NOT NULL component cannot be nulled,
+             so the group keeps its required marker (no clear option). -->
         {@const groupRequired = members.some(
           (c) => !c.nullable && !c.readonly && !c.isPrimaryKey,
         )}
