@@ -1,9 +1,9 @@
 # @kozou/api
 
-> **Stable (Kozou v1.0).** The REST wire format, query grammar, and OpenAPI
-> extensions documented below are a stable contract: they will not change
-> incompatibly without a major release. The one part still evolving is the
-> composite-foreign-key relation shape — see [Stability](#stability).
+> **Stable (Kozou v1.0; composite foreign keys as of v1.1).** The REST wire
+> format, query grammar, and OpenAPI extensions documented below are a stable
+> contract: they will not change incompatibly without a major release — see
+> [Stability](#stability).
 
 Kozou's own REST layer. Given a `SchemaContext` (from `@kozou/introspect`
 + `@kozou/core`) and a PostgreSQL connection, it serves the tables and
@@ -38,6 +38,12 @@ code.
   supported here too. Returns the row, or `404`.
 - `GET /<resource>?as=options&label=<col>&fields=<a,b>&q=<text>&limit=<n>`
   — lightweight relation-select lookup. Returns `{ options: [{ id, label }] }`.
+  For a composite-key resource each `id` is a JSON array of key components in
+  primary-key declaration order. To address that row's item route, build the
+  `{id}` path segment from the components: percent-encode each component and
+  join them with an unescaped comma. A component value that itself contains
+  a comma cannot be represented in the item route (a documented limitation
+  of the comma-joined segment).
 
 ### Writing
 
@@ -77,7 +83,11 @@ PostgreSQL.
 `embed=<relation-chain>` inlines related rows as nested JSON, on both list
 and item reads:
 
-- forward (to-one) and reverse (to-many) relations, mixed in one request;
+- forward (to-one) and reverse (to-many) relations, mixed in one request —
+  including composite (multi-column) foreign keys, which join on every
+  column pair; a forward composite relation is selected by its referenced
+  table name, a reverse one by the child table name, and `x-kozou-embeds`
+  advertises only relations whose selector is unambiguous;
 - dot-separated chains up to 5 deep (`embed=order.customer.region`);
 - comma-separated for several relations (`embed=customer,lines`);
 - up to 25 distinct relations per request, and up to 100 child rows inlined
@@ -100,12 +110,12 @@ Kozou's `@`-annotations become vendor extensions:
 - embeddable relations → `x-kozou-embeds` (with `cardinality`)
 
 The document models the schema, the `x-kozou-*` metadata, and the list /
-item / CRUD surface. A few runtime behaviors are enforced by the server but
-not yet fully modeled in the generated document: create accepts an empty body
-(column defaults) and `PATCH` accepts a partial column subset, the
-`as=options` relation-select mode shares the collection path, and ambiguous
-embeds are rejected at request time. These are being refined; the wire
-behavior itself is stable.
+item / CRUD surface faithfully: create and update carry their own request
+schemas (`<resource>.CreateInput` requires only NOT NULL columns without a
+default; `<resource>.UpdateInput` is a partial subset), the `as=options`
+relation-select mode is documented on the collection path with its alternate
+response shape, and the advertised embed hints match what the server
+resolves at request time.
 
 ## Stability
 
@@ -118,14 +128,21 @@ change without a major release):
   grammar, `as=options`, and `embed`;
 - the `GET /openapi.json` document — OpenAPI 3.1 plus the `x-kozou-ai` /
   `x-kozou-widget` / `x-kozou-policy` / `x-kozou-embeds` extensions;
+- the **composite-foreign-key relation shape** (as of Kozou v1.1) — a
+  multi-column foreign key is a first-class relation. Where advertised in
+  `x-kozou-embeds` it embeds, with the server joining on every column pair.
+  A forward composite relation is selected by its referenced table name
+  (advertised only when no other foreign key shares that target table); a
+  reverse one is selected by the child table name (advertised only when the
+  child has exactly one foreign key back and no forward relation shadows
+  that name). The hint carries `fields` (the local foreign-key columns, in
+  declaration order; the hint is an embed selector, not a join recipe), and
+  `as=options` on a composite-key target returns array option ids whose
+  components follow primary-key declaration order;
 - the auth boundary — JWT claims mapped to `SET LOCAL ROLE` (see below).
 
 Still evolving (not yet covered by the stability guarantee):
 
-- the **composite-foreign-key relation shape**. A composite FK is surfaced
-  as a `BuildIssue` rather than silently dropped, but embedding and
-  relation-select over a composite FK are a fast-follow, so the relation
-  shape they will take is not frozen yet.
 - the **`@kozou/codegen`** output (a separate package, still experimental).
 
 ## Scope: default coverage vs PostgREST opt-out
@@ -143,7 +160,7 @@ deliberate opt-out.
 | Views | ✅ read-only / list | no item-by-id, writes are `405`, no embedding from a view |
 | Embed 1:1 / many-to-1 / 1-to-many | ✅ `embed=` (mixed direction, multi-hop) | forward to-one + reverse to-many |
 | Many-to-many | △ name the junction and chain (`embed=link.far`) | no automatic junction flattening |
-| Relation-select | ✅ `as=options&label=&q=` | composite PK / FK support is a fast-follow |
+| Relation-select | ✅ `as=options&label=&q=` | composite-key targets return array option ids (components in key declaration order) |
 | Filter operators | ✅ `eq` / `neq` / `gt` / `gte` / `lt` / `lte` / `like` / `ilike` / `in` / `is` | |
 | Sort / pagination | ✅ | `sort`, `page` / `pageSize` |
 | COMMENT-native OpenAPI 3.1 (`x-kozou-*`) | ✅ | **Kozou's differentiator** — PostgREST treats COMMENTs as opaque text |
