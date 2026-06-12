@@ -8,8 +8,9 @@
 //     startHttpServer (spec §7.1).
 //
 // Both default to 0.0.0.0 (spec §9.1, so `docker compose` port mapping
-// works); a loud warning fires on a non-loopback bind because neither
-// surface authenticates in v0.1 (spec §18.5).
+// works); a loud warning fires on a non-loopback bind because the UI and
+// MCP listeners have no authentication of their own (the in-house API may
+// enforce JWT auth; the Admin UI warning distinguishes that case).
 //
 // The Admin UI is an adapter-node (SvelteKit) server: without ORIGIN it
 // assumes https and rejects every form POST over plain http with a 403.
@@ -25,9 +26,13 @@ import { loadConfig, type KozouConfig, ADAPTER_KINDS, type AdapterKind } from '.
 import { PACKAGE_VERSION } from '../version.js';
 import {
   buildAdminUiEnv,
+  classifyAdminUiExposure,
+  describeApiAuth,
   resolveAdminUiEntry,
   resolveAdminUiToken,
   resolveOrigin,
+  type AdminUiExposure,
+  type AdminUiTokenResult,
 } from './dev-runtime.js';
 
 export type DevOptions = {
@@ -104,13 +109,30 @@ async function startInhouseApi(config: KozouConfig, port: number): Promise<Inhou
   };
 }
 
-function warnIfPublic(label: string, host: string): void {
+// Warn when a surface with no authentication of its own binds beyond
+// loopback. The Admin UI never has a login of its own; what varies is how
+// the API behind it treats the UI's requests, so the warning states the
+// resolved exposure mode instead of implying nothing (or everything) is
+// protected.
+function warnIfPublic(label: string, host: string, exposure: AdminUiExposure): void {
   if (isLoopbackHost(host)) return;
+  const detail: Record<AdminUiExposure, string> = {
+    unauthenticated: `${PREFIX} It has NO authentication. Anyone who can reach ${host} can use it.\n`,
+    'service-token':
+      `${PREFIX} The API behind it verifies JWTs, but ${label} itself has no login —\n` +
+      `${PREFIX} anyone who can reach ${host} acts with its service token.\n`,
+    'anon-role':
+      `${PREFIX} The API behind it verifies JWTs and ${label} holds no token, so\n` +
+      `${PREFIX} anyone who can reach ${host} acts as the anonymous role.\n`,
+    rejected:
+      `${PREFIX} The API behind it verifies JWTs and ${label} holds no usable token,\n` +
+      `${PREFIX} so the API rejects its requests; the port itself stays reachable.\n`,
+  };
   process.stderr.write(
     `${PREFIX} WARNING: ${label} bound to non-loopback host "${host}".\n` +
-      `${PREFIX} v0.1 has NO authentication (spec §18.5). Anyone who can reach\n` +
-      `${PREFIX} ${host} can use it. This is expected inside docker compose;\n` +
-      `${PREFIX} avoid it on an untrusted network or put an auth proxy in front.\n`,
+      detail[exposure] +
+      `${PREFIX} This is expected inside docker compose; avoid it on an untrusted\n` +
+      `${PREFIX} network or put an auth proxy in front.\n`,
   );
 }
 
@@ -146,21 +168,24 @@ export async function devCommand(opts: DevOptions = {}): Promise<void> {
     : null;
   if (api) {
     process.stderr.write(`${PREFIX} in-house @kozou/api on ${api.url}\n`);
+    // State the auth mode unambiguously: a stack whose KOZOU_JWT_* env never
+    // reached this process fails open, and this line is what surfaces it.
+    process.stderr.write(`${PREFIX} api auth: ${describeApiAuth(config.auth)}\n`);
   }
 
   // When the in-house API enforces auth, resolve the token the bundled Admin
   // UI presents to it: a minted HS256 token, a supplied RS256 / external one,
   // or none (with a warning) when neither is available. @kozou/api is already
   // imported (startInhouseApi succeeded), so this dynamic import is cached.
-  let apiToken: string | undefined;
+  let tokenResult: AdminUiTokenResult | undefined;
   if (api && config.auth) {
     const apiModule = await import('@kozou/api');
-    const resolved = await resolveAdminUiToken(config, apiModule, process.env);
-    if (resolved.warning) {
-      process.stderr.write(`${PREFIX} WARNING: ${resolved.warning}\n`);
+    tokenResult = await resolveAdminUiToken(config, apiModule, process.env);
+    if (tokenResult.warning) {
+      process.stderr.write(`${PREFIX} WARNING: ${tokenResult.warning}\n`);
     }
-    apiToken = resolved.token;
   }
+  const apiToken = tokenResult?.token;
 
   const cache = new SchemaCache({
     connection: config.database.url,
@@ -177,7 +202,11 @@ export async function devCommand(opts: DevOptions = {}): Promise<void> {
   });
 
   // 2. Admin UI, as a child process.
-  warnIfPublic('Admin UI', config.server.ui.host);
+  warnIfPublic(
+    'Admin UI',
+    config.server.ui.host,
+    classifyAdminUiExposure(config.auth, tokenResult, api !== null),
+  );
   const origin = resolveOrigin(config, process.env);
   const child = spawn('node', [adminUiEntry], {
     env: buildAdminUiEnv(config, origin, process.env, api?.url, apiToken),

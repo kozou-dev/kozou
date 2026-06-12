@@ -80,7 +80,7 @@ function nonLoopbackWarning(host: string, prefix: string, authed: boolean): stri
   }
   return (
     `${prefix} WARNING: REST API bound to non-loopback host "${host}".\n` +
-    `${prefix} This API has NO authentication configured (Kozou v0.1 spec §18.5).\n` +
+    `${prefix} This API has NO authentication configured.\n` +
     `${prefix} Anyone who can reach ${host} can read and write this database.\n` +
     `${prefix} Bind to 127.0.0.1 (the default) or configure JWT auth.\n`
   );

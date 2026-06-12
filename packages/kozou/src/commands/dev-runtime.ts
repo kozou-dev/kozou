@@ -53,6 +53,14 @@ export function buildAdminUiEnv(
     ORIGIN: origin,
     NODE_ENV: 'production',
   };
+  // JWT verifier / signing inputs are a CLI-process concern. The
+  // network-facing UI child only ever consumes KOZOU_ADAPTER_*, so the
+  // HS256 secret (or key / JWKS settings) must not extend into it — with
+  // the scaffold compose forwarding KOZOU_JWT_* these are present in the
+  // parent environment on the default path.
+  for (const key of Object.keys(env)) {
+    if (key.startsWith('KOZOU_JWT_')) delete env[key];
+  }
   if (apiAdapterUrl !== undefined) {
     // In-house @kozou/api backend: point the UI at it and attach the token
     // when one was resolved, clearing any inherited stale token otherwise.
@@ -75,6 +83,78 @@ export function buildAdminUiEnv(
   return env;
 }
 
+// Strip anything that could carry a credential out of a URL before it is
+// written to a log: userinfo (https://user:pass@host/...), query (?token=...)
+// and fragment. Keeps scheme + host + path, which is enough to recognize
+// the endpoint.
+function redactUrlForLog(raw: string): string {
+  try {
+    const url = new URL(raw);
+    return `${url.origin}${url.pathname}`;
+  } catch {
+    return '<invalid URL>';
+  }
+}
+
+// One unambiguous startup line about the in-house API's auth state, so a
+// stack whose auth never reached the process (for instance env vars a
+// compose file did not forward) is visible immediately instead of
+// failing open silently. Never includes secret material: only the
+// verification mode and the role configuration (the JWKS URL is redacted
+// to scheme + host + path in case it embeds a credential).
+export function describeApiAuth(auth: KozouConfig['auth']): string {
+  if (auth === undefined) {
+    return 'disabled (no JWT verification configured; requests run as the connection role)';
+  }
+  const mode =
+    auth.jwt.secret !== undefined && auth.jwt.secret.length > 0
+      ? 'HS256 (shared secret)'
+      : auth.jwt.jwksUri !== undefined && auth.jwt.jwksUri.length > 0
+        ? `JWKS (${redactUrlForLog(auth.jwt.jwksUri)})`
+        : auth.jwt.publicKey !== undefined && auth.jwt.publicKey.length > 0
+          ? 'static public key'
+          : 'misconfigured (auth set but no secret / publicKey / jwksUri)';
+  const parts = [mode];
+  if (auth.allowedRoles !== undefined && auth.allowedRoles.length > 0) {
+    parts.push(`allowedRoles=[${auth.allowedRoles.join(', ')}]`);
+  }
+  if (auth.defaultRole !== undefined) parts.push(`defaultRole=${auth.defaultRole}`);
+  if (auth.anonRole !== undefined) parts.push(`anonRole=${auth.anonRole}`);
+  if (auth.ui?.role !== undefined) parts.push(`ui role=${auth.ui.role}`);
+  else if (auth.ui?.token !== undefined) parts.push('ui token=supplied');
+  return parts.join(', ');
+}
+
+// How a publicly bound Admin UI exposes the data behind it. Decided from
+// what was actually resolved at startup (not just whether auth is
+// configured), so the non-loopback warning never overstates protection:
+//   - 'unauthenticated': no JWT verification (or an external adapter whose
+//     auth kozou does not manage) — the UI is an open door to the data;
+//   - 'service-token':   the UI holds a usable token, so every visitor acts
+//     with it;
+//   - 'anon-role':       auth is on but the UI holds no token; the API runs
+//     its requests as the configured anonymous role (anonRole applies only
+//     to requests with no Authorization header, so a present-but-rejected
+//     token never falls back to it);
+//   - 'rejected':        the API answers the UI with 401/403 — either no
+//     token and no anonRole, or a token the resolver already knows the API
+//     will reject — but the UI port itself stays reachable.
+export type AdminUiExposure = 'unauthenticated' | 'service-token' | 'anon-role' | 'rejected';
+
+export function classifyAdminUiExposure(
+  auth: KozouConfig['auth'],
+  tokenResult: AdminUiTokenResult | undefined,
+  inhouseApi: boolean,
+): AdminUiExposure {
+  if (!inhouseApi || auth === undefined) return 'unauthenticated';
+  const token = tokenResult?.token;
+  if (token !== undefined && token.length > 0) {
+    return tokenResult?.knownRejected === true ? 'rejected' : 'service-token';
+  }
+  if (auth.anonRole !== undefined && auth.anonRole.length > 0) return 'anon-role';
+  return 'rejected';
+}
+
 // The slice of @kozou/api that resolveAdminUiToken needs, declared locally
 // so the resolver unit-tests with a stub instead of the real module.
 export type ServiceTokenMinter = {
@@ -92,6 +172,10 @@ export type AdminUiTokenResult = {
   token?: string;
   /** Operator-facing reason the UI will be rejected, when no usable token. */
   warning?: string;
+  /** The resolver already knows the API will reject this token with 403
+   *  (minted with no role and no defaultRole, or a role outside
+   *  allowedRoles). Lets the exposure classification below stay honest. */
+  knownRejected?: boolean;
 };
 
 // Decide what token (if any) the bundled Admin UI should send to @kozou/api,
@@ -127,7 +211,7 @@ export async function resolveAdminUiToken(
       audience: auth.jwt.audience,
     });
     const warning = mintedRoleWarning(auth, role);
-    return warning !== undefined ? { token, warning } : { token };
+    return warning !== undefined ? { token, warning, knownRejected: true } : { token };
   }
 
   return {

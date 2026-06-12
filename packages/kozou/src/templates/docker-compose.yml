@@ -44,6 +44,24 @@ services:
       # Set it to the exact URL you open in the browser; override if you
       # publish the Admin UI on a different host or port.
       ORIGIN: ${KOZOU_ORIGIN:-http://localhost:3333}
+      # JWT auth (see .env.example). Compose reads .env for ${VAR}
+      # interpolation only, so every variable must be forwarded here
+      # explicitly to reach the container. An empty value means unset:
+      # kozou treats empty auth variables as absent, so leaving these
+      # blank keeps auth off (it never means "HS256 with empty secret").
+      KOZOU_JWT_SECRET: ${KOZOU_JWT_SECRET:-}
+      KOZOU_JWT_PUBLIC_KEY: ${KOZOU_JWT_PUBLIC_KEY:-}
+      KOZOU_JWT_JWKS_URI: ${KOZOU_JWT_JWKS_URI:-}
+      KOZOU_JWT_ALGORITHMS: ${KOZOU_JWT_ALGORITHMS:-}
+      KOZOU_JWT_ISSUER: ${KOZOU_JWT_ISSUER:-}
+      KOZOU_JWT_AUDIENCE: ${KOZOU_JWT_AUDIENCE:-}
+      KOZOU_JWT_ROLE_CLAIM: ${KOZOU_JWT_ROLE_CLAIM:-}
+      KOZOU_JWT_ALLOWED_ROLES: ${KOZOU_JWT_ALLOWED_ROLES:-}
+      KOZOU_JWT_DEFAULT_ROLE: ${KOZOU_JWT_DEFAULT_ROLE:-}
+      KOZOU_JWT_ANON_ROLE: ${KOZOU_JWT_ANON_ROLE:-}
+      KOZOU_JWT_CLAIMS_GUC: ${KOZOU_JWT_CLAIMS_GUC:-}
+      KOZOU_UI_ROLE: ${KOZOU_UI_ROLE:-}
+      KOZOU_ADAPTER_TOKEN: ${KOZOU_ADAPTER_TOKEN:-}
     depends_on:
       postgres:
         condition: service_healthy

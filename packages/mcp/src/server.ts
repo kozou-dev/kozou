@@ -32,7 +32,7 @@ const TOOL_DEFINITIONS = [
       type: 'object',
       properties: {
         schema: { type: 'string', description: 'Target schema (default: public)' },
-        includeSystem: { type: 'boolean', description: 'Include system schemas (ignored in v0.1)' },
+        includeSystem: { type: 'boolean', description: 'Include system schemas (currently ignored)' },
       },
     },
   },
