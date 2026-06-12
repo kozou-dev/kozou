@@ -71,7 +71,7 @@ export function buildAdminUiEnv(
   // config — delete any inherited value when the feature is off, so a stray
   // parent KOZOU_INTROSPECTION_ROLE cannot silently turn it on.
   // A ready-made token only actually gates role resolution on the in-house API
-  // path: the PostgREST opt-out below clears KOZOU_ADAPTER_TOKEN and the UI
+  // path: the external REST opt-out below clears KOZOU_ADAPTER_TOKEN and the UI
   // never forwards it, so an inherited token there must not force
   // introspection.role. Detect a real ready-made token (config or inherited
   // env) only when the API path is active.
