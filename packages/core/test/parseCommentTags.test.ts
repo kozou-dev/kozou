@@ -236,4 +236,95 @@ describe('parseCommentTags', () => {
     const r = parseCommentTags('text\n\n  \n');
     expect(r.body).toBe('text');
   });
+
+  describe('mid-line tags (recognized at line start only)', () => {
+    it('a known tag mid-line is not parsed, stays in body, and warns', () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const r = parseCommentTags('Free-form notes. @widget: textarea');
+      expect(r.widget).toBeNull();
+      expect(r.body).toBe('Free-form notes. @widget: textarea');
+      expect(warn).toHaveBeenCalledOnce();
+      expect(warn.mock.calls[0]![0]).toMatch(/mid-line "@widget:" is not parsed/);
+    });
+
+    it('the same tag at line start parses without a warning', () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const r = parseCommentTags('Free-form notes.\n@widget: textarea');
+      expect(r.widget).toBe('textarea');
+      expect(warn).not.toHaveBeenCalled();
+    });
+
+    it('does not warn inside an @example block (SQL legitimately contains @ text)', () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const r = parseCommentTags(
+        "Sales view.\n@example: literal tags in SQL\n  SELECT '@widget: text' AS note;",
+      );
+      expect(r.examples).toHaveLength(1);
+      expect(r.examples[0]!.sql).toContain("'@widget: text'");
+      expect(warn).not.toHaveBeenCalled();
+    });
+
+    it('warns on a mid-line tag inside an @ai continuation line (content still captured)', () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const r = parseCommentTags('@ai: first line\n  also see @policy: something');
+      expect(r.ai).toEqual(['first line\nalso see @policy: something']);
+      expect(r.policy).toEqual([]);
+      expect(warn).toHaveBeenCalledOnce();
+      expect(warn.mock.calls[0]![0]).toMatch(/mid-line "@policy:"/);
+    });
+
+    it('does not warn on unknown tokens or email-like text', () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const r = parseCommentTags('Contact someone@example.com or see @todo: later');
+      expect(r.body).toBe('Contact someone@example.com or see @todo: later');
+      expect(warn).not.toHaveBeenCalled();
+    });
+
+    it('matches the tag token case-insensitively, like line-start tags', () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      parseCommentTags('note @Widget: textarea');
+      expect(warn).toHaveBeenCalledOnce();
+    });
+
+    it('warns once per offending line', () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      parseCommentTags('a @ai: x and @widget: y\nplain line\nmore @policy: z');
+      expect(warn).toHaveBeenCalledTimes(2);
+    });
+
+    it('warns when a known tag is embedded in a tag-line value (@ai)', () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const r = parseCommentTags('@ai: note @policy: secret');
+      // The embedded tag is NOT parsed — the literal text stays in the value.
+      expect(r.policy).toEqual([]);
+      expect(r.ai).toEqual(['note @policy: secret']);
+      expect(warn).toHaveBeenCalledOnce();
+      expect(warn.mock.calls[0]![0]).toMatch(/mid-line "@policy:"/);
+    });
+
+    it('warns when a known tag is embedded in an @example description', () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const r = parseCommentTags('@example: desc @widget: textarea\n  SELECT 1;');
+      expect(r.widget).toBeNull();
+      expect(r.examples[0]!.description).toBe('desc @widget: textarea');
+      expect(warn).toHaveBeenCalledOnce();
+      expect(warn.mock.calls[0]![0]).toMatch(/mid-line "@widget:"/);
+    });
+
+    it('stays linear on adversarial dense-@ input', () => {
+      // A quadratic detector stalls on this shape (prefix re-scans per @);
+      // the single-pass scan finishes instantly. Guarded by the test
+      // timeout — quadratic behavior here costs tens of seconds.
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const dense = `x ${'@'.repeat(200_000)}`;
+      const r = parseCommentTags(dense);
+      expect(r.body).toBe(dense);
+      expect(warn).not.toHaveBeenCalled();
+
+      const identifiers = `x ${'@aaaaaaaa'.repeat(25_000)}`;
+      const r2 = parseCommentTags(identifiers);
+      expect(r2.body).toBe(identifiers);
+      expect(warn).not.toHaveBeenCalled();
+    });
+  });
 });

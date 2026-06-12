@@ -2,6 +2,11 @@
 // `@policy:`, `@example:`). See Kozou v0.1 design spec §10.1 for the
 // tag vocabulary and §7.3.6 for the `exampleQueries` MCP surface.
 //
+// Tags are recognized at line start only (after optional leading
+// whitespace). A known tag written mid-line is NOT parsed — the text
+// stays in `body` verbatim — and emits a warning so the leak into
+// OpenAPI / MCP descriptions is not silent.
+//
 // `@ai:`, `@policy:`, and `@example:` are multi-line: the tag line
 // carries the first value (may be empty), and indented continuation
 // lines extend it. A blank line, a non-indented line, or the next
@@ -39,6 +44,68 @@ const KNOWN_TAGS = new Set(['ai', 'widget', 'policy', 'example']);
 // uses single, non-overlapping `\s*` groups, so matching stays linear.
 const TAG_RE = /^\s*@([a-zA-Z_][a-zA-Z0-9_]*)\s*:(.*)$/;
 const INDENT_RE = /^[ \t]/;
+const LINE_WS_RE = /\s/;
+
+function isIdentStart(code: number): boolean {
+  return (
+    (code >= 97 && code <= 122) || // a-z
+    (code >= 65 && code <= 90) || // A-Z
+    code === 95 // _
+  );
+}
+
+function isIdentChar(code: number): boolean {
+  return isIdentStart(code) || (code >= 48 && code <= 57); // + 0-9
+}
+
+// Manual scan for `<identifier>\s*:` at a given offset — the tag-token
+// shape TAG_RE recognizes, without a regex. This sits on the COMMENT
+// dataflow path, where CodeQL flags closure-adjacent regex shapes as
+// polynomial-ReDoS (the established workaround in this package is a
+// linear character scan). Returns the identifier, or null.
+function tagTokenAt(line: string, start: number): string | null {
+  let i = start;
+  if (i >= line.length || !isIdentStart(line.charCodeAt(i))) return null;
+  i += 1;
+  while (i < line.length && isIdentChar(line.charCodeAt(i))) i += 1;
+  const token = line.slice(start, i);
+  while (i < line.length && LINE_WS_RE.test(line[i]!)) i += 1;
+  return i < line.length && line[i] === ':' ? token : null;
+}
+
+// Tags are recognized at line start only. A *known* tag written mid-line
+// is the silent-leak case from the field: it is neither parsed nor
+// removed, so the literal tag text flows into `body` (and tag values) and
+// from there into OpenAPI / MCP descriptions. Detect it so the loop can
+// warn (the same courtesy the invalid-value and unknown-tag paths already
+// extend). Single pass: `seenContent` tracks whether any non-whitespace
+// precedes the current position, so a line-start `@` (TAG_RE territory)
+// never trips it, and no prefix is re-scanned per `@`. Email-style text
+// (`user@example.com`) does not trip this: the token must be followed by
+// a colon. Unknown tokens (`@todo:`) stay silent — mid-line prose is the
+// normal place to mention such things.
+function midlineKnownTag(line: string): string | null {
+  let seenContent = false;
+  for (let i = 0; i < line.length; i += 1) {
+    const ch = line[i]!;
+    if (ch === '@' && seenContent) {
+      const token = tagTokenAt(line, i + 1);
+      if (token !== null && KNOWN_TAGS.has(token.toLowerCase())) {
+        return `@${token}:`;
+      }
+    }
+    if (!seenContent && !LINE_WS_RE.test(ch)) seenContent = true;
+  }
+  return null;
+}
+
+function warnMidlineTag(token: string): void {
+  console.warn(
+    `[@kozou/core] parseCommentTags: mid-line "${token}" is not parsed ` +
+      '(tags are recognized at line start only; the text stays in the ' +
+      'description verbatim)',
+  );
+}
 
 export type ExampleQuery = {
   description: string;
@@ -111,6 +178,8 @@ export function parseCommentTags(comment: string | null): ParsedComment {
         INDENT_RE.test(line) &&
         !TAG_RE.test(line)
       ) {
+        const midline = midlineKnownTag(line);
+        if (midline !== null) warnMidlineTag(midline);
         pending.lines.push(line.trim());
         bodyLines.push(line);
         continue;
@@ -118,6 +187,15 @@ export function parseCommentTags(comment: string | null): ParsedComment {
       // Anything else ends the block; re-process this line below.
       flushPending();
     }
+
+    // Warn for a known tag stranded mid-line — on body lines and inside
+    // tag-line values alike (`@ai: note @policy: x` captures the literal
+    // `@policy: x` into the value; `@example: desc @widget: y` surfaces it
+    // in the example description). Example-block SQL never reaches here:
+    // the block collector above absorbs indented/blank lines without
+    // warning, since SQL legitimately contains `@…` text.
+    const midline = midlineKnownTag(line);
+    if (midline !== null) warnMidlineTag(midline);
 
     const match = TAG_RE.exec(line);
     if (!match) {
