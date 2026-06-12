@@ -102,11 +102,14 @@ const jwtAuthSchema = z.object({
 
 // How the bundled Admin UI authenticates to @kozou/api when auth is on. This
 // is a CLI-only concern (not part of @kozou/api's AuthConfig): under HS256 the
-// CLI mints a token claiming `role`; for RS256 / an external IdP it cannot
-// mint, so `token` carries a ready-made one through to the UI instead.
+// CLI mints a token claiming `role` plus the optional `claims` (for RLS
+// policies that read request.jwt.claims beyond the role, e.g. a tenant id);
+// for RS256 / an external IdP it cannot mint, so `token` carries a
+// ready-made one through to the UI instead.
 const authUiSchema = z.object({
   role: z.string().min(1).optional(),
   token: z.string().min(1).optional(),
+  claims: z.record(z.string(), z.unknown()).optional(),
 });
 
 const authSchema = z.object({
@@ -258,13 +261,42 @@ function injectAuthFromEnv(raw: unknown, env: NodeJS.ProcessEnv): unknown {
   if (env.KOZOU_JWT_CLAIMS_GUC) auth.claimsGuc = env.KOZOU_JWT_CLAIMS_GUC;
 
   // How the bundled Admin UI authenticates: KOZOU_UI_ROLE names the role the
-  // CLI mints an HS256 token for; KOZOU_ADAPTER_TOKEN supplies a ready-made
-  // token (RS256 / external IdP, where the CLI cannot mint).
+  // CLI mints an HS256 token for; KOZOU_UI_CLAIMS is a JSON object of extra
+  // claims to mint into it; KOZOU_ADAPTER_TOKEN supplies a ready-made token
+  // (RS256 / external IdP, where the CLI cannot mint).
   const ui: Record<string, unknown> = {};
   if (env.KOZOU_UI_ROLE) ui.role = env.KOZOU_UI_ROLE;
+  if (env.KOZOU_UI_CLAIMS) ui.claims = parseUiClaimsEnv(env.KOZOU_UI_CLAIMS);
   if (env.KOZOU_ADAPTER_TOKEN) ui.token = env.KOZOU_ADAPTER_TOKEN;
   if (Object.keys(ui).length > 0) auth.ui = ui;
   return { ...obj, auth };
+}
+
+// KOZOU_UI_CLAIMS must be a JSON object. A malformed value fails loudly at
+// startup — silently minting a token without the expected claims would be
+// the same silent-misconfiguration class as unforwarded auth env vars
+// (every RLS policy keyed on a claim would just see nothing).
+function parseUiClaimsEnv(raw: string): Record<string, unknown> {
+  // The CLI surfaces only the top-level error message, so the actionable
+  // detail (which env var, what is wrong with it) must live there — not
+  // just in the structured issues.
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    const detail = `KOZOU_UI_CLAIMS is not valid JSON: ${message}`;
+    throw new KozouConfigError(`Invalid kozou config: ${detail}`, null, [
+      { path: 'auth.ui.claims', message: detail },
+    ]);
+  }
+  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    const detail = 'KOZOU_UI_CLAIMS must be a JSON object, e.g. {"tenant_id":"acme"}.';
+    throw new KozouConfigError(`Invalid kozou config: ${detail}`, null, [
+      { path: 'auth.ui.claims', message: detail },
+    ]);
+  }
+  return parsed as Record<string, unknown>;
 }
 
 export async function loadConfig(opts: LoadConfigOptions = {}): Promise<KozouConfig> {

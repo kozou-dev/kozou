@@ -65,6 +65,21 @@ export type Authenticator = {
   authenticate(authorizationHeader: string | undefined): Promise<AuthContext>;
 };
 
+// Registered JWT claims with temporal / issuer semantics the verifier (and
+// the service-token mint) actively control. Naming one of these as the role
+// claim cannot work — the role value would be validated as a timestamp or
+// overridden by the mint — so it fails fast instead of failing per request.
+const RESERVED_ROLE_CLAIMS: ReadonlySet<string> = new Set(['exp', 'nbf', 'iat', 'iss', 'aud']);
+
+function assertUsableRoleClaim(roleClaim: string, context: string): void {
+  if (RESERVED_ROLE_CLAIMS.has(roleClaim)) {
+    throw new Error(
+      `${context}: roleClaim "${roleClaim}" is a registered JWT claim ` +
+        '("exp", "nbf", "iat", "iss", "aud") and cannot carry the role.',
+    );
+  }
+}
+
 /** Validate config (throws a plain Error at startup on misconfiguration),
  *  import the key once, and return a verifier closure. */
 export function createAuthenticator(config: AuthConfig): Authenticator {
@@ -81,6 +96,7 @@ export function createAuthenticator(config: AuthConfig): Authenticator {
 
   const algorithms = jwt.algorithms ?? (hasSecret ? ['HS256'] : ['RS256']);
   const roleClaim = config.roleClaim ?? 'role';
+  assertUsableRoleClaim(roleClaim, '@kozou/api auth');
   const claimsGuc = config.claimsGuc ?? 'request.jwt.claims';
 
   const verifyOptions: JWTVerifyOptions = { algorithms };
@@ -175,6 +191,13 @@ export type ServiceTokenOptions = {
   issuer?: string;
   /** `aud` to set; required when the verifier expects a matching audience. */
   audience?: string | string[];
+  /** Extra claims merged into the payload (flat, shallow) — for RLS
+   *  policies that read `request.jwt.claims` beyond the role, e.g. a
+   *  tenant id. The role claim is always controlled by `role`/`roleClaim`
+   *  (a colliding key here is dropped, even when no role is set); `iat`
+   *  is always set by the mint; `iss`/`aud` win when `issuer`/`audience`
+   *  are given. */
+  claims?: Record<string, unknown>;
 };
 
 /**
@@ -194,7 +217,13 @@ export async function signServiceToken(opts: ServiceTokenOptions): Promise<strin
     throw new Error('@kozou/api signServiceToken: a non-empty HS256 secret is required.');
   }
   const roleClaim = opts.roleClaim ?? 'role';
-  const payload: JWTPayload = {};
+  assertUsableRoleClaim(roleClaim, '@kozou/api signServiceToken');
+  // Extra claims first, so the explicit settings below always win. The
+  // role claim is reserved unconditionally: dropping a colliding key even
+  // when no `role` is set keeps the role decision in `role`/`defaultRole`
+  // (a claims entry must not smuggle one in).
+  const payload: JWTPayload = { ...(opts.claims ?? {}) };
+  delete payload[roleClaim];
   if (typeof opts.role === 'string' && opts.role.length > 0) {
     payload[roleClaim] = opts.role;
   }

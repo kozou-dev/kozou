@@ -163,6 +163,8 @@ auth:
   anonRole: web_anon                   # role for requests with no token (else 401)
   ui:
     role: app_admin                    # role the bundled Admin UI runs as (HS256)
+    claims:                            # extra claims minted into the UI token (HS256)
+      tenant_id: acme                  #   for RLS policies reading request.jwt.claims
     # token: ${KOZOU_ADAPTER_TOKEN}    # RS256 / external IdP: supply a token instead
 ```
 
@@ -174,8 +176,10 @@ With no `auth:` block, the section is built instead from
 `KOZOU_JWT_SECRET` / `KOZOU_JWT_PUBLIC_KEY` / `KOZOU_JWT_JWKS_URI` /
 `KOZOU_JWT_ALGORITHMS` / `KOZOU_JWT_ISSUER` / `KOZOU_JWT_AUDIENCE` /
 `KOZOU_JWT_ROLE_CLAIM` / `KOZOU_JWT_ALLOWED_ROLES` / `KOZOU_JWT_DEFAULT_ROLE` /
-`KOZOU_JWT_ANON_ROLE` / `KOZOU_UI_ROLE` / `KOZOU_ADAPTER_TOKEN` (algorithms
-and roles are comma-separated). A role outside `allowedRoles` gets `403`. A request with
+`KOZOU_JWT_ANON_ROLE` / `KOZOU_UI_ROLE` / `KOZOU_UI_CLAIMS` /
+`KOZOU_ADAPTER_TOKEN` (algorithms and roles are comma-separated;
+`KOZOU_UI_CLAIMS` takes a JSON object and fails loudly at startup when
+malformed). A role outside `allowedRoles` gets `403`. A request with
 no token gets `401` unless `anonRole` is set, in which case it runs under
 that role and your RLS policies decide what it sees (a present but invalid
 token is always `401`). The login role of `database.url` must be `GRANT`ed
@@ -186,10 +190,18 @@ membership in every allowed role, and in `anonRole` when set.
 The Admin UI calls `@kozou/api` server-side, so when `auth` is on it must
 send a token too. Under **HS256** the CLI mints one for the UI claiming
 `auth.ui.role` (or, if unset, no role — the API then applies `defaultRole`);
-set `auth.ui.role` to the role the console should run as. Under **RS256**
-or an external identity provider the CLI cannot mint, so supply a
-ready-made token via `auth.ui.token` (or the `KOZOU_ADAPTER_TOKEN` env);
-without it the UI is rejected with `401` and the CLI logs how to fix it.
+set `auth.ui.role` to the role the console should run as. RLS policies
+usually need more than the role: `auth.ui.claims` (or `KOZOU_UI_CLAIMS`,
+a JSON object) merges extra claims — a tenant id, an operator flag — into
+the minted token, where `request.jwt.claims` makes them visible to your
+policies. The merge is flat: the role claim is always controlled by
+`auth.ui.role` (a colliding key is dropped with a startup warning), and
+`iat` / configured `iss` / `aud` win likewise. These are *service-token*
+claims — everyone who can reach the UI port acts with them. Under
+**RS256** or an external identity provider the CLI cannot mint, so supply
+a ready-made token via `auth.ui.token` (or the `KOZOU_ADAPTER_TOKEN` env);
+without it the UI is rejected with `401` and the CLI logs how to fix it
+(`auth.ui.claims` only applies to tokens the CLI mints itself).
 The minted role must satisfy `allowedRoles` or the UI gets `403`.
 
 ## License
