@@ -44,13 +44,34 @@ const KNOWN_TAGS = new Set(['ai', 'widget', 'policy', 'example']);
 // uses single, non-overlapping `\s*` groups, so matching stays linear.
 const TAG_RE = /^\s*@([a-zA-Z_][a-zA-Z0-9_]*)\s*:(.*)$/;
 const INDENT_RE = /^[ \t]/;
-// Sticky check for a tag token at a given offset; used by the mid-line
-// detector below. Sticky (`y`) so it matches at `lastIndex` without
-// slicing the string — the attempt cost is bounded by the token it scans,
-// keeping the whole detector linear (no unanchored regex, the CodeQL-safe
-// shape like TAG_RE above).
-const TAG_AT_STICKY = /([a-zA-Z_][a-zA-Z0-9_]*)\s*:/y;
 const LINE_WS_RE = /\s/;
+
+function isIdentStart(code: number): boolean {
+  return (
+    (code >= 97 && code <= 122) || // a-z
+    (code >= 65 && code <= 90) || // A-Z
+    code === 95 // _
+  );
+}
+
+function isIdentChar(code: number): boolean {
+  return isIdentStart(code) || (code >= 48 && code <= 57); // + 0-9
+}
+
+// Manual scan for `<identifier>\s*:` at a given offset — the tag-token
+// shape TAG_RE recognizes, without a regex. This sits on the COMMENT
+// dataflow path, where CodeQL flags closure-adjacent regex shapes as
+// polynomial-ReDoS (the established workaround in this package is a
+// linear character scan). Returns the identifier, or null.
+function tagTokenAt(line: string, start: number): string | null {
+  let i = start;
+  if (i >= line.length || !isIdentStart(line.charCodeAt(i))) return null;
+  i += 1;
+  while (i < line.length && isIdentChar(line.charCodeAt(i))) i += 1;
+  const token = line.slice(start, i);
+  while (i < line.length && LINE_WS_RE.test(line[i]!)) i += 1;
+  return i < line.length && line[i] === ':' ? token : null;
+}
 
 // Tags are recognized at line start only. A *known* tag written mid-line
 // is the silent-leak case from the field: it is neither parsed nor
@@ -68,10 +89,9 @@ function midlineKnownTag(line: string): string | null {
   for (let i = 0; i < line.length; i += 1) {
     const ch = line[i]!;
     if (ch === '@' && seenContent) {
-      TAG_AT_STICKY.lastIndex = i + 1;
-      const m = TAG_AT_STICKY.exec(line);
-      if (m !== null && KNOWN_TAGS.has(m[1]!.toLowerCase())) {
-        return `@${m[1]!}:`;
+      const token = tagTokenAt(line, i + 1);
+      if (token !== null && KNOWN_TAGS.has(token.toLowerCase())) {
+        return `@${token}:`;
       }
     }
     if (!seenContent && !LINE_WS_RE.test(ch)) seenContent = true;
