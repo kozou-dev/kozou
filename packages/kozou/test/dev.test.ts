@@ -560,3 +560,64 @@ describe('resolveAdminUiEntry', () => {
     expect(existsSync(entry)).toBe(true);
   });
 });
+
+describe('buildAdminUiEnv privilege-aware introspection (#99)', () => {
+  it('omits KOZOU_INTROSPECTION_ROLE when respectPrivileges is off', async () => {
+    const config = await makeConfig();
+    const env = buildAdminUiEnv(config, 'http://localhost:3333', {});
+    expect(env.KOZOU_INTROSPECTION_ROLE).toBeUndefined();
+  });
+
+  it('passes the resolved role through when respectPrivileges is on', async () => {
+    const base = await makeConfig();
+    const config: KozouConfig = {
+      ...base,
+      introspection: { respectPrivileges: true },
+      auth: { jwt: { secret: 's' }, ui: { role: 'app_user' } },
+    };
+    const env = buildAdminUiEnv(config, 'http://localhost:3333', {});
+    expect(env.KOZOU_INTROSPECTION_ROLE).toBe('app_user');
+  });
+
+  it('is authoritative: a stray parent value is dropped when the feature is off', async () => {
+    const config = await makeConfig();
+    const env = buildAdminUiEnv(config, 'http://localhost:3333', {
+      KOZOU_INTROSPECTION_ROLE: 'sneaky',
+    });
+    expect(env.KOZOU_INTROSPECTION_ROLE).toBeUndefined();
+  });
+
+  it('throws on the API path when a KOZOU_ADAPTER_TOKEN is inherited but no introspection.role is set', async () => {
+    const base = await makeConfig();
+    const config: KozouConfig = {
+      ...base,
+      introspection: { respectPrivileges: true },
+      auth: { jwt: { secret: 's' }, ui: { role: 'app_user' } },
+    };
+    // On the in-house API path a ready-made token in the environment wins over
+    // minting, so its role — not auth.ui.role — is what the UI uses; the
+    // resolver must refuse to guess.
+    expect(() =>
+      buildAdminUiEnv(
+        config,
+        'http://localhost:3333',
+        { KOZOU_ADAPTER_TOKEN: 'env.jwt' },
+        'http://127.0.0.1:3335',
+      ),
+    ).toThrow();
+  });
+
+  it('REST opt-out path does NOT gate on an inherited KOZOU_ADAPTER_TOKEN (it is cleared, never used)', async () => {
+    const base = await makeConfig();
+    const config: KozouConfig = {
+      ...base,
+      introspection: { respectPrivileges: true },
+      auth: { jwt: { secret: 's' }, ui: { role: 'app_user' } },
+    };
+    // No apiAdapterUrl -> REST opt-out: the token is cleared and the UI talks to
+    // config.adapter.url, so the inherited token must not force introspection.role.
+    const env = buildAdminUiEnv(config, 'http://localhost:3333', { KOZOU_ADAPTER_TOKEN: 'env.jwt' });
+    expect(env.KOZOU_ADAPTER_TOKEN).toBeUndefined();
+    expect(env.KOZOU_INTROSPECTION_ROLE).toBe('app_user');
+  });
+});

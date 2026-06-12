@@ -16,6 +16,7 @@ import {
   promoteCompositeMemberWidgets,
   relationFieldConfigs,
 } from '$lib/form/relation-field-config.js';
+import { applyPrivilegeReadonly } from '$lib/form/privilege-readonly.js';
 import { zodFromTable } from '$lib/form/zod-from-table.js';
 import { encodeResourceId, parseResourceId } from '$lib/resource-id.js';
 import { getAdapter } from '$lib/server/adapter.js';
@@ -55,10 +56,13 @@ function tableViewModel(table: TableContext) {
 }
 
 export const load: PageServerLoad = async ({ params, locals }) => {
-  const table = findTable(locals.schema.tables, params.table);
-  if (!table) {
+  const found = findTable(locals.schema.tables, params.table);
+  if (!found) {
     throw error(404, `Unknown table: ${params.table}`);
   }
+  // Privilege-aware mode (#99): a column the role cannot UPDATE is read-only on
+  // edit. No-op when privileges were not evaluated.
+  const table = applyPrivilegeReadonly(found, 'update');
   const adapter = getAdapter(locals.schema);
   const id = parseResourceId(params.id, table.primaryKey);
   const row = await adapter.get(table.qualifiedName, id);
@@ -84,10 +88,11 @@ export const load: PageServerLoad = async ({ params, locals }) => {
 
 export const actions: Actions = {
   default: async ({ request, params, locals }) => {
-    const table = findTable(locals.schema.tables, params.table);
-    if (!table) {
+    const found = findTable(locals.schema.tables, params.table);
+    if (!found) {
       throw error(404, `Unknown table: ${params.table}`);
     }
+    const table = applyPrivilegeReadonly(found, 'update');
     const relations = relationFieldConfigs(table, locals.schema);
     const formTable = promoteCompositeMemberWidgets(
       demoteUnpickableRelations(table, relations),

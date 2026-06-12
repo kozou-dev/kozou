@@ -26,7 +26,19 @@ const cache = new SchemaCache({
         'hooks.server: DATABASE_URL is required to introspect the schema.',
       );
     }
-    const raw = await introspect({ connection });
+    // Privilege-aware introspection (issue #99): when `kozou dev` resolves a
+    // role for the Admin UI (introspection.respectPrivileges on), it passes it
+    // through as KOZOU_INTROSPECTION_ROLE. Present + non-empty => evaluate that
+    // role's table/column privileges so unreadable tables are hidden and
+    // non-updatable columns render read-only. Absent => schema-faithful (the
+    // default; the @kozou/api server and MCP stay schema-wide regardless).
+    const privilegeRole = process.env.KOZOU_INTROSPECTION_ROLE;
+    const raw = await introspect({
+      connection,
+      ...(typeof privilegeRole === 'string' && privilegeRole.length > 0
+        ? { privilegeRole }
+        : {}),
+    });
     return buildSchemaContext({ raw });
   },
 });

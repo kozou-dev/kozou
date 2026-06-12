@@ -56,14 +56,16 @@
   >
     Edit
   </a>
-  <form method="POST" action="?/delete" use:enhance>
-    <button
-      type="submit"
-      class="rounded-md border border-destructive px-4 py-2 text-sm font-medium text-destructive"
-    >
-      Delete
-    </button>
-  </form>
+  {#if data.table.canDelete}
+    <form method="POST" action="?/delete" use:enhance>
+      <button
+        type="submit"
+        class="rounded-md border border-destructive px-4 py-2 text-sm font-medium text-destructive"
+      >
+        Delete
+      </button>
+    </form>
+  {/if}
   <a
     href={`/tables/${data.table.qualifiedName}`}
     class="rounded-md border border-border px-4 py-2 text-sm font-medium"

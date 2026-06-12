@@ -21,6 +21,27 @@ export type RawIntrospection = {
   functions: RawFunction[];
 };
 
+/** Privileges of one role on a table, evaluated by `has_table_privilege`.
+ *  Only populated when introspection runs with `privilegeRole` set (the
+ *  opt-in privilege-aware mode, Kozou issue #99); otherwise `undefined`,
+ *  meaning "privileges were not evaluated" — distinct from "all denied". */
+export type RawTablePrivileges = {
+  /** Evaluated for this role name. */
+  role: string;
+  select: boolean;
+  insert: boolean;
+  update: boolean;
+  delete: boolean;
+};
+
+/** Privileges of one role on a single column, from `has_column_privilege`.
+ *  Postgres reports a column privilege as held when it is granted either at
+ *  the column level or table-wide, so these subsume the table grants. */
+export type RawColumnPrivileges = {
+  insert: boolean;
+  update: boolean;
+};
+
 export type RawTable = {
   schema: string;
   name: string;
@@ -31,6 +52,9 @@ export type RawTable = {
   foreignKeys: RawForeignKey[];
   checks: RawCheck[];
   indexes: RawIndex[];
+  /** Privileges of the serving role, present only in privilege-aware mode
+   *  (issue #99). `undefined` = not evaluated. */
+  privileges?: RawTablePrivileges;
   /** Planner-maintained row count estimate (`pg_class.reltuples`).
    *  PostgreSQL stores -1 for "never analyzed"; that case maps to
    *  null here so consumers always see "a non-negative count, or
@@ -50,6 +74,9 @@ export type RawColumn = {
   comment: string | null;
   /** Ordinal position (1-based, from information_schema.columns) */
   position: number;
+  /** Privileges of the serving role on this column, present only in
+   *  privilege-aware mode (issue #99). `undefined` = not evaluated. */
+  privileges?: RawColumnPrivileges;
 };
 
 export type RawForeignKey = {
@@ -93,6 +120,10 @@ export type RawView = {
   underlyingTables: { schema: string; name: string }[];
   /** pg_views.definition */
   definition: string;
+  /** Privileges of the serving role, present only in privilege-aware mode
+   *  (issue #99). A view the role cannot SELECT (or whose schema it cannot
+   *  USAGE) is hidden, like a table. `undefined` = not evaluated. */
+  privileges?: RawTablePrivileges;
 };
 
 export type RawEnum = {

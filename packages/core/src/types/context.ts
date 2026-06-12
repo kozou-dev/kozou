@@ -63,8 +63,19 @@ export type ColumnContext = {
   widget: WidgetType;
   /** Values extracted from CHECK constraints, or PostgreSQL ENUM members */
   enumValues: string[] | null;
-  /** Sourced from UI Hints */
+  /** Read-only in the Admin UI, sourced from UI Hints. Drives form rendering
+   *  and payload exclusion. Privilege-aware mode (issue #99) does NOT fold into
+   *  this flag: read-only is mode-dependent there, so the Admin UI derives a
+   *  per-mode read-only from `insertable` / `updatable` (see below). */
   readonly: boolean;
+  /** Privilege-aware mode only (issue #99): whether the serving role may INSERT
+   *  this column. `undefined` = privileges were not evaluated (default mode).
+   *  `false` makes the Admin UI render the column read-only on **create**. */
+  insertable?: boolean;
+  /** Privilege-aware mode only (issue #99): whether the serving role may UPDATE
+   *  this column. `undefined` = not evaluated. `false` makes the Admin UI
+   *  render the column read-only on **edit**. */
+  updatable?: boolean;
 };
 
 /** Widget domain for Kozou v0.1 spec §6.4. */
