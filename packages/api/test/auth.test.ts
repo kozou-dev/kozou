@@ -319,4 +319,81 @@ describe('signServiceToken', () => {
   it('throws on an empty secret', async () => {
     await expect(signServiceToken({ secret: '', role: 'r' })).rejects.toThrow(/secret/);
   });
+
+  it('rejects a registered JWT claim as the roleClaim (mint and verifier alike)', async () => {
+    for (const reserved of ['exp', 'nbf', 'iat', 'iss', 'aud']) {
+      await expect(
+        signServiceToken({ secret: SECRET, roleClaim: reserved, role: 'r' }),
+      ).rejects.toThrow(/registered JWT claim/);
+      expect(() => createAuthenticator(hs({ roleClaim: reserved }))).toThrow(
+        /registered JWT claim/,
+      );
+    }
+  });
+
+  it('merges extra claims into the payload (visible via request.jwt.claims)', async () => {
+    const token = await signServiceToken({
+      secret: SECRET,
+      role: 'app_admin',
+      claims: { tenant_id: 'acme', is_admin: true },
+    });
+    const ctx = await createAuthenticator(hs()).authenticate(`Bearer ${token}`);
+    expect(ctx.role).toBe('app_admin');
+    expect(ctx.claims.tenant_id).toBe('acme');
+    expect(ctx.claims.is_admin).toBe(true);
+  });
+
+  it('the configured role always wins over a colliding claims key', async () => {
+    const token = await signServiceToken({
+      secret: SECRET,
+      role: 'app_admin',
+      claims: { role: 'smuggled' },
+    });
+    const ctx = await createAuthenticator(hs()).authenticate(`Bearer ${token}`);
+    expect(ctx.role).toBe('app_admin');
+    expect(ctx.claims.role).toBe('app_admin');
+  });
+
+  it('drops a role-claim key in claims even when no role is set (no smuggling)', async () => {
+    const token = await signServiceToken({
+      secret: SECRET,
+      claims: { role: 'smuggled' },
+    });
+    // The token carries no role claim at all -> defaultRole applies.
+    const a = createAuthenticator(hs({ defaultRole: 'app_reader' }));
+    const ctx = await a.authenticate(`Bearer ${token}`);
+    expect(ctx.role).toBe('app_reader');
+    expect(ctx.claims.role).toBeUndefined();
+  });
+
+  it('drops a custom roleClaim key in claims the same way', async () => {
+    const token = await signServiceToken({
+      secret: SECRET,
+      roleClaim: 'kozou_role',
+      role: 'custom',
+      claims: { kozou_role: 'smuggled', tenant_id: 't1' },
+    });
+    const a = createAuthenticator(hs({ roleClaim: 'kozou_role' }));
+    const ctx = await a.authenticate(`Bearer ${token}`);
+    expect(ctx.role).toBe('custom');
+    expect(ctx.claims.tenant_id).toBe('t1');
+  });
+
+  it('the mint always controls iat, and iss/aud when configured', async () => {
+    const before = Math.floor(Date.now() / 1000);
+    const token = await signServiceToken({
+      secret: SECRET,
+      role: 'app_reader',
+      issuer: 'kozou',
+      audience: 'kozou-api',
+      claims: { iat: 1, iss: 'forged', aud: 'forged' },
+    });
+    const a = createAuthenticator(
+      hs({ jwt: { secret: SECRET, issuer: 'kozou', audience: 'kozou-api' } }),
+    );
+    const ctx = await a.authenticate(`Bearer ${token}`);
+    expect(ctx.claims.iss).toBe('kozou');
+    expect(ctx.claims.aud).toBe('kozou-api');
+    expect(ctx.claims.iat as number).toBeGreaterThanOrEqual(before);
+  });
 });

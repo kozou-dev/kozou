@@ -61,6 +61,7 @@ services:
       KOZOU_JWT_ANON_ROLE: ${KOZOU_JWT_ANON_ROLE:-}
       KOZOU_JWT_CLAIMS_GUC: ${KOZOU_JWT_CLAIMS_GUC:-}
       KOZOU_UI_ROLE: ${KOZOU_UI_ROLE:-}
+      KOZOU_UI_CLAIMS: ${KOZOU_UI_CLAIMS:-}
       KOZOU_ADAPTER_TOKEN: ${KOZOU_ADAPTER_TOKEN:-}
     depends_on:
       postgres:

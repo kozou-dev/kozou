@@ -53,13 +53,16 @@ export function buildAdminUiEnv(
     ORIGIN: origin,
     NODE_ENV: 'production',
   };
-  // JWT verifier / signing inputs are a CLI-process concern. The
-  // network-facing UI child only ever consumes KOZOU_ADAPTER_*, so the
-  // HS256 secret (or key / JWKS settings) must not extend into it — with
-  // the scaffold compose forwarding KOZOU_JWT_* these are present in the
-  // parent environment on the default path.
+  // JWT verifier / signing inputs and minting inputs are a CLI-process
+  // concern. The network-facing UI child only ever consumes KOZOU_ADAPTER_*,
+  // so the HS256 secret (or key / JWKS settings) and the UI token inputs
+  // (role name, claim values — which can carry tenant identifiers) must not
+  // extend into it — with the scaffold compose forwarding these variables
+  // they are present in the parent environment on the default path.
   for (const key of Object.keys(env)) {
-    if (key.startsWith('KOZOU_JWT_')) delete env[key];
+    if (key.startsWith('KOZOU_JWT_') || key === 'KOZOU_UI_ROLE' || key === 'KOZOU_UI_CLAIMS') {
+      delete env[key];
+    }
   }
   if (apiAdapterUrl !== undefined) {
     // In-house @kozou/api backend: point the UI at it and attach the token
@@ -122,6 +125,10 @@ export function describeApiAuth(auth: KozouConfig['auth']): string {
   if (auth.anonRole !== undefined) parts.push(`anonRole=${auth.anonRole}`);
   if (auth.ui?.role !== undefined) parts.push(`ui role=${auth.ui.role}`);
   else if (auth.ui?.token !== undefined) parts.push('ui token=supplied');
+  if (auth.ui?.claims !== undefined) {
+    // Key names only — values can carry tenant identifiers.
+    parts.push(`ui claims=[${Object.keys(auth.ui.claims).join(', ')}]`);
+  }
   return parts.join(', ');
 }
 
@@ -164,6 +171,7 @@ export type ServiceTokenMinter = {
     role?: string;
     issuer?: string;
     audience?: string | string[];
+    claims?: Record<string, unknown>;
   }): Promise<string>;
 };
 
@@ -195,9 +203,17 @@ export async function resolveAdminUiToken(
   const auth = config.auth;
   if (auth === undefined) return {}; // no auth -> the UI sends no token (unchanged)
 
+  const claims = auth.ui?.claims;
+
   const supplied = auth.ui?.token ?? env.KOZOU_ADAPTER_TOKEN;
   if (supplied !== undefined && supplied.length > 0) {
-    return { token: supplied };
+    // claims only apply to a token the CLI mints itself.
+    const warning =
+      claims !== undefined
+        ? 'auth.ui.claims is ignored because a ready-made token is supplied ' +
+          '(auth.ui.token / KOZOU_ADAPTER_TOKEN); put the claims in that token instead.'
+        : undefined;
+    return warning !== undefined ? { token: supplied, warning } : { token: supplied };
   }
 
   const secret = auth.jwt.secret;
@@ -209,18 +225,97 @@ export async function resolveAdminUiToken(
       role,
       issuer: auth.jwt.issuer,
       audience: auth.jwt.audience,
+      claims,
     });
-    const warning = mintedRoleWarning(auth, role);
-    return warning !== undefined ? { token, warning, knownRejected: true } : { token };
+    const warnings: string[] = [];
+    const reserved = reservedClaimCollisions(auth, claims);
+    if (reserved.length > 0) {
+      warnings.push(
+        `auth.ui.claims key(s) ${reserved.map((k) => `"${k}"`).join(', ')} are ` +
+          'reserved and overridden by the auth config (the role claim, iat, ' +
+          'and iss/aud when configured).',
+      );
+    }
+    // exp/nbf pass through (an intentionally expiring UI token is allowed),
+    // but a value that provably fails verification — expired, not yet
+    // valid, or not a number — would 401 every UI request from the start.
+    const temporalWarning = temporalClaimsWarning(claims);
+    if (temporalWarning !== undefined) warnings.push(temporalWarning);
+    const roleWarning = mintedRoleWarning(auth, role);
+    if (roleWarning !== undefined) warnings.push(roleWarning);
+    if (warnings.length === 0) return { token };
+    return {
+      token,
+      warning: warnings.join(' '),
+      ...(roleWarning !== undefined || temporalWarning !== undefined
+        ? { knownRejected: true }
+        : {}),
+    };
   }
 
+  const claimsNote =
+    claims !== undefined
+      ? ' (auth.ui.claims is also unusable on this path — the CLI cannot mint)'
+      : '';
   return {
     warning:
       'auth uses an RS256 public key, so the CLI cannot mint a token for the ' +
       'bundled Admin UI; it will be rejected with 401. Set auth.ui.token (or ' +
       'KOZOU_ADAPTER_TOKEN) to a token from your identity provider, or use an ' +
-      'HS256 secret so the CLI can mint one.',
+      `HS256 secret so the CLI can mint one${claimsNote}.`,
   };
+}
+
+// Keys in auth.ui.claims that the mint will override (or drop): the role
+// claim is always reserved, `iat` is always set, and `iss`/`aud` are set
+// when the auth config declares an issuer/audience. Surfaced as a startup
+// warning so a colliding key is never a silent override.
+function reservedClaimCollisions(
+  auth: NonNullable<KozouConfig['auth']>,
+  claims: Record<string, unknown> | undefined,
+): string[] {
+  if (claims === undefined) return [];
+  const reserved = new Set<string>([auth.roleClaim ?? 'role', 'iat']);
+  if (auth.jwt.issuer !== undefined) reserved.add('iss');
+  if (auth.jwt.audience !== undefined) reserved.add('aud');
+  return Object.keys(claims).filter((k) => reserved.has(k));
+}
+
+// `exp` / `nbf` in auth.ui.claims that provably make the minted token fail
+// verification: already expired, not valid yet, or not a number (the
+// verifier rejects malformed temporal claims). A well-formed future `exp`
+// is intentional (an expiring UI token) and passes silently.
+function temporalClaimsWarning(
+  claims: Record<string, unknown> | undefined,
+): string | undefined {
+  if (claims === undefined) return undefined;
+  const now = Math.floor(Date.now() / 1000);
+  // Finite numbers only: YAML parses `.nan` / `.inf` to NaN / Infinity,
+  // which survive a typeof check, serialize to null in the JWT payload,
+  // and fail verification.
+  if ('exp' in claims) {
+    const exp = claims.exp;
+    if (typeof exp !== 'number' || !Number.isFinite(exp)) {
+      return 'auth.ui.claims.exp is not a finite number (UNIX seconds), so ' +
+        'the API rejects the minted Admin UI token (401).';
+    }
+    if (exp <= now) {
+      return 'auth.ui.claims.exp is already in the past, so the API rejects ' +
+        'the minted Admin UI token (401).';
+    }
+  }
+  if ('nbf' in claims) {
+    const nbf = claims.nbf;
+    if (typeof nbf !== 'number' || !Number.isFinite(nbf)) {
+      return 'auth.ui.claims.nbf is not a finite number (UNIX seconds), so ' +
+        'the API rejects the minted Admin UI token (401).';
+    }
+    if (nbf > now) {
+      return 'auth.ui.claims.nbf is in the future, so the API rejects the ' +
+        'minted Admin UI token (401) until that time.';
+    }
+  }
+  return undefined;
 }
 
 // A minted Admin UI token will be rejected with 403 unless the API can

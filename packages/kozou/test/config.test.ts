@@ -323,6 +323,7 @@ auth:
         KOZOU_JWT_ANON_ROLE: '',
         KOZOU_JWT_CLAIMS_GUC: '',
         KOZOU_UI_ROLE: '',
+        KOZOU_UI_CLAIMS: '',
         KOZOU_ADAPTER_TOKEN: '',
       },
     });
@@ -346,6 +347,7 @@ auth:
         KOZOU_JWT_ANON_ROLE: '',
         KOZOU_JWT_CLAIMS_GUC: '',
         KOZOU_UI_ROLE: '',
+        KOZOU_UI_CLAIMS: '',
         KOZOU_ADAPTER_TOKEN: '',
       },
     });
@@ -374,6 +376,91 @@ auth:
     const config = await loadConfig({ path: file, env: {} });
     expect(config.auth?.jwt.jwksUri).toBe('https://idp.example/.well-known/jwks.json');
     expect(config.auth?.jwt.secret).toBeUndefined();
+  });
+
+  it('parses auth.ui.claims from the config file', async () => {
+    const dir = await makeTempDir();
+    const file = await writeYaml(
+      dir,
+      `database:
+  url: postgres://u:p@h:5432/db
+auth:
+  jwt:
+    secret: shhh
+  ui:
+    role: app_admin
+    claims:
+      tenant_id: acme
+      is_admin: true
+`,
+    );
+    const config = await loadConfig({ path: file, env: {} });
+    expect(config.auth?.ui?.claims).toEqual({ tenant_id: 'acme', is_admin: true });
+  });
+
+  it('parses YAML non-finite literals in claims verbatim (NaN / Infinity reach the resolver)', async () => {
+    // Sanity for the resolver's Number.isFinite guard: the YAML loader
+    // really does produce these values from `.nan` / `.inf`.
+    const dir = await makeTempDir();
+    const file = await writeYaml(
+      dir,
+      `database:
+  url: postgres://u:p@h:5432/db
+auth:
+  jwt:
+    secret: shhh
+  ui:
+    role: app_admin
+    claims:
+      exp: .inf
+      nbf: .nan
+`,
+    );
+    const config = await loadConfig({ path: file, env: {} });
+    expect(config.auth?.ui?.claims?.exp).toBe(Number.POSITIVE_INFINITY);
+    expect(Number.isNaN(config.auth?.ui?.claims?.nbf)).toBe(true);
+  });
+
+  it('builds auth.ui.claims from a KOZOU_UI_CLAIMS JSON object', async () => {
+    const config = await loadConfig({
+      skipFile: true,
+      env: {
+        DATABASE_URL: 'postgres://u:p@h:5432/db',
+        KOZOU_JWT_SECRET: 'env-secret',
+        KOZOU_UI_CLAIMS: '{"tenant_id":"acme","is_admin":true}',
+      },
+    });
+    expect(config.auth?.ui?.claims).toEqual({ tenant_id: 'acme', is_admin: true });
+  });
+
+  it('fails loudly when KOZOU_UI_CLAIMS is not valid JSON', async () => {
+    await expect(
+      loadConfig({
+        skipFile: true,
+        env: {
+          DATABASE_URL: 'postgres://u:p@h:5432/db',
+          KOZOU_JWT_SECRET: 'env-secret',
+          KOZOU_UI_CLAIMS: '{tenant_id: acme}',
+        },
+      }),
+      // The CLI prints only the top-level message, so the env var must be
+      // named there (not just in the structured issues).
+    ).rejects.toThrow(/KOZOU_UI_CLAIMS is not valid JSON/);
+  });
+
+  it('fails loudly when KOZOU_UI_CLAIMS is JSON but not an object', async () => {
+    for (const bad of ['[1,2]', '"acme"', 'null', '42']) {
+      await expect(
+        loadConfig({
+          skipFile: true,
+          env: {
+            DATABASE_URL: 'postgres://u:p@h:5432/db',
+            KOZOU_JWT_SECRET: 'env-secret',
+            KOZOU_UI_CLAIMS: bad,
+          },
+        }),
+      ).rejects.toThrow(/KOZOU_UI_CLAIMS must be a JSON object/);
+    }
   });
 
   it('builds auth from KOZOU_JWT_JWKS_URI env alone', async () => {

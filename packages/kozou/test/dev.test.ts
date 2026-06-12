@@ -99,12 +99,18 @@ describe('buildAdminUiEnv', () => {
       KOZOU_JWT_PUBLIC_KEY: 'pem',
       KOZOU_JWT_JWKS_URI: 'https://idp.example/jwks',
       KOZOU_JWT_ANON_ROLE: 'web_anon',
+      KOZOU_UI_ROLE: 'app_admin',
+      KOZOU_UI_CLAIMS: '{"tenant_id":"acme"}',
     };
     // In-house api path (token attached) and REST opt-out path alike.
     const apiEnv = buildAdminUiEnv(config, 'http://localhost:3333', baseEnv, 'http://127.0.0.1:3335', 'tok');
     const optOutEnv = buildAdminUiEnv(config, 'http://localhost:3333', baseEnv);
     for (const env of [apiEnv, optOutEnv]) {
       expect(Object.keys(env).filter((k) => k.startsWith('KOZOU_JWT_'))).toEqual([]);
+      // The UI token-mint inputs stay in the CLI process too (claim values
+      // can carry tenant identifiers).
+      expect(env.KOZOU_UI_ROLE).toBeUndefined();
+      expect(env.KOZOU_UI_CLAIMS).toBeUndefined();
       expect(env.PATH).toBe('/usr/bin');
     }
     expect(apiEnv.KOZOU_ADAPTER_TOKEN).toBe('tok');
@@ -257,6 +263,159 @@ describe('resolveAdminUiToken', () => {
     expect(result.warning).toMatch(/allowedRoles/);
   });
 
+  it('passes auth.ui.claims through to the minter', async () => {
+    const { minter, calls } = spyMinter();
+    const config = await configWithAuth({
+      jwt: { secret: 's' },
+      defaultRole: 'app_reader',
+      ui: { claims: { tenant_id: 'acme', is_admin: true } },
+    });
+    const result = await resolveAdminUiToken(config, minter, {});
+    expect(result.token).toBe('minted-token');
+    expect(result.warning).toBeUndefined();
+    expect(calls[0]!.claims).toEqual({ tenant_id: 'acme', is_admin: true });
+  });
+
+  it('warns when a claims key is reserved (role claim / iat / configured iss, aud)', async () => {
+    const { minter } = spyMinter();
+    const config = await configWithAuth({
+      jwt: { secret: 's', issuer: 'kozou' },
+      ui: { role: 'app_admin', claims: { role: 'smuggled', iat: 1, iss: 'forged', tenant_id: 't' } },
+    });
+    const result = await resolveAdminUiToken(config, minter, {});
+    expect(result.token).toBe('minted-token');
+    expect(result.warning).toMatch(/reserved/);
+    expect(result.warning).toContain('"role"');
+    expect(result.warning).toContain('"iat"');
+    expect(result.warning).toContain('"iss"');
+    expect(result.warning).not.toContain('"tenant_id"');
+    // A collision alone does not make the token rejected.
+    expect(result.knownRejected).toBeUndefined();
+  });
+
+  it('does not flag iss/aud claims when the auth config sets no issuer/audience', async () => {
+    const { minter } = spyMinter();
+    const config = await configWithAuth({
+      jwt: { secret: 's' },
+      ui: { role: 'app_admin', claims: { iss: 'mine', aud: 'mine' } },
+    });
+    const result = await resolveAdminUiToken(config, minter, {});
+    expect(result.warning).toBeUndefined();
+  });
+
+  it('uses the custom roleClaim when checking for a reserved collision', async () => {
+    const { minter } = spyMinter();
+    const config = await configWithAuth({
+      jwt: { secret: 's' },
+      roleClaim: 'kozou_role',
+      ui: { role: 'app_admin', claims: { kozou_role: 'smuggled' } },
+    });
+    const result = await resolveAdminUiToken(config, minter, {});
+    expect(result.warning).toContain('"kozou_role"');
+  });
+
+  it('joins a reserved-claims warning with a minted-role warning (still knownRejected)', async () => {
+    const { minter } = spyMinter();
+    // No ui.role and no defaultRole -> known 403; plus a reserved claims key.
+    const config = await configWithAuth({
+      jwt: { secret: 's' },
+      ui: { claims: { iat: 1 } },
+    });
+    const result = await resolveAdminUiToken(config, minter, {});
+    expect(result.warning).toMatch(/reserved/);
+    expect(result.warning).toMatch(/auth\.ui\.role/);
+    expect(result.knownRejected).toBe(true);
+  });
+
+  it('flags an already-expired exp claim as known-rejected', async () => {
+    const { minter } = spyMinter();
+    const config = await configWithAuth({
+      jwt: { secret: 's' },
+      ui: { role: 'app_admin', claims: { exp: 1 } },
+    });
+    const result = await resolveAdminUiToken(config, minter, {});
+    expect(result.warning).toMatch(/exp is already in the past/);
+    expect(result.knownRejected).toBe(true);
+  });
+
+  it('flags a future nbf claim as known-rejected', async () => {
+    const { minter } = spyMinter();
+    const config = await configWithAuth({
+      jwt: { secret: 's' },
+      ui: { role: 'app_admin', claims: { nbf: Math.floor(Date.now() / 1000) + 3600 } },
+    });
+    const result = await resolveAdminUiToken(config, minter, {});
+    expect(result.warning).toMatch(/nbf is in the future/);
+    expect(result.knownRejected).toBe(true);
+  });
+
+  it('flags non-numeric temporal claims as known-rejected', async () => {
+    const { minter } = spyMinter();
+    const config = await configWithAuth({
+      jwt: { secret: 's' },
+      ui: { role: 'app_admin', claims: { exp: 'tomorrow' } },
+    });
+    const result = await resolveAdminUiToken(config, minter, {});
+    expect(result.warning).toMatch(/exp is not a finite number/);
+    expect(result.knownRejected).toBe(true);
+  });
+
+  it('flags non-finite temporal claims (YAML .nan / .inf) as known-rejected', async () => {
+    // YAML parses `.nan` / `.inf` to NaN / Infinity, which pass a typeof
+    // check, serialize to null in the JWT payload, and fail verification.
+    const { minter } = spyMinter();
+    for (const bad of [Number.NaN, Number.POSITIVE_INFINITY]) {
+      const config = await configWithAuth({
+        jwt: { secret: 's' },
+        ui: { role: 'app_admin', claims: { exp: bad } },
+      });
+      const result = await resolveAdminUiToken(config, minter, {});
+      expect(result.warning).toMatch(/exp is not a finite number/);
+      expect(result.knownRejected).toBe(true);
+    }
+    const config = await configWithAuth({
+      jwt: { secret: 's' },
+      ui: { role: 'app_admin', claims: { nbf: Number.NaN } },
+    });
+    const result = await resolveAdminUiToken(config, minter, {});
+    expect(result.warning).toMatch(/nbf is not a finite number/);
+    expect(result.knownRejected).toBe(true);
+  });
+
+  it('allows a well-formed future exp (an intentionally expiring UI token)', async () => {
+    const { minter } = spyMinter();
+    const config = await configWithAuth({
+      jwt: { secret: 's' },
+      ui: { role: 'app_admin', claims: { exp: Math.floor(Date.now() / 1000) + 3600 } },
+    });
+    const result = await resolveAdminUiToken(config, minter, {});
+    expect(result.warning).toBeUndefined();
+    expect(result.knownRejected).toBeUndefined();
+  });
+
+  it('warns that claims are ignored when a ready-made token is supplied', async () => {
+    const { minter, calls } = spyMinter();
+    const config = await configWithAuth({
+      jwt: { secret: 's' },
+      ui: { token: 'ready-made', claims: { tenant_id: 'acme' } },
+    });
+    const result = await resolveAdminUiToken(config, minter, {});
+    expect(result.token).toBe('ready-made');
+    expect(result.warning).toMatch(/claims is ignored/);
+    expect(calls).toHaveLength(0);
+  });
+
+  it('mentions unusable claims in the RS256 no-token warning', async () => {
+    const { minter } = spyMinter();
+    const config = await configWithAuth({
+      jwt: { publicKey: '-----BEGIN PUBLIC KEY-----' },
+      ui: { claims: { tenant_id: 'acme' } },
+    });
+    const result = await resolveAdminUiToken(config, minter, {});
+    expect(result.token).toBeUndefined();
+    expect(result.warning).toMatch(/claims is also unusable/);
+  });
+
   it('returns a warning and no token for RS256 with no supplied token', async () => {
     const { minter, calls } = spyMinter();
     const config = await configWithAuth({ jwt: { publicKey: '-----BEGIN PUBLIC KEY-----' } });
@@ -302,6 +461,15 @@ describe('describeApiAuth', () => {
     expect(describeApiAuth({ jwt: { publicKey: '-----BEGIN PUBLIC KEY-----' } })).toBe(
       'static public key',
     );
+  });
+
+  it('lists ui claims by key only — never values', () => {
+    const line = describeApiAuth({
+      jwt: { secret: 's' },
+      ui: { role: 'app_admin', claims: { tenant_id: 'secret-tenant', is_admin: true } },
+    });
+    expect(line).toBe('HS256 (shared secret), ui role=app_admin, ui claims=[tenant_id, is_admin]');
+    expect(line).not.toContain('secret-tenant');
   });
 
   it('redacts credentials embedded in the JWKS URL', () => {

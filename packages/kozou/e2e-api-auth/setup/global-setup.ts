@@ -51,7 +51,11 @@ const CLI_ENTRY = resolve(packageRoot, 'dist/cli.js');
 const ADMIN_UI_BUILD = resolve(repoRoot, 'packages/svelte-ui/build/index.js');
 
 // Layered on top of the shared fixture: an ownership column the RLS policy
-// keys on, a row the policy hides, and the role the Admin UI assumes.
+// keys on, a row the policy hides, and the role the Admin UI assumes. The
+// policy reads the `team` claim from request.jwt.claims (not a literal), so
+// the visible rows depend on the custom claim minted into the UI token via
+// auth.ui.claims — the suite proves the claims passthrough end to end (if
+// the claim does not reach the database, every row disappears).
 const AUTH_DDL = `
   ALTER TABLE authors ADD COLUMN owner text NOT NULL DEFAULT 'admin';
   INSERT INTO authors (display_name, owner) VALUES ('Hidden Author', 'other');
@@ -63,7 +67,8 @@ const AUTH_DDL = `
 
   ALTER TABLE authors ENABLE ROW LEVEL SECURITY;
   CREATE POLICY authors_admin ON authors FOR ALL TO app_admin
-    USING (owner = 'admin') WITH CHECK (owner = 'admin');
+    USING (owner = current_setting('request.jwt.claims', true)::jsonb ->> 'team')
+    WITH CHECK (owner = current_setting('request.jwt.claims', true)::jsonb ->> 'team');
 `;
 
 function log(msg: string) {
@@ -114,8 +119,9 @@ export default async function globalSetup() {
   }
 
   // kozou.config.yaml with an auth block. The secret arrives via ${VAR}
-  // expansion (verbatim), allowedRoles gates role-switching, and ui.role tells
-  // the CLI which role to mint the bundled UI's HS256 token for.
+  // expansion (verbatim), allowedRoles gates role-switching, ui.role tells
+  // the CLI which role to mint the bundled UI's HS256 token for, and
+  // ui.claims mints the `team` claim the RLS policy above reads.
   const configDir = mkdtempSync(join(tmpdir(), 'kozou-e2e-api-auth-'));
   const configPath = join(configDir, 'kozou.config.yaml');
   writeFileSync(
@@ -138,6 +144,8 @@ export default async function globalSetup() {
       '  allowedRoles: [app_admin]',
       '  ui:',
       '    role: app_admin',
+      '    claims:',
+      '      team: admin',
       '',
     ].join('\n'),
     'utf8',
