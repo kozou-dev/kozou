@@ -13,7 +13,7 @@ import type { AddressInfo } from 'node:net';
 
 import type { SchemaContext } from '@kozou/core';
 
-import { errorBody, KozouApiError } from './errors.js';
+import { errorBody, KozouApiError, mapDatabaseError } from './errors.js';
 import {
   handleApiRequest,
   type ApiHandlerDeps,
@@ -95,10 +95,9 @@ export function createApiRequestListener(
   deps: ApiHandlerDeps,
 ): (req: IncomingMessage, res: ServerResponse) => void {
   return (req, res) => {
-    dispatch(deps, req, res).catch((err: unknown) => {
-      const message = err instanceof Error ? err.message : String(err);
-      respondJson(res, 500, errorBody('internal', message));
-    });
+    // Same sanitizer as the authenticated path: log the detail server-side,
+    // never return raw error text in the body.
+    dispatch(deps, req, res).catch((err: unknown) => respondError(res, err));
   };
 }
 
@@ -196,6 +195,14 @@ function respondError(res: ServerResponse, err: unknown): void {
   // information) to the client: log it server-side, return a generic message.
   const detail = err instanceof Error ? err.message : String(err);
   process.stderr.write(`[@kozou/api] request failed: ${detail}\n`);
+  // Same SQLSTATE contract as the request handler. This path sees database
+  // errors raised outside routing — notably DEFERRABLE constraints, which
+  // fire at COMMIT — and they must map to the same documented statuses.
+  const mapped = mapDatabaseError(err);
+  if (mapped !== null) {
+    respondJson(res, mapped.status, errorBody(mapped.code, mapped.message));
+    return;
+  }
   respondJson(res, 500, errorBody('internal', 'Internal server error.'));
 }
 
@@ -239,6 +246,7 @@ export async function startApiServer(opts: StartApiServerOptions): Promise<ApiSe
     lookup: buildResourceLookup(opts.schema),
     version: opts.version,
     openapi: buildOpenApiDocument(opts.schema, { version: opts.version }),
+    logPrefix: prefix,
   };
 
   const pool = opts.pool;

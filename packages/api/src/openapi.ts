@@ -368,6 +368,14 @@ function resourcePaths(
     }
   }
 
+  // Database-mapped error statuses (the request handler's SQLSTATE mapping):
+  // privilege / row-level-security denials surface as 403 on every
+  // data-touching operation; constraint conflicts as 409 on writes.
+  const forbiddenResp = (): JsonObject =>
+    errorResponse('Permission denied (database privilege or row-level security).');
+  const conflictResp = (): JsonObject =>
+    errorResponse('Constraint conflict (unique or foreign-key violation).');
+
   const collection: JsonObject = {
     get: {
       summary: `List ${label}`,
@@ -380,6 +388,7 @@ function resourcePaths(
               { oneOf: [listResultSchema(rowRef), optionsResultSchema(primaryKey)] },
             )
           : jsonResponse(`A page of ${label}.`, listResultSchema(rowRef)),
+        '403': forbiddenResp(),
       },
     },
   };
@@ -390,6 +399,8 @@ function resourcePaths(
       responses: {
         '201': jsonResponse('The created row.', rowRef),
         '400': errorResponse('Validation error.'),
+        '403': forbiddenResp(),
+        '409': conflictResp(),
       },
     };
   }
@@ -408,6 +419,7 @@ function resourcePaths(
         parameters: [idParam, ...embedParams],
         responses: {
           '200': jsonResponse('The row.', rowRef),
+          '403': forbiddenResp(),
           '404': errorResponse('No such row.'),
         },
       },
@@ -419,7 +431,10 @@ function resourcePaths(
         requestBody: jsonBody(requestRefs.update ? { $ref: requestRefs.update } : rowRef),
         responses: {
           '200': jsonResponse('The updated row.', rowRef),
+          '400': errorResponse('Validation error.'),
+          '403': forbiddenResp(),
           '404': errorResponse('No such row.'),
+          '409': conflictResp(),
         },
       };
       item.delete = {
@@ -427,7 +442,9 @@ function resourcePaths(
         parameters: [idParam],
         responses: {
           '200': jsonResponse('The deleted row.', rowRef),
+          '403': forbiddenResp(),
           '404': errorResponse('No such row.'),
+          '409': conflictResp(),
         },
       };
     }

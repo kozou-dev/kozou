@@ -2,7 +2,14 @@
 // JSON result, independent of node:http (so it can be unit-tested with a
 // fake Queryable and driven by the node:http wiring in startApiServer.ts).
 
-import { KozouApiError, badRequest, errorBody, methodNotAllowed, notFound } from './errors.js';
+import {
+  KozouApiError,
+  badRequest,
+  errorBody,
+  mapDatabaseError,
+  methodNotAllowed,
+  notFound,
+} from './errors.js';
 import type { ResourceLookup, Resource } from './schema-lookup.js';
 import {
   buildGetQuery,
@@ -33,6 +40,8 @@ export type ApiHandlerDeps = {
   version?: string;
   /** Prebuilt OpenAPI document served at `GET /openapi.json`. */
   openapi?: Record<string, unknown>;
+  /** Prefix for server-side error log lines. Default: '[@kozou/api]'. */
+  logPrefix?: string;
 };
 
 export type ApiHttpRequest = {
@@ -67,8 +76,16 @@ export async function handleApiRequest(
     if (err instanceof KozouApiError) {
       return { status: err.status, body: errorBody(err.code, err.message) };
     }
-    const message = err instanceof Error ? err.message : String(err);
-    return { status: 500, body: errorBody('internal', message) };
+    // The raw error (a database message, a stack, a driver detail) can carry
+    // internal information such as schema or helper-function names; it goes
+    // to the server log, never into the response body.
+    const detail = err instanceof Error ? err.message : String(err);
+    process.stderr.write(`${deps.logPrefix ?? '[@kozou/api]'} request failed: ${detail}\n`);
+    const mapped = mapDatabaseError(err);
+    if (mapped !== null) {
+      return { status: mapped.status, body: errorBody(mapped.code, mapped.message) };
+    }
+    return { status: 500, body: errorBody('internal', 'Internal server error.') };
   }
 }
 

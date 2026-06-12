@@ -117,6 +117,43 @@ relation-select mode is documented on the collection path with its alternate
 response shape, and the advertised embed hints match what the server
 resolves at request time.
 
+### Errors
+
+Every non-2xx response carries the same envelope:
+
+```json
+{ "error": { "code": "machine-readable", "message": "human-readable" } }
+```
+
+Database outcomes map to stable statuses. The raw database message is
+written to the server log, never into the response body (it can carry
+internal schema detail):
+
+| Database condition (SQLSTATE) | HTTP | `code` |
+|---|---|---|
+| insufficient privilege / row-level security (42501) | 403 | `forbidden` |
+| unique violation (23505) | 409 | `conflict` |
+| foreign-key violation (23503) | 409 | `conflict` |
+| not-null violation (23502) | 400 | `constraint_violation` |
+| check violation (23514) | 400 | `constraint_violation` |
+| anything else | 500 | `internal` (generic message; detail in the server log) |
+
+Mapped messages are fully generic: the violated constraint or column name
+appears only in the server log, never in the response (an error can name
+objects outside the exposed surface — for instance a foreign key from a
+table that is not exposed — so identifiers are withheld across the board).
+Data exceptions (SQLSTATE class 22) are deliberately not mapped: mapping
+the whole class would relabel genuine kozou bugs as client errors. List
+filter and search values are already validated before they reach the
+database (invalid values return 400 up front); inputs not yet pre-flighted
+the same way — an invalid id segment or write-body value — currently
+surface as a 500 with the detail in the server log, and closing those
+gaps with up-front 400s is tracked as follow-up work.
+
+With auth enabled, the auth layer adds its own statuses: missing token →
+401 (or the configured `anonRole` takes over), invalid token → 401,
+disallowed role → 403.
+
 ## Stability
 
 Stable as of Kozou v1.0 (covered by semantic versioning — no incompatible
@@ -139,7 +176,9 @@ change without a major release):
   declaration order; the hint is an embed selector, not a join recipe), and
   `as=options` on a composite-key target returns array option ids whose
   components follow primary-key declaration order;
-- the auth boundary — JWT claims mapped to `SET LOCAL ROLE` (see below).
+- the auth boundary — JWT claims mapped to `SET LOCAL ROLE` (see below);
+- the error envelope `{ error: { code, message } }` and the database-mapped
+  status table (see Errors above).
 
 Still evolving (not yet covered by the stability guarantee):
 
