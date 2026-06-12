@@ -71,6 +71,23 @@ describe('startApiServer over real HTTP', () => {
     expect(server.port).toBeGreaterThan(0);
   });
 
+  it('returns a sanitized 500 over HTTP when the db fails unexpectedly (zero-auth path)', async () => {
+    const { db } = recordingDb(() => {
+      throw new Error('secret-internal-detail');
+    });
+    server = await startApiServer({
+      schema,
+      db,
+      host: '127.0.0.1',
+      port: 0,
+      logPrefix: '[test]',
+    });
+    const r = await fetch(`http://127.0.0.1:${server.port}/authors`);
+    expect(r.status).toBe(500);
+    const body = (await r.json()) as { error: { code: string; message: string } };
+    expect(body.error).toEqual({ code: 'internal', message: 'Internal server error.' });
+  });
+
   it('reads a JSON body for create (POST) requests', async () => {
     const { db, calls } = recordingDb((text) =>
       text.startsWith('INSERT')

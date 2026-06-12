@@ -229,13 +229,144 @@ describe('handleApiRequest — routing', () => {
     expect(errorOf(r.body).code).toBe('bad_request');
   });
 
-  it('maps an unexpected error to a 500', async () => {
+  it('maps an unexpected error to a 500 with a generic message (detail stays server-side)', async () => {
     const { deps } = depsWith(() => {
-      throw new Error('boom');
+      throw new Error('secret internal detail');
     });
     const r = await handleApiRequest(deps, reqOf('GET', '/authors'));
     expect(r.status).toBe(500);
-    expect(errorOf(r.body)).toEqual({ code: 'internal', message: 'boom' });
+    expect(errorOf(r.body)).toEqual({ code: 'internal', message: 'Internal server error.' });
+  });
+
+  describe('database error mapping (SQLSTATE -> HTTP)', () => {
+    // What node-postgres raises for a server error: an Error carrying the
+    // SQLSTATE in `code`, a `severity`, and the violated constraint/column.
+    function pgError(
+      code: string,
+      message: string,
+      extra: { constraint?: string; column?: string } = {},
+    ): Error {
+      return Object.assign(new Error(message), { code, severity: 'ERROR', ...extra });
+    }
+
+    async function failingWith(err: Error, method = 'GET', body?: unknown) {
+      const { deps } = depsWith(() => {
+        throw err;
+      });
+      return handleApiRequest(deps, reqOf(method, '/authors', '', body));
+    }
+
+    it('42501 (privilege / row-level security) -> 403 forbidden, raw message withheld', async () => {
+      const raw = 'permission denied for schema app';
+      const r = await failingWith(pgError('42501', raw));
+      expect(r.status).toBe(403);
+      expect(errorOf(r.body)).toEqual({ code: 'forbidden', message: 'Permission denied.' });
+      expect(JSON.stringify(r.body)).not.toContain('app');
+    });
+
+    it('42501 on a write (RLS WITH CHECK) -> 403 as well', async () => {
+      const r = await failingWith(
+        pgError('42501', 'new row violates row-level security policy for table "authors"'),
+        'POST',
+        { display_name: 'x' },
+      );
+      expect(r.status).toBe(403);
+      expect(errorOf(r.body).code).toBe('forbidden');
+    });
+
+    it('23505 (unique violation) -> 409 conflict, constraint name withheld', async () => {
+      // The error object cannot prove the identifier belongs to the exposed
+      // surface, so it must never be echoed — generic body, detail in the log.
+      const r = await failingWith(
+        pgError('23505', 'duplicate key value violates unique constraint "authors_pkey"', {
+          constraint: 'authors_pkey',
+        }),
+        'POST',
+        { display_name: 'x' },
+      );
+      expect(r.status).toBe(409);
+      expect(errorOf(r.body)).toEqual({
+        code: 'conflict',
+        message: 'Unique constraint violation.',
+      });
+      expect(JSON.stringify(r.body)).not.toContain('authors_pkey');
+    });
+
+    it('23503 (foreign-key violation) -> 409 conflict, hidden-table constraint withheld', async () => {
+      // A delete on an exposed table can be rejected by a foreign key from a
+      // table that is not exposed at all — its constraint name must not leak.
+      const r = await failingWith(
+        pgError(
+          '23503',
+          'update or delete on table "authors" violates foreign key constraint "hidden_audit_author_id_fkey"',
+          { constraint: 'hidden_audit_author_id_fkey' },
+        ),
+        'POST',
+        { display_name: 'x' },
+      );
+      expect(r.status).toBe(409);
+      expect(errorOf(r.body)).toEqual({
+        code: 'conflict',
+        message: 'Foreign key constraint violation.',
+      });
+      expect(JSON.stringify(r.body)).not.toContain('hidden_audit');
+    });
+
+    it('23502 (not-null violation) -> 400 constraint_violation, column name withheld', async () => {
+      const r = await failingWith(
+        pgError('23502', 'null value in column "display_name" violates not-null constraint', {
+          column: 'display_name',
+        }),
+        'POST',
+        {},
+      );
+      expect(r.status).toBe(400);
+      expect(errorOf(r.body)).toEqual({
+        code: 'constraint_violation',
+        message: 'Not-null constraint violation.',
+      });
+      expect(JSON.stringify(r.body)).not.toContain('display_name');
+    });
+
+    it('23514 (check violation) -> 400 constraint_violation', async () => {
+      const r = await failingWith(
+        pgError('23514', 'new row violates check constraint "authors_name_check"', {
+          constraint: 'authors_name_check',
+        }),
+        'POST',
+        { display_name: '' },
+      );
+      expect(r.status).toBe(400);
+      expect(errorOf(r.body)).toEqual({
+        code: 'constraint_violation',
+        message: 'Check constraint violation.',
+      });
+      expect(JSON.stringify(r.body)).not.toContain('authors_name_check');
+    });
+
+    it('22xxx data exceptions stay 500 (deliberately unmapped: pre-flight owns input validation)', async () => {
+      const r = await failingWith(pgError('22P02', 'invalid input syntax for type uuid: "zzz"'));
+      expect(r.status).toBe(500);
+      expect(errorOf(r.body)).toEqual({ code: 'internal', message: 'Internal server error.' });
+    });
+
+    it('a non-database error with a 5-char code is not mistaken for a SQLSTATE', async () => {
+      // No `severity` -> not database-shaped, even though the code matches.
+      const r = await failingWith(Object.assign(new Error('boom'), { code: '42501' }));
+      expect(r.status).toBe(500);
+      expect(errorOf(r.body).code).toBe('internal');
+    });
+
+    it('driver-level codes (ECONNREFUSED) stay 500', async () => {
+      const r = await failingWith(
+        Object.assign(new Error('connect ECONNREFUSED'), {
+          code: 'ECONNREFUSED',
+          severity: 'FATAL',
+        }),
+      );
+      expect(r.status).toBe(500);
+      expect(errorOf(r.body).code).toBe('internal');
+    });
   });
 
   it('serves the OpenAPI document at GET /openapi.json when configured', async () => {

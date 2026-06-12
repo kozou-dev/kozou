@@ -76,6 +76,14 @@ describe('@kozou/api JWT + RLS (generic fixture)', () => {
       await admin.query(
         `CREATE POLICY authors_anon ON authors FOR SELECT TO app_anon USING (owner = 'public')`,
       );
+
+      // A constraint that fires at COMMIT, not at the statement: the
+      // authenticated path runs each request in an explicit transaction, so
+      // deferred violations surface on COMMIT and must map like any other.
+      await admin.query(
+        `ALTER TABLE authors ADD CONSTRAINT authors_display_name_deferred_uniq
+         UNIQUE (display_name) DEFERRABLE INITIALLY DEFERRED`,
+      );
     } finally {
       await admin.end();
     }
@@ -180,6 +188,64 @@ describe('@kozou/api JWT + RLS (generic fixture)', () => {
       const denied = await getAuthed('/authors');
       expect(denied.status).toBe(401);
     }
+  });
+
+  describe('database error mapping (real SQLSTATEs)', () => {
+    type ErrorBody = { error: { code: string; message: string } };
+
+    const postAuthed = async (path: string, jwt: string, body: unknown) => {
+      const r = await fetch(`${base}${path}`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${jwt}`, 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      return { status: r.status, body: (await r.json()) as ErrorBody };
+    };
+
+    it('maps an RLS write denial (42501) to 403 with a generic body', async () => {
+      // The FOR ALL policy's WITH CHECK mirrors USING: inserting a row owned
+      // by someone else violates it. Postgres raises 42501.
+      const jwt = await token({ sub: 'ada', role: 'app_reader' });
+      const { status, body } = await postAuthed('/authors', jwt, {
+        display_name: 'Mallory',
+        owner: 'turing',
+      });
+      expect(status).toBe(403);
+      expect(body.error.code).toBe('forbidden');
+      expect(body.error.message).toBe('Permission denied.');
+      // The raw database text (policy / table wording) must not leak.
+      expect(JSON.stringify(body)).not.toContain('row-level security');
+    });
+
+    it('maps a unique violation (23505) to 409 conflict', async () => {
+      const jwt = await token({ sub: 'ada', role: 'app_reader' });
+      const list = await getAuthed<ListBody>('/authors', jwt);
+      expect(list.status).toBe(200);
+      const existing = list.body.rows[0];
+      const { status, body } = await postAuthed('/authors', jwt, {
+        id: existing.id,
+        display_name: 'Duplicate',
+        owner: 'ada',
+      });
+      expect(status).toBe(409);
+      expect(body.error.code).toBe('conflict');
+      expect(body.error.message).toMatch(/^Unique constraint violation/);
+    });
+
+    it('maps a DEFERRABLE violation raised at COMMIT to 409 as well', async () => {
+      // The deferred unique constraint on display_name passes the INSERT
+      // statement and fires when the request transaction commits — a path
+      // outside the request router that must honour the same contract.
+      const jwt = await token({ sub: 'ada', role: 'app_reader' });
+      const { status, body } = await postAuthed('/authors', jwt, {
+        display_name: 'Ada Lovelace',
+        owner: 'ada',
+      });
+      expect(status).toBe(409);
+      expect(body.error.code).toBe('conflict');
+      expect(body.error.message).toBe('Unique constraint violation.');
+      expect(JSON.stringify(body)).not.toContain('authors_display_name_deferred_uniq');
+    });
   });
 
   describe('anonymous role (anonRole configured)', () => {
