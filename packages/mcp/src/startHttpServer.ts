@@ -63,7 +63,7 @@ export function isLoopbackHost(host: string): boolean {
 function nonLoopbackWarning(host: string, prefix: string): string {
   return (
     `${prefix} WARNING: MCP HTTP server bound to non-loopback host "${host}".\n` +
-    `${prefix} v0.1 MCP HTTP has NO authentication (spec §18.5). Anyone who can\n` +
+    `${prefix} The MCP HTTP server has NO authentication. Anyone who can\n` +
     `${prefix} reach ${host} can read this database's schema metadata. Bind to\n` +
     `${prefix} 127.0.0.1 (the default) unless you have a trusted network and an\n` +
     `${prefix} external auth/proxy layer in front.\n`

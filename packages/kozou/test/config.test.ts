@@ -302,6 +302,64 @@ auth:
     expect(config.auth?.defaultRole).toBe('app_reader');
   });
 
+  it('treats empty-string auth env vars as unset (auth stays off)', async () => {
+    // The scaffold's docker-compose.yml forwards every KOZOU_JWT_* variable
+    // with a `${VAR:-}` default, so an unset host variable reaches the
+    // container as an empty string. Empty must mean "auth off" — never
+    // "HS256 with an empty secret".
+    const config = await loadConfig({
+      skipFile: true,
+      env: {
+        DATABASE_URL: 'postgres://u:p@h:5432/db',
+        KOZOU_JWT_SECRET: '',
+        KOZOU_JWT_PUBLIC_KEY: '',
+        KOZOU_JWT_JWKS_URI: '',
+        KOZOU_JWT_ALGORITHMS: '',
+        KOZOU_JWT_ISSUER: '',
+        KOZOU_JWT_AUDIENCE: '',
+        KOZOU_JWT_ROLE_CLAIM: '',
+        KOZOU_JWT_ALLOWED_ROLES: '',
+        KOZOU_JWT_DEFAULT_ROLE: '',
+        KOZOU_JWT_ANON_ROLE: '',
+        KOZOU_JWT_CLAIMS_GUC: '',
+        KOZOU_UI_ROLE: '',
+        KOZOU_ADAPTER_TOKEN: '',
+      },
+    });
+    expect(config.auth).toBeUndefined();
+  });
+
+  it('skips empty-string optional auth env vars when a secret is set', async () => {
+    // Same compose shape with only the secret filled in: the other
+    // empty-string variables must not produce empty roles / claims (zod
+    // would reject min(1)) — they are simply absent.
+    const config = await loadConfig({
+      skipFile: true,
+      env: {
+        DATABASE_URL: 'postgres://u:p@h:5432/db',
+        KOZOU_JWT_SECRET: 'env-secret',
+        KOZOU_JWT_ALGORITHMS: '',
+        KOZOU_JWT_ISSUER: '',
+        KOZOU_JWT_ROLE_CLAIM: '',
+        KOZOU_JWT_ALLOWED_ROLES: '',
+        KOZOU_JWT_DEFAULT_ROLE: '',
+        KOZOU_JWT_ANON_ROLE: '',
+        KOZOU_JWT_CLAIMS_GUC: '',
+        KOZOU_UI_ROLE: '',
+        KOZOU_ADAPTER_TOKEN: '',
+      },
+    });
+    expect(config.auth?.jwt.secret).toBe('env-secret');
+    expect(config.auth?.jwt.algorithms).toBeUndefined();
+    expect(config.auth?.jwt.issuer).toBeUndefined();
+    expect(config.auth?.roleClaim).toBeUndefined();
+    expect(config.auth?.allowedRoles).toBeUndefined();
+    expect(config.auth?.defaultRole).toBeUndefined();
+    expect(config.auth?.anonRole).toBeUndefined();
+    expect(config.auth?.claimsGuc).toBeUndefined();
+    expect(config.auth?.ui).toBeUndefined();
+  });
+
   it('parses auth.jwt.jwksUri from the config file', async () => {
     const dir = await makeTempDir();
     const file = await writeYaml(

@@ -4,6 +4,8 @@ import { describe, expect, it } from 'vitest';
 import { loadConfig, type KozouConfig } from '../src/config.js';
 import {
   buildAdminUiEnv,
+  classifyAdminUiExposure,
+  describeApiAuth,
   resolveOrigin,
   resolveAdminUiEntry,
   resolveAdminUiToken,
@@ -84,6 +86,28 @@ describe('buildAdminUiEnv', () => {
     expect(env.KOZOU_ADAPTER_URL).toBe(adapterUrl);
     expect(env.PORT).toBe('4000');
     expect(env.HOST).toBe('127.0.0.1');
+  });
+
+  it('never passes KOZOU_JWT_* verifier inputs to the UI child', async () => {
+    // The scaffold compose forwards KOZOU_JWT_* to the CLI process; the
+    // network-facing UI child only consumes KOZOU_ADAPTER_*, so signing /
+    // verification material must not extend into it.
+    const config = await makeConfig();
+    const baseEnv = {
+      PATH: '/usr/bin',
+      KOZOU_JWT_SECRET: 'hs256-secret',
+      KOZOU_JWT_PUBLIC_KEY: 'pem',
+      KOZOU_JWT_JWKS_URI: 'https://idp.example/jwks',
+      KOZOU_JWT_ANON_ROLE: 'web_anon',
+    };
+    // In-house api path (token attached) and REST opt-out path alike.
+    const apiEnv = buildAdminUiEnv(config, 'http://localhost:3333', baseEnv, 'http://127.0.0.1:3335', 'tok');
+    const optOutEnv = buildAdminUiEnv(config, 'http://localhost:3333', baseEnv);
+    for (const env of [apiEnv, optOutEnv]) {
+      expect(Object.keys(env).filter((k) => k.startsWith('KOZOU_JWT_'))).toEqual([]);
+      expect(env.PATH).toBe('/usr/bin');
+    }
+    expect(apiEnv.KOZOU_ADAPTER_TOKEN).toBe('tok');
   });
 
   it('omits KOZOU_ADAPTER_KIND and uses the config url for the REST opt-out', async () => {
@@ -240,6 +264,122 @@ describe('resolveAdminUiToken', () => {
     expect(result.token).toBeUndefined();
     expect(result.warning).toMatch(/RS256/);
     expect(calls).toHaveLength(0);
+  });
+});
+
+describe('describeApiAuth', () => {
+  it('says disabled when no auth is configured', () => {
+    expect(describeApiAuth(undefined)).toBe(
+      'disabled (no JWT verification configured; requests run as the connection role)',
+    );
+  });
+
+  it('describes an HS256 setup without leaking the secret', () => {
+    const line = describeApiAuth({
+      jwt: { secret: 'super-secret' },
+      allowedRoles: ['app_user', 'web_anon'],
+      defaultRole: 'app_user',
+      anonRole: 'web_anon',
+      ui: { role: 'app_admin' },
+    });
+    expect(line).toBe(
+      'HS256 (shared secret), allowedRoles=[app_user, web_anon], ' +
+        'defaultRole=app_user, anonRole=web_anon, ui role=app_admin',
+    );
+    expect(line).not.toContain('super-secret');
+  });
+
+  it('names the JWKS endpoint and a supplied UI token', () => {
+    const line = describeApiAuth({
+      jwt: { jwksUri: 'https://idp.example/.well-known/jwks.json' },
+      ui: { token: 'opaque.jwt.token' },
+    });
+    expect(line).toBe('JWKS (https://idp.example/.well-known/jwks.json), ui token=supplied');
+    expect(line).not.toContain('opaque.jwt.token');
+  });
+
+  it('describes a static public key', () => {
+    expect(describeApiAuth({ jwt: { publicKey: '-----BEGIN PUBLIC KEY-----' } })).toBe(
+      'static public key',
+    );
+  });
+
+  it('redacts credentials embedded in the JWKS URL', () => {
+    const line = describeApiAuth({
+      jwt: { jwksUri: 'https://user:hunter2@idp.example/jwks?token=tok-123#frag' },
+    });
+    expect(line).toBe('JWKS (https://idp.example/jwks)');
+    expect(line).not.toContain('hunter2');
+    expect(line).not.toContain('tok-123');
+  });
+});
+
+describe('classifyAdminUiExposure', () => {
+  const hs256 = { jwt: { secret: 's' } };
+
+  it('is unauthenticated with no auth or with an external adapter', () => {
+    expect(classifyAdminUiExposure(undefined, undefined, true)).toBe('unauthenticated');
+    // External REST opt-out: kozou does not manage that adapter's auth.
+    expect(classifyAdminUiExposure(hs256, { token: 'tok' }, false)).toBe('unauthenticated');
+  });
+
+  it('is service-token when a usable UI token was resolved', () => {
+    expect(classifyAdminUiExposure(hs256, { token: 'tok' }, true)).toBe('service-token');
+  });
+
+  it('is anon-role when no token resolved but an anonRole is configured', () => {
+    expect(classifyAdminUiExposure({ ...hs256, anonRole: 'web_anon' }, undefined, true)).toBe(
+      'anon-role',
+    );
+  });
+
+  it('is rejected when no token resolved and no anonRole', () => {
+    // RS256 / JWKS with no supplied token: the CLI cannot mint one.
+    const rs256 = { jwt: { jwksUri: 'https://idp.example/jwks' } };
+    expect(classifyAdminUiExposure(rs256, { warning: 'no token' }, true)).toBe('rejected');
+    expect(classifyAdminUiExposure(hs256, { token: '' }, true)).toBe('rejected');
+  });
+
+  it('is rejected (not service-token) when the resolver knows the API will refuse the token', () => {
+    // HS256 mints a token even when it is known-rejected: no role and no
+    // defaultRole, or a role outside allowedRoles. The exposure must not
+    // claim visitors act with a working service token in those configs —
+    // and a present-but-rejected token never falls back to anonRole.
+    const result = { token: 'tok', warning: 'API will reject it with 403', knownRejected: true };
+    expect(classifyAdminUiExposure(hs256, result, true)).toBe('rejected');
+    expect(classifyAdminUiExposure({ ...hs256, anonRole: 'web_anon' }, result, true)).toBe(
+      'rejected',
+    );
+  });
+
+  it('matches what resolveAdminUiToken actually returns for known-rejected mints', async () => {
+    const minter: ServiceTokenMinter = {
+      signServiceToken: () => Promise.resolve('minted-token'),
+    };
+    // No ui.role and no defaultRole.
+    const noRole = await resolveAdminUiToken(
+      { ...(await makeConfig()), auth: { jwt: { secret: 's' } } },
+      minter,
+      {},
+    );
+    expect(noRole.knownRejected).toBe(true);
+    expect(classifyAdminUiExposure({ jwt: { secret: 's' } }, noRole, true)).toBe('rejected');
+
+    // Minted role outside allowedRoles.
+    const auth = {
+      jwt: { secret: 's' },
+      allowedRoles: ['app_reader'],
+      ui: { role: 'app_admin' },
+    };
+    const badRole = await resolveAdminUiToken({ ...(await makeConfig()), auth }, minter, {});
+    expect(badRole.knownRejected).toBe(true);
+    expect(classifyAdminUiExposure(auth, badRole, true)).toBe('rejected');
+
+    // A clean mint stays service-token.
+    const cleanAuth = { jwt: { secret: 's' }, defaultRole: 'app_reader' };
+    const clean = await resolveAdminUiToken({ ...(await makeConfig()), auth: cleanAuth }, minter, {});
+    expect(clean.knownRejected).toBeUndefined();
+    expect(classifyAdminUiExposure(cleanAuth, clean, true)).toBe('service-token');
   });
 });
 
