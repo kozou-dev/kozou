@@ -178,7 +178,7 @@ change without a major release):
   components follow primary-key declaration order;
 - the auth boundary — JWT claims mapped to `SET LOCAL ROLE` (see below);
 - the error envelope `{ error: { code, message } }` and the database-mapped
-  status table (see Errors above).
+  status table (as of Kozou v1.1.1 — see Errors above).
 
 Still evolving (not yet covered by the stability guarantee):
 
