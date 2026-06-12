@@ -2,7 +2,7 @@
 
 PostgreSQL compiler. One source, many faithful forms.
 
-Kozou reads a PostgreSQL schema once and produces every form a modern team and its AI need from it — admin UI, MCP context, TypeScript types, GraphQL endpoints, and documentation. No duplicate definitions. No drift.
+Kozou reads a PostgreSQL schema once and produces every form a modern team and its AI need from it — admin UI, MCP context, TypeScript types, REST endpoints, and documentation. No duplicate definitions. No drift.
 
 ## Status
 
