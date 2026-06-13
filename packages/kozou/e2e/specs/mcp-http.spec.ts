@@ -5,8 +5,7 @@
 // Claude Code speak) to initialise a session, list tools, and call
 // list_tables — proving the in-process MCP server introspects the live
 // database and returns the fixture's tables. Also checks the
-// `POST /admin/refresh` cache-invalidation route (spec §7.5). Tracks
-// Kozou v0.1 design spec §7.1 / §7.5 and §16.1.1 B.
+// `POST /admin/refresh` cache-invalidation route.
 
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';

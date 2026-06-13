@@ -6,8 +6,6 @@
 //   3. Optionally load UI hints (@kozou/core.loadUIHints).
 //   4. Build a SchemaContext (@kozou/core.buildSchemaContext).
 //   5. Render a Markdown schema document and write it out.
-//
-// See product_architecture_v3 §3.4 (the "docs" emit target).
 
 import { writeFile } from 'node:fs/promises';
 import { buildSchemaContext, loadUIHints } from '@kozou/core';

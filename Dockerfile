@@ -1,10 +1,9 @@
 # syntax=docker/dockerfile:1.7
 #
 # Multi-stage build for the `kozou` CLI image
-# (ghcr.io/kozou-dev/kozou). Per Kozou v0.1 design spec §14.2 /
-# §16.1.1 A the image ships only the CLI (inspect / mcp / dev
-# hand-off) plus its transitive production dependencies. PostgREST
-# source / binary is intentionally absent (license compliance §4);
+# (ghcr.io/kozou-dev/kozou). The image ships only the CLI (inspect /
+# mcp / dev hand-off) plus its transitive production dependencies.
+# PostgREST source / binary is intentionally absent;
 # operators run the PostgREST image side-by-side via docker compose
 # - see the scaffold templates shipped under `packages/kozou/dist/
 # templates/`.
@@ -67,8 +66,8 @@ COPY --from=builder /deploy /app
 # least-privilege account.
 USER node
 
-# `kozou dev` serves the Admin UI on 3333 and MCP HTTP on 3334
-# (Kozou v0.1 spec §9.1). Other subcommands (inspect / mcp --stdio)
+# `kozou dev` serves the Admin UI on 3333 and MCP HTTP on 3334.
+# Other subcommands (inspect / mcp --stdio)
 # bind nothing; EXPOSE is informational and harmless for them.
 EXPOSE 3333 3334
 

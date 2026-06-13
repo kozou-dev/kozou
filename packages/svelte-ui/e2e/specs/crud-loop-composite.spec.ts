@@ -1,4 +1,4 @@
-// Composite-primary-key CRUD loop (Kozou v1.0 dev spec §3.6 / §3.7). The
+// Composite-primary-key CRUD loop. The
 // Admin UI addresses a row by a two-column key (order_lines: order_id,
 // line_no) the whole way through: the list row link, the detail / edit
 // routes, and the create redirect all carry the comma-joined `id` segment,

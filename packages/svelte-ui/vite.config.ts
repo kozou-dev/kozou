@@ -16,9 +16,8 @@ export default defineConfig({
       exclude: ['src/lib/components/ui/**'],
       reporter: ['text', 'lcov'],
       // Enforce DoD #6 from Step 6. Branches/functions stay
-      // unmetered for v0.1; design spec §16.1.1 B reactivates the
-      // tighter gates in v0.1.1 along with the other deferred
-      // items.
+      // unmetered for v0.1; the tighter gates reactivate in v0.1.1
+      // along with the other deferred items.
       thresholds: {
         lines: 90,
       },

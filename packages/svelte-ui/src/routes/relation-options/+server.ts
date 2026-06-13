@@ -1,7 +1,7 @@
 // Relation-select live-search endpoint.
 //
 // The browser picker cannot call the server-only DataAdapter directly (it is
-// kept behind the adapter-boundary rule, Kozou v0.1 design spec §18.1.1), so
+// kept behind the adapter-boundary rule), so
 // it queries this endpoint, which forwards to DataAdapter.searchRelation and
 // returns `{ options: RelationOption[] }`. Request validation (known target
 // table, real label / search columns) lives in `searchRelationOptions` so it

@@ -1,7 +1,6 @@
 // Read-only VIEW listing. Same URL contract as the table list
 // (see src/lib/query/list-params.ts), but no Edit / New / Delete
-// buttons render in the template; views are derived data per Kozou
-// v0.1 design spec §8.3.6.
+// buttons render in the template; views are derived data.
 
 import { error } from '@sveltejs/kit';
 

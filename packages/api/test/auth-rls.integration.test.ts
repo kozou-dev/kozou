@@ -265,7 +265,7 @@ describe('@kozou/api JWT + RLS (generic fixture)', () => {
     });
   });
 
-  describe('RPC EXECUTE enforcement (issue #103, §6.1)', () => {
+  describe('RPC EXECUTE enforcement (issue #103)', () => {
     const postRpc = async (fn: string, jwt: string) => {
       const r = await fetch(`${base}/rpc/${db.schema}.${fn}`, {
         method: 'POST',

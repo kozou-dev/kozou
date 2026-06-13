@@ -12,7 +12,7 @@ on:
     branches: [main]
   workflow_dispatch:
 
-# Supply chain hardening (Codex W2, Step 4-A3-c): declare the minimum
+# Supply chain hardening (Step 4-A3-c): declare the minimum
 # permissions at the top level. Each job adds the additional scopes it
 # needs (this workflow only needs read access).
 permissions:
@@ -51,7 +51,7 @@ jobs:
       # within budget.
       NODE_OPTIONS: '--max-old-space-size=4096'
     steps:
-      # Codex W2: SHA-pin third-party actions (kept fresh by Dependabot).
+      # SHA-pin third-party actions (kept fresh by Dependabot).
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
       - name: Install pnpm
@@ -208,7 +208,7 @@ jobs:
     # Kozou v1.0 default: launches a plain `node dist/cli.js dev` (no adapter
     # flag), which resolves adapter.type to its default `api`, starts the
     # in-house @kozou/api server in-process, and spawns the Admin UI pointed
-    # at it — NO data-backend sidecar (the §1.3 DoD: default config, no
+    # at it — NO data-backend sidecar (default config, no
     # PostgREST container) — then drives a browser CRUD loop. The Playwright
     # globalSetup owns the postgres lifecycle via testcontainers.
     # (See packages/kozou/e2e-api/setup/global-setup.ts.)

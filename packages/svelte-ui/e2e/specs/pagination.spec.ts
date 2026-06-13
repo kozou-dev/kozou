@@ -2,8 +2,7 @@
 // authors, so a `?pageSize=2` URL splits them across two pages. The spec
 // walks forward with "Next →" and back with "← Prev", asserting the page
 // indicator and the rendered row count at each step. Read-only, so it
-// leaves the fixture untouched. Tracks Kozou v0.1 design spec §8.3.2 /
-// §16.1.1 B (Playwright E2E list pagination).
+// leaves the fixture untouched. Tracks Playwright E2E list pagination.
 
 import { expect, test } from '@playwright/test';
 

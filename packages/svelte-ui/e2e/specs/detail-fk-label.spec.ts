@@ -1,8 +1,7 @@
 // Detail-page FK label resolution smoke: navigating to a books row
 // resolves the `author_id` foreign key into the referenced authors
 // row's display_name, surfaced as a clickable link with the raw FK
-// value as a subtle annotation. Tracks Kozou v0.1 design spec
-// §16.1.1 B (FK label resolution / Step 6-K).
+// value as a subtle annotation. Tracks FK label resolution / Step 6-K.
 
 import { expect, test } from '@playwright/test';
 

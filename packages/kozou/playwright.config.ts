@@ -1,5 +1,4 @@
 // Playwright config for the `kozou dev` full-stack E2E suite.
-// Tracks Kozou v0.1 design spec §9.1 (`kozou dev`) and §16.1.1 B.
 //
 // The suite spins up postgres + the REST adapter via testcontainers and
 // launches `node dist/cli.js dev` against them (see e2e/setup/global-

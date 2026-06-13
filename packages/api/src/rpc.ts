@@ -1,9 +1,9 @@
-// The RPC surface for the Kozou REST layer (RPC design §5.1 / §6, issue #103).
+// The RPC surface for the Kozou REST layer (issue #103).
 // Turns the exposed FunctionContexts of a SchemaContext into a callable
 // `POST /rpc/<schema>.<fn>` namespace: a registry that resolves a function by
-// its schema-qualified identity (§5.0), a builder that pre-flights the body and
-// produces a parameterized named-args call (§5.1 / §6.2), and a shaper that maps
-// the result to the v1 wire form (§4.3).
+// its schema-qualified identity, a builder that pre-flights the body and
+// produces a parameterized named-args call, and a shaper that maps
+// the result to the v1 wire form.
 //
 // Safety contract (mirrors query-builder.ts):
 //   - The only addressable functions are those `@kozou/core` decided to expose;
@@ -13,7 +13,7 @@
 //     interpolated into the SQL text.
 //   - Whether the caller may actually run the function is enforced by
 //     PostgreSQL's EXECUTE privilege under the request's role; a denial (42501)
-//     maps to 403 via the handler's error classifier (§6.1). Exposure is not
+//     maps to 403 via the handler's error classifier. Exposure is not
 //     permission.
 
 import type { SchemaContext, FunctionContext, FunctionReturnContext } from '@kozou/core';
@@ -22,7 +22,7 @@ import { badRequest } from './errors.js';
 import { quoteIdent } from './ident.js';
 
 /** Registry of exposed RPC functions, keyed by the schema-qualified identity
- *  (`schema.name`, §5.0). Unlike resources, functions have no bare-name alias —
+ *  (`schema.name`). Unlike resources, functions have no bare-name alias —
  *  the qualified name is the canonical and only addressable form. */
 export type FunctionLookup = {
   resolve(qualifiedName: string): FunctionContext | undefined;
@@ -73,7 +73,7 @@ function selectForReturn(call: string, returns: FunctionReturnContext): string {
 /**
  * Build the parameterized call for an exposed function from a named-args body.
  *
- * Pre-flight (§6.2, all 400 before the query runs):
+ * Pre-flight (all 400 before the query runs):
  *   - the body must name only declared arguments (unknown key -> 400);
  *   - every argument without a DEFAULT must be supplied (missing -> 400).
  * Argument *value* validation (format / range) is deliberately left to
@@ -113,8 +113,8 @@ export function buildRpcCall(fn: FunctionContext, body: Record<string, unknown>)
 
 export type RpcResult = { status: number; body: unknown };
 
-/** Map the rows returned by {@link buildRpcCall}'s query to the v1 wire form
- *  (§4.3): void -> 204; scalar -> the bare value; composite -> an object;
+/** Map the rows returned by {@link buildRpcCall}'s query to the v1 wire form:
+ *  void -> 204; scalar -> the bare value; composite -> an object;
  *  SETOF -> an array (of objects, or of bare scalars for a scalar set). */
 export function shapeRpcResult(
   returns: FunctionReturnContext,

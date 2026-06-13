@@ -5,7 +5,7 @@ import { buildSchemaContext, type SchemaContext, type RpcBuildConfig } from '@ko
 export type SchemaCacheOptions = {
   connection: string | ClientConfig;
   schemas?: string[];
-  /** TTL in ms (default 60_000, per Kozou v0.1 spec §7.5) */
+  /** TTL in ms (default 60_000) */
   ttlMs?: number;
   /** RPC exposure config (issue #103). Threaded into buildSchemaContext so
    *  `describe_functions` advertises the same exposed set as the REST `/rpc/`

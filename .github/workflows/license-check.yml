@@ -2,8 +2,7 @@ name: License integrity check
 
 # Verify the license metadata is consistent (LICENSE / package.json /
 # pyproject.toml / README.md all point at Apache 2.0) and that no build
-# artifact contains forbidden AGPL/GPL/PostgREST vocabulary (per Kozou
-# v0.1 license compliance §4).
+# artifact contains forbidden AGPL/GPL/PostgREST vocabulary.
 
 on:
   push:
@@ -12,7 +11,7 @@ on:
     branches: [main]
   workflow_dispatch:
 
-# Supply chain hardening (Codex W2, Step 4-A3-c):
+# Supply chain hardening (Step 4-A3-c):
 # declare the minimum permissions at the top level.
 permissions:
   contents: read
@@ -30,7 +29,7 @@ jobs:
     name: License metadata integrity check
     runs-on: ubuntu-latest
     steps:
-      # Codex W2: SHA-pin third-party actions (kept fresh by Dependabot).
+      # SHA-pin third-party actions (kept fresh by Dependabot).
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
       - name: LICENSE is Apache License 2.0
@@ -90,23 +89,23 @@ jobs:
       - name: No AGPL/GPL/PostgREST vocabulary in code files
         # NOTE: this check scans only TypeScript / JavaScript / Svelte /
         # SQL code. Excluded by design:
-        # - markdown docs (policy / README / CONTRIBUTING / Kozou v0.1
-        #   spec intentionally mention these names)
-        # - YAML / YML (configs / spec - using `type: postgrest` as the
-        #   adapter type is the documented option per Kozou v0.1 spec §9.2)
+        # - markdown docs (policy / README / CONTRIBUTING
+        #   intentionally mention these names)
+        # - YAML / YML (configs - using `type: postgrest` as the
+        #   adapter type is the documented option)
         # - TOML (pyproject.toml is verified separately above)
         # - GitHub Actions workflow files (including this one)
         # - .eslintrc.cjs (mentions PostgREST only inside the defensive
-        #   rule defined per Kozou v0.1 spec §18.1.1)
+        #   rule)
         # - packages/kozou/src/config.ts (the adapter.type literal is
-        #   the discriminator value 'postgrest' defined by Kozou v0.1
-        #   spec §9.2; it identifies the adapter, not the implementation)
+        #   the discriminator value 'postgrest'; it identifies the
+        #   adapter, not the implementation)
         # - packages/kozou/test/config.test.ts (asserts the spec's
         #   discriminator literal)
         # - packages/svelte-ui/src/lib/adapter/postgrest.ts (the
-        #   PostgrestDataAdapter implementation mandated by Kozou v0.1
-        #   spec §4.4 / §8.5; calls into the PostgREST HTTP surface
-        #   but ships none of the PostgREST source/binary itself)
+        #   PostgrestDataAdapter implementation; calls into the
+        #   PostgREST HTTP surface but ships none of the PostgREST
+        #   source/binary itself)
         # - packages/svelte-ui/src/lib/adapter/index.ts (re-exports
         #   the PostgrestDataAdapter / PostgrestAdapterError symbols
         #   above; identifier strings only, no PostgREST code)
@@ -126,13 +125,13 @@ jobs:
         #   export name is fixed by the module under test, identifier only)
         # - packages/svelte-ui/e2e/** (Playwright E2E suite; spawns
         #   postgrest/postgrest as a sidecar container via
-        #   testcontainers per Kozou v0.1 spec §16.1.1 B. The directory
-        #   ships no PostgREST source / binary; it only references the
-        #   public Docker image tag + env var names.)
+        #   testcontainers. The directory ships no PostgREST source /
+        #   binary; it only references the public Docker image tag +
+        #   env var names.)
         # - packages/svelte-ui/playwright.config.ts (Playwright config
         #   header documenting the same sidecar arrangement)
         # - packages/kozou/e2e/** (the `kozou dev` full-stack Playwright
-        #   suite per Kozou v0.1 spec §16.1.1 B; launches `kozou dev`
+        #   suite; launches `kozou dev`
         #   against the same postgrest sidecar via testcontainers. Ships
         #   no PostgREST source / binary; references the public Docker
         #   image tag + env var names only, and is not in the package's
@@ -167,8 +166,7 @@ jobs:
   npm-artifact-grep:
     name: npm artifact integrity (${{ matrix.pkg }})
     runs-on: ubuntu-latest
-    # Step 7-D matrix-ized this job per Kozou v0.1 design spec
-    # §16.1.1 A (Step 6-M addendum). Each matrix leg packs a single
+    # Step 7-D matrix-ized this job (Step 6-M addendum). Each matrix leg packs a single
     # workspace package, unpacks the tarball, and verifies the
     # code/binary files contain no forbidden vocabulary.
     strategy:
@@ -181,12 +179,11 @@ jobs:
             forbidden_regex: 'postgrest|pgrst|agpl|gnu affero|gpl-3|gnu general public'
             # The compiled `dist/config.js` + `dist/config.d.ts`
             # carry the `adapter.type: 'postgrest'` discriminator
-            # literal defined by Kozou v0.1 design spec §9.2 - the
-            # exact string the code-grep job above already exempts
-            # from `packages/kozou/src/config.ts`. The literal is a
-            # configuration value identifying the adapter, not
-            # PostgREST source / binary / generated code (license
-            # compliance §4). Path-anchor the exclusion so a future
+            # literal - the exact string the code-grep job above
+            # already exempts from `packages/kozou/src/config.ts`. The
+            # literal is a configuration value identifying the adapter,
+            # not PostgREST source / binary / generated code.
+            # Path-anchor the exclusion so a future
             # `config.js` somewhere else in the tarball would still
             # be scanned.
             extra_excludes: "! -path '*/dist/config.js' ! -path '*/dist/config.d.ts'"
@@ -209,10 +206,9 @@ jobs:
             tgz_glob: 'kozou-svelte-ui-*.tgz'
             # The svelte-ui adapter-node bundle inlines the
             # `PostgrestDataAdapter` class name into the hashed
-            # server chunk (see Kozou v0.1 design spec §4.4 / §8.5
-            # for the adapter contract). The class identifier is
+            # server chunk. The class identifier is
             # not PostgREST source / binary / generated code
-            # (license compliance §4 only forbids the latter), and
+            # (only the latter is forbidden), and
             # the bundled chunk's hashed filename makes a stable
             # exclude list impractical. Drop `postgrest|pgrst` from
             # the alternation; AGPL / GPL / "GNU Affero" / "GNU
@@ -237,7 +233,7 @@ jobs:
       # vite build. Matches the bump in ci.yml (Step 6-Z-2).
       NODE_OPTIONS: '--max-old-space-size=4096'
     steps:
-      # Codex W2: SHA-pin third-party actions (kept fresh by Dependabot).
+      # SHA-pin third-party actions (kept fresh by Dependabot).
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
       - name: Install pnpm
@@ -270,8 +266,7 @@ jobs:
         # Step 7-G: assert every entry in `expected_files` ships and
         # that no `src/**` leaks into the tarball. Runs before the
         # actual `npm pack` below so a publish-config regression
-        # surfaces ahead of any download/scan overhead. This closes
-        # Codex 1st-pass E.16.
+        # surfaces ahead of any download/scan overhead.
         working-directory: packages/${{ matrix.pkg }}
         run: |
           npm pack --dry-run 2>&1 | tee pack-dryrun.txt
@@ -308,10 +303,10 @@ jobs:
       - name: npm pack ${{ matrix.pkg }} + grep code/binary contents
         # README / LICENSE / NOTICE / package.json metadata are
         # intentionally allowed to mention PostgREST and license
-        # names, so we exclude them. The actual goal of Kozou v0.1
-        # license compliance §4 (keep PostgREST source / binary /
-        # generated code out of the published artifacts) is satisfied
-        # by grepping the code/binary files only.
+        # names, so we exclude them. The actual goal (keep PostgREST
+        # source / binary / generated code out of the published
+        # artifacts) is satisfied by grepping the code/binary files
+        # only.
         #
         # The Step 5 CLI scaffold ships env.example as a configuration
         # template that mentions `postgrest` as the default adapter

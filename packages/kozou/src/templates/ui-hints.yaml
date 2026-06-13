@@ -5,7 +5,7 @@
 # presentation: override a table label, force a specific widget for a
 # column, or surface relation search fields.
 #
-# See Kozou v0.1 design spec §4.3 for the full schema.
+# See the kozou.config.yaml reference at https://kozou.org for the UI-hints schema.
 
 tables: {}
 

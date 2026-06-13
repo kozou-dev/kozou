@@ -1,6 +1,5 @@
 // @kozou/core: Schema Context, type definitions, UI Hints zod schema, DataAdapter interface.
-// Per Kozou v0.1 spec §0, the type definitions in this package are the
-// source of truth on the code side.
+// The type definitions in this package are the source of truth on the code side.
 
 export type {
   RawIntrospection,

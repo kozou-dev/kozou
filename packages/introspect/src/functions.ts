@@ -7,12 +7,12 @@ import type {
 } from '@kozou/core';
 import { runQuery } from './errors.js';
 
-// Function introspection for the RPC surface (RPC design §4, issue #103).
+// Function introspection for the RPC surface (issue #103).
 // Reads pg_proc for the metadata the @kozou/core exposure decision needs:
 // structured arguments, a classified return shape, volatility, security,
 // owner, whether PUBLIC retains EXECUTE (the CREATE FUNCTION default grant),
 // and the declared SET search_path with owner-relative writability per element
-// (the input to the SECURITY DEFINER safe-search_path predicate, §3.2).
+// (the input to the SECURITY DEFINER safe-search_path predicate).
 //
 // Only ordinary functions (`prokind = 'f'`) in the target schemas are pulled;
 // aggregates / window functions / procedures are out of scope for v1. @core
@@ -158,7 +158,7 @@ type SchemaWritabilityRow = {
 };
 
 // Who may CREATE in each named schema, framed for the owner-safe search_path
-// predicate (§3.2). Superusers are deliberately not enumerated as creators:
+// predicate. Superusers are deliberately not enumerated as creators:
 // a superuser bypasses every ACL and can replace the definer function itself,
 // so it is not a hijack vector — and this is what makes pg_catalog (owned by
 // the bootstrap superuser) correctly safe. Inherited privileges are NOT lost,
@@ -361,7 +361,7 @@ export async function fetchFunctions(client: Client, schemas: string[]): Promise
   if (rows.length === 0) return [];
 
   // Pre-parse search paths and gather the fixed schema names whose CREATE
-  // writability the safe-search_path predicate (§3.2) needs. Only definer
+  // writability the safe-search_path predicate needs. Only definer
   // functions are subject to the predicate, so only their paths matter; but
   // parsing every function's path is cheap and keeps the shape uniform.
   const parsed = rows.map((row) => ({ row, searchPath: parseSearchPath(row.proconfig) }));

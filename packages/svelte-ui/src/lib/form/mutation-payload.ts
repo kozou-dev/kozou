@@ -13,8 +13,6 @@
 // A relation-select with no selection is normalized to null: its foreign-key
 // column (a uuid / integer / ...) cannot store an empty string, so an empty
 // value means "clear the relation".
-//
-// See Kozou v0.1 design spec §8.3.3 (create) / §8.3.5 (update).
 
 import type { ColumnContext } from '@kozou/core';
 

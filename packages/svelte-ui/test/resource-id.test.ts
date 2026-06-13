@@ -62,7 +62,7 @@ describe('parseResourceId', () => {
 });
 
 describe('composite key value containing a comma (documented limitation)', () => {
-  // Kozou v1.0 dev spec §3.8: a composite key value cannot contain a comma,
+  // A composite key value cannot contain a comma,
   // because SvelteKit (and the in-house API handler) URL-decode the whole
   // `[id]` segment before splitting on commas. This test pins the behaviour
   // so the limitation stays *contained* — a comma inflates the component

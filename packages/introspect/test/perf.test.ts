@@ -4,7 +4,7 @@ import pkg from 'pg';
 import { setupDatabase, type DatabaseHandle } from '@kozou/test-utils';
 import { introspect } from '../src/index.js';
 
-// Kozou v0.1 design spec §5.3 performance requirement: introspecting a
+// Performance requirement: introspecting a
 // 100-table / 1000-column schema must complete within 3s (localhost, no
 // network latency). This gate generates exactly that shape (100 tables x
 // 10 columns = 1000 columns) and asserts the introspect() call stays
@@ -34,7 +34,7 @@ function buildSchemaSql(): string {
   return statements.join('\n');
 }
 
-describe('introspect performance (spec §5.3: 100 tables / 1000 columns < 3s)', () => {
+describe('introspect performance (100 tables / 1000 columns < 3s)', () => {
   let db: DatabaseHandle;
 
   beforeAll(async () => {

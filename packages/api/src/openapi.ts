@@ -1,5 +1,5 @@
-// OpenAPI 3.1 document generation from a SchemaContext (Kozou v0.2 spec
-// §3.2). The differentiator over a generic auto-API is that COMMENT-derived
+// OpenAPI 3.1 document generation from a SchemaContext.
+// The differentiator over a generic auto-API is that COMMENT-derived
 // metadata is baked into the document: table/view/column descriptions, the
 // `@ai:` notes (as `x-kozou-ai`), `@policy:` rules (as `x-kozou-policy`),
 // CHECK / ENUM members (as `enum`), and the resolved widget (as
@@ -111,7 +111,7 @@ export function buildOpenApiDocument(
   }
 
   // RPC operations (issue #103): one `POST /rpc/<schema>.<fn>` per exposed
-  // function, addressed by its schema-qualified identity (§5.0). COMMENT-derived
+  // function, addressed by its schema-qualified identity. COMMENT-derived
   // metadata (@ai / @policy) rides along as x-kozou-* the same way it does for
   // tables/views.
   for (const fn of schema.functions ?? []) {
@@ -640,8 +640,8 @@ function errorResponse(description: string): JsonObject {
 // ---- RPC (issue #103) ------------------------------------------------------
 
 /** The `POST /rpc/<schema>.<fn>` operation for one exposed function. The path
- *  uses the schema-qualified identity (§5.0); the request body is the named
- *  arguments; the response shape follows the v1 return mapping (§4.3). */
+ *  uses the schema-qualified identity; the request body is the named
+ *  arguments; the response shape follows the v1 return mapping. */
 function rpcPaths(fn: FunctionContext): JsonObject {
   const properties: JsonObject = {};
   const required: string[] = [];
@@ -684,15 +684,15 @@ function argSchema(arg: FunctionArgContext): JsonObject {
   return schema;
 }
 
-/** Responses for an RPC operation: the success status/shape by return kind
- *  (§4.3), plus the database-mapped 403 (no EXECUTE / RLS denial) and a 400 for
+/** Responses for an RPC operation: the success status/shape by return kind,
+ *  plus the database-mapped 403 (no EXECUTE / RLS denial) and a 400 for
  *  a malformed body. */
 function rpcResponses(returns: FunctionReturnContext): JsonObject {
   const base: JsonObject = {
     '400': errorResponse('Validation error (unknown or missing argument).'),
     '403': errorResponse('Permission denied (no EXECUTE privilege or row-level security).'),
     // A function that violates (or RAISEs with) a unique / foreign-key SQLSTATE
-    // maps to 409 via the same classifier as table writes (§6.3 / #98 reuse).
+    // maps to 409 via the same classifier as table writes (#98 reuse).
     '409': errorResponse('Constraint conflict (unique or foreign-key violation).'),
   };
   if (returns.kind === 'void') {
@@ -701,7 +701,7 @@ function rpcResponses(returns: FunctionReturnContext): JsonObject {
   return { '200': jsonResponse('The function result.', returnSchema(returns)), ...base };
 }
 
-/** Best-effort response schema for a return shape (§4.3): a scalar is left
+/** Best-effort response schema for a return shape: a scalar is left
  *  unconstrained (the SQL type is advisory only, in `x-kozou-type`); a composite
  *  is an object of its columns; a SETOF is an array of objects (or of scalars
  *  when the row has no named columns). */

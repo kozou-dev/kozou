@@ -1,22 +1,22 @@
-// The RPC exposure decision (RPC design, issue #103, §3 / §4.4 / §6.1) and the
-// shaping of an exposed function into a FunctionContext (§4.2 / §5.4).
+// The RPC exposure decision (issue #103) and the
+// shaping of an exposed function into a FunctionContext.
 //
 // Input is the raw functions pulled from pg_proc (@kozou/introspect) plus the
 // operator's deploy-time RPC config. Output is the set of functions that pass
 // every guard, ready for the surfaces (REST / OpenAPI / MCP / Admin UI). A
 // function tagged `@expose: rpc` that fails a guard is NOT exposed and is
 // reported as a build issue instead (loud skip — "you tagged it but it does not
-// appear", no silent gap, §4.4). A function with no `@expose` tag is simply
+// appear", no silent gap). A function with no `@expose` tag is simply
 // absent (the default, not an issue).
 //
 // The guards, in order:
-//   1. overload collision — two+ tagged functions share `schema.name` (§2)
-//   2. unsupported argument — VARIADIC / polymorphic / unnamed (§2 / §4.4)
-//   3. unsupported return — `kind: 'unsupported'` from introspect (§4.3 / §4.4)
+//   1. overload collision — two+ tagged functions share `schema.name`
+//   2. unsupported argument — VARIADIC / polymorphic / unnamed
+//   3. unsupported return — `kind: 'unsupported'` from introspect
 //   4. SECURITY DEFINER — must be in `allowDefiner` AND have an owner-safe
-//      search_path (the double opt-in of §3.2)
+//      search_path (the double opt-in)
 //   5. PUBLIC EXECUTE — the CREATE FUNCTION default grant is a hard skip unless
-//      intentionally overridden (`@expose: rpc public` / `allowPublicExecute`, §6.1)
+//      intentionally overridden (`@expose: rpc public` / `allowPublicExecute`)
 
 import type {
   RawEnum,
@@ -35,20 +35,20 @@ import type { ParsedComment } from './parseCommentTags.js';
 import { parseCommentTags } from './parseCommentTags.js';
 import { inferWidget } from './widget.js';
 
-/** Deploy-time RPC config (RPC design §3). Both lists hold schema-qualified
+/** Deploy-time RPC config. Both lists hold schema-qualified
  *  function names (`schema.function`); a bare name is ambiguous and reported as
- *  a build issue (§5.0). Sourced from `api.rpc.*` in kozou.config.yaml. */
+ *  a build issue. Sourced from `api.rpc.*` in kozou.config.yaml. */
 export type RpcBuildConfig = {
   /** `security definer` functions the operator has authorized for exposure —
-   *  the deploy-time half of the double opt-in (§3.2). */
+   *  the deploy-time half of the double opt-in. */
   allowDefiner?: string[];
-  /** Functions allowed to keep PUBLIC EXECUTE (intentional public-callable,
-   *  §6.1). `@expose: rpc public` is the per-function tag equivalent. */
+  /** Functions allowed to keep PUBLIC EXECUTE (intentional public-callable).
+   *  `@expose: rpc public` is the per-function tag equivalent. */
   allowPublicExecute?: string[];
 };
 
 // PostgreSQL polymorphic pseudo-types. A function taking one of these resolves
-// its argument types at call time, which v1 does not model — loud skip (§4.4).
+// its argument types at call time, which v1 does not model — loud skip.
 const POLYMORPHIC_TYPES: ReadonlySet<string> = new Set([
   'anyelement',
   'anyarray',
@@ -72,7 +72,7 @@ function isInputArg(arg: RawFunctionArg): boolean {
 
 /** Validate an allowlist: every entry must be a schema-qualified name of
  *  exactly the form `schema.function`, with both parts non-empty and no extra
- *  dot (§5.0). A bare name is ambiguous (which schema?); an entry with two+
+ *  dot. A bare name is ambiguous (which schema?); an entry with two+
  *  dots is ambiguous against a quoted identifier that itself contains a dot, so
  *  it could authorize the wrong function — both are dropped with a build issue
  *  rather than matched loosely (fail-closed for the definer / PUBLIC gates).
@@ -101,7 +101,7 @@ function normalizeAllowlist(
 }
 
 /** The owner-relative safe-search_path predicate for `security definer`
- *  functions (RPC design §3.2). A definer function runs as its owner, so an
+ *  functions. A definer function runs as its owner, so an
  *  unqualified name resolved through a schema that someone else can write to
  *  can be hijacked. Safe requires: a declared search_path; `pg_temp` present
  *  exactly once and last (else the temp schema is searched implicitly first);
@@ -273,14 +273,14 @@ function decideAndBuild(input: {
     if (!allowDefiner.has(qualifiedName)) {
       return skip(
         'is SECURITY DEFINER and tagged @expose: rpc, but is not listed in api.rpc.allowDefiner; ' +
-          'not exposed (the operator must opt in to a privilege-bypassing endpoint, §3.2).',
+          'not exposed (the operator must opt in to a privilege-bypassing endpoint).',
       );
     }
     const sp = checkSafeSearchPath(fn);
     if (!sp.safe) {
       return skip(
         `is SECURITY DEFINER but its search_path is not owner-safe (${sp.reason}); ` +
-          'not exposed. Declare SET search_path with owner-only schemas and a trailing pg_temp (§3.2).',
+          'not exposed. Declare SET search_path with owner-only schemas and a trailing pg_temp.',
       );
     }
   }
@@ -294,7 +294,7 @@ function decideAndBuild(input: {
       return skip(
         'still grants EXECUTE to PUBLIC (the CREATE FUNCTION default); not exposed. ' +
           'REVOKE EXECUTE FROM PUBLIC and GRANT it to the intended role, or declare the public ' +
-          'endpoint intentional with @expose: rpc public / api.rpc.allowPublicExecute (§6.1).',
+          'endpoint intentional with @expose: rpc public / api.rpc.allowPublicExecute.',
       );
     }
     publicCallable = true;
@@ -336,7 +336,7 @@ function decideAndBuild(input: {
 }
 
 /** Decide which functions are exposed as RPC actions and shape them into
- *  FunctionContexts (RPC design §3–§5). Skipped-but-tagged functions are pushed
+ *  FunctionContexts. Skipped-but-tagged functions are pushed
  *  onto `issues`. Output is sorted by qualified name for stable surfaces. */
 export function buildFunctionContexts(input: {
   functions: RawFunction[];
@@ -355,7 +355,7 @@ export function buildFunctionContexts(input: {
   // Parse every comment and group ALL functions — tagged or not — by their
   // (flattened) `schema.name`. Grouping must include untagged overloads: the
   // RPC surface addresses a function by `schema.name` alone (no body-key
-  // disambiguation, §2), but a named-args call is resolved by PostgreSQL
+  // disambiguation), but a named-args call is resolved by PostgreSQL
   // against *every* overload of that name, ignoring Kozou's tags. So if a
   // `schema.name` has more than one definition and any of them is tagged, the
   // exposed identity is ambiguous — Postgres could route the call to a sibling
@@ -378,12 +378,12 @@ export function buildFunctionContexts(input: {
   const result: FunctionContext[] = [];
   for (const [qualifiedName, group] of byQualified) {
     // An identity with no tagged member is simply not exposed (the untagged
-    // majority: triggers, RLS predicates, internal helpers, §3.1) — no issue.
+    // majority: triggers, RLS predicates, internal helpers) — no issue.
     if (!group.some((e) => e.parsed.expose !== 'none')) continue;
 
     // (1) overload collision: the identity has >1 definition and at least one
-    // is tagged. Expose none of them (§2 / §4.4). cross-schema same-name is a
-    // distinct identity (§5.0) and does not collide.
+    // is tagged. Expose none of them. cross-schema same-name is a
+    // distinct identity and does not collide.
     if (group.length > 1) {
       issues.push({
         path: `functions.${qualifiedName}`,
@@ -396,7 +396,7 @@ export function buildFunctionContexts(input: {
     }
 
     // The canonical identity is the dotted string `schema.name`, shared by the
-    // REST path, OpenAPI operationId, MCP tool name, and config entries (§5.0).
+    // REST path, OpenAPI operationId, MCP tool name, and config entries.
     // A dot inside a (quoted) schema or function name makes that string
     // non-injective — `"a.b".c` and `a."b.c"` both flatten to `a.b.c`, so an
     // `allowDefiner` / `allowPublicExecute` entry could authorize the wrong

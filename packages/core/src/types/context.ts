@@ -1,8 +1,8 @@
-// SchemaContext type definitions per Kozou v0.1 spec §4.2.
+// SchemaContext type definitions.
 //
 // This is the output contract of @kozou/core.buildSchemaContext and the
-// input contract for @kozou/mcp and @kozou/svelte-ui. Per Kozou v0.1 spec
-// §0, the code is the source of truth.
+// input contract for @kozou/mcp and @kozou/svelte-ui. The code is the
+// source of truth.
 
 import type { RawFunction, RawTable, RawView } from './raw.js';
 
@@ -18,9 +18,9 @@ export type SchemaContext = {
   enums: EnumContext[];
   /** Domain concepts derived from views (in v0.1, every view is a concept) */
   concepts: ConceptContext[];
-  /** Functions exposed as RPC actions (RPC design, issue #103). Contains only
-   *  the functions that pass the exposure decision (§3); functions tagged for
-   *  exposure that fail a guard are reported as build issues (loud skip, §4.4),
+  /** Functions exposed as RPC actions (issue #103). Contains only
+   *  the functions that pass the exposure decision; functions tagged for
+   *  exposure that fail a guard are reported as build issues (loud skip),
    *  not listed here. Optional for back-compat: `buildSchemaContext` always
    *  populates it (possibly empty), but a context built before this field
    *  existed omits it, so readers normalize with `functions ?? []`. */
@@ -45,7 +45,7 @@ export type TableContext = {
    *  row-level security. Also retained inline in `description`. */
   policy?: string[];
   primaryKey: string[];
-  /** From UI Hints; otherwise a heuristic (Kozou v0.1 spec §6.5) */
+  /** From UI Hints; otherwise a heuristic */
   displayField: string | null;
   columns: ColumnContext[];
   relations: RelationContext[];
@@ -66,7 +66,7 @@ export type ColumnContext = {
   /** `@policy:` lines from the column COMMENT — advisory business rules
    *  surfaced to AI agents, never enforced by kozou (see TableContext.policy). */
   policy?: string[];
-  /** Order: UI Hints > @widget: tag > heuristic (Kozou v0.1 spec §6.4) */
+  /** Order: UI Hints > @widget: tag > heuristic */
   widget: WidgetType;
   /** Values extracted from CHECK constraints, or PostgreSQL ENUM members */
   enumValues: string[] | null;
@@ -85,7 +85,7 @@ export type ColumnContext = {
   updatable?: boolean;
 };
 
-/** Widget domain for Kozou v0.1 spec §6.4. */
+/** Widget domain. */
 export type WidgetType =
   | 'text'
   | 'textarea'
@@ -152,8 +152,8 @@ export type EnumContext = {
   description: string | null;
 };
 
-/** One input argument of an exposed RPC function, shaped for the surfaces
- *  (RPC design §4.2 / §5.4). Only input args (`in` / `inout` / `variadic`)
+/** One input argument of an exposed RPC function, shaped for the surfaces.
+ *  Only input args (`in` / `inout` / `variadic`)
  *  reach here; the builder excludes OUT / TABLE columns. */
 export type FunctionArgContext = {
   name: string;
@@ -164,15 +164,15 @@ export type FunctionArgContext = {
   /** ENUM members when the argument's type is a PostgreSQL ENUM (drives
    *  enum-select in the Admin UI action form). */
   enumValues?: string[];
-  /** Relation target resolved from an `@arg: <name> relation(<ref>)` hint
-   *  (RPC design §5.4), for a relation-select argument widget. */
+  /** Relation target resolved from an `@arg: <name> relation(<ref>)` hint,
+   *  for a relation-select argument widget. */
   relation?: { schema: string; table: string; column: string };
   /** Widget for the Admin UI action form: relation-select (relation hint),
    *  enum-select (enum type), else a type-based scalar widget. */
   widget: WidgetType;
 };
 
-/** Return shape of an exposed RPC function, mapped to the v1 wire (§4.3). */
+/** Return shape of an exposed RPC function, mapped to the v1 wire. */
 export type FunctionReturnContext = {
   kind: 'scalar' | 'composite' | 'setof' | 'void';
   typeName: string;
@@ -180,15 +180,15 @@ export type FunctionReturnContext = {
   columns?: { name: string; typeName: string }[];
 };
 
-/** A function compiled into the RPC surface (RPC design, issue #103). Only
- *  functions that pass the exposure decision (§3) become a FunctionContext;
- *  skipped-but-tagged functions are reported as build issues instead (§4.4).
- *  The canonical external identity is the schema-qualified `qualifiedName`
- *  (§5.0); REST path / OpenAPI operationId / MCP tool name all derive from it. */
+/** A function compiled into the RPC surface (issue #103). Only
+ *  functions that pass the exposure decision become a FunctionContext;
+ *  skipped-but-tagged functions are reported as build issues instead.
+ *  The canonical external identity is the schema-qualified `qualifiedName`;
+ *  REST path / OpenAPI operationId / MCP tool name all derive from it. */
 export type FunctionContext = {
   schema: string;
   name: string;
-  /** "schema.name" — the canonical external identity (RPC design §5.0). */
+  /** "schema.name" — the canonical external identity. */
   qualifiedName: string;
   /** Order: first line of COMMENT > name. */
   label: string;
@@ -205,14 +205,14 @@ export type FunctionContext = {
   volatility: 'immutable' | 'stable' | 'volatile';
   security: 'invoker' | 'definer';
   /** Whether this function is intentionally public-callable: PUBLIC keeps
-   *  EXECUTE by deliberate override (`@expose: rpc public` / `allowPublicExecute`,
-   *  §6.1). Default false: the function is callable only by roles with EXECUTE. */
+   *  EXECUTE by deliberate override (`@expose: rpc public` / `allowPublicExecute`).
+   *  Default false: the function is callable only by roles with EXECUTE. */
   publicCallable: boolean;
   /** Raw record kept for downstream consumers. */
   rawFunction: RawFunction;
 };
 
-/** v0.1: ConceptContext is a thin wrapper around ViewContext. See end of Kozou v0.1 spec §4.2. */
+/** v0.1: ConceptContext is a thin wrapper around ViewContext. */
 export type ConceptContext = {
   /** Matches ViewContext.name */
   name: string;
@@ -227,7 +227,7 @@ export type ConceptContext = {
   /** `@policy:` lines from the COMMENT — advisory business rules surfaced to
    *  AI agents, never enforced by kozou (see TableContext.policy). */
   policies?: string[];
-  /** @example: blocks from the COMMENT (Kozou v0.1 spec §7.3.6). Each
+  /** @example: blocks from the COMMENT. Each
    *  entry is `{ description, sql }`: the text on the `@example:`
    *  line and the indented continuation block. */
   exampleQueries: { description: string; sql: string }[];

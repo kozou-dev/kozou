@@ -7,8 +7,7 @@
 -- Mirrors the generic English schema used by the @kozou/introspect unit
 -- tests (authors / books / editions / inventory_items + the
 -- vw_inventory_for_sale view) so the E2E suite exercises a realistic
--- schema-with-COMMENTs surface end-to-end. Tracks Kozou v0.1 design spec
--- §10.2 (sample schema shape) and §11 (comparison demo shape).
+-- schema-with-COMMENTs surface end-to-end.
 --
 -- The fixture also seeds three authors / books / editions and three
 -- inventory items in distinct states (for_sale, for_sale, reserved) so
@@ -18,7 +17,7 @@
 -- ---------------------------------------------------------------------------
 -- PostgREST anonymous role.
 -- ---------------------------------------------------------------------------
--- v0.1 wires PostgREST without auth (dev_spec §1.3, §7.1). The anonymous
+-- v0.1 wires PostgREST without auth. The anonymous
 -- role gets full CRUD on the fixture tables so the Admin UI can exercise
 -- the read + write paths.
 CREATE ROLE web_anon NOLOGIN;

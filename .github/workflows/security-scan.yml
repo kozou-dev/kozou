@@ -17,8 +17,7 @@ name: Security scan
 #   only applies to private repos). Uses advanced setup (this workflow),
 #   so the repo's "Default setup" for code scanning must stay disabled -
 #   the two are mutually exclusive.
-# trufflehog (AGPL-3) is intentionally not adopted per Kozou v0.1
-# license compliance §4.
+# trufflehog (AGPL-3) is intentionally not adopted.
 
 on:
   push:
@@ -30,7 +29,7 @@ on:
     - cron: '0 0 * * 0'
   workflow_dispatch:
 
-# Supply chain hardening (Codex W2, Step 4-A3-c): declare the minimum
+# Supply chain hardening (Step 4-A3-c): declare the minimum
 # permissions at the top level.
 permissions:
   contents: read

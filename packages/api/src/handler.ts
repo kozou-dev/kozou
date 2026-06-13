@@ -111,9 +111,9 @@ async function route(deps: ApiHandlerDeps, req: ApiHttpRequest): Promise<ApiHttp
   }
 
   // RPC namespace (issue #103): `POST /rpc/<schema>.<fn>`. The function is
-  // addressed by its schema-qualified identity (§5.0), which contains a dot, so
+  // addressed by its schema-qualified identity, which contains a dot, so
   // it never collides with a `/<resource>/<id>` item route. Reserved as
-  // POST-only (volatility does not split GET/POST in v1, §2). `rpc` is a
+  // POST-only (volatility does not split GET/POST in v1). `rpc` is a
   // reserved top-level segment: a table literally named `rpc` is still
   // reachable by its qualified name (`/<schema>.rpc/<id>`), but its bare-name
   // item routes are shadowed by this namespace.

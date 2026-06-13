@@ -6,8 +6,8 @@ import type { RawEnum } from '@kozou/core';
 import { introspect } from '../src/index.js';
 import { setupDatabase, type DatabaseHandle } from '@kozou/test-utils';
 
-// A fixture exercising every shape the RPC introspection must classify
-// (RPC design §4). Created under the suite's schema after SET search_path, so
+// A fixture exercising every shape the RPC introspection must classify.
+// Created under the suite's schema after SET search_path, so
 // unqualified type names (the enum) resolve there.
 const FUNCTIONS_FIXTURE_SQL = `
   CREATE TYPE order_status AS ENUM ('pending', 'shipped');
@@ -65,7 +65,7 @@ const FUNCTIONS_FIXTURE_SQL = `
     LANGUAGE sql SECURITY DEFINER SET search_path = "$user", pg_temp AS $$ SELECT $$;
 
   -- A definer endpoint should not keep the PUBLIC EXECUTE default; revoke it
-  -- so the pipeline test isolates the search_path predicate from §6.1.
+  -- so the pipeline test isolates the search_path predicate from PUBLIC EXECUTE.
   REVOKE EXECUTE ON FUNCTION settle_safe(uuid) FROM PUBLIC;
   REVOKE EXECUTE ON FUNCTION settle_public(uuid) FROM PUBLIC;
   REVOKE EXECUTE ON FUNCTION settle_no_path(uuid) FROM PUBLIC;
@@ -211,7 +211,7 @@ describe('introspect functions (RPC, issue #103)', () => {
     expect(byName('noargs').arguments).toEqual([]);
   });
 
-  describe('SECURITY DEFINER search_path writability (§3.2)', () => {
+  describe('SECURITY DEFINER search_path writability', () => {
     it('owner-only schema (pg_catalog) + trailing pg_temp is safe', () => {
       const sp = byName('settle_safe').searchPath;
       expect(sp).toEqual([
@@ -277,7 +277,7 @@ describe('introspect functions (RPC, issue #103)', () => {
 // has_schema_privilege per non-superuser role (rather than dropping superuser
 // grantees) sees the inherited grant. Roles are cluster-global, so names are
 // derived from the random schema and dropped on teardown.
-describe('introspect functions — inherited CREATE through a superuser role (§3.2)', () => {
+describe('introspect functions — inherited CREATE through a superuser role', () => {
   let db: DatabaseHandle;
   let su: string;
   let mem: string;

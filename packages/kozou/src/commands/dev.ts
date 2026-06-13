@@ -1,13 +1,13 @@
 // `kozou dev` command implementation.
 //
-// Brings up the full local runtime described in Kozou v0.1 spec §9.1:
+// Brings up the full local runtime:
 //   - the bundled @kozou/svelte-ui Admin UI, spawned as a child process
 //     (`node <svelte-ui>/build/index.js` — the adapter-node standalone
 //     server, the same entry the svelte-ui E2E suite exercises);
 //   - the MCP Streamable HTTP server, run in-process via @kozou/mcp's
-//     startHttpServer (spec §7.1).
+//     startHttpServer.
 //
-// Both default to 0.0.0.0 (spec §9.1, so `docker compose` port mapping
+// Both default to 0.0.0.0 (so `docker compose` port mapping
 // works); a loud warning fires on a non-loopback bind because the UI and
 // MCP listeners have no authentication of their own (the in-house API may
 // enforce JWT auth; the Admin UI warning distinguishes that case).

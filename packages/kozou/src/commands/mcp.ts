@@ -3,10 +3,8 @@
 // --stdio: spins up the @kozou/mcp server with a stdio transport, reading
 //   connection details from kozou.config.yaml / environment.
 // --http: spins up the @kozou/mcp server with the Streamable HTTP
-//   transport (Kozou v0.1 spec §7.1), binding to localhost by default and
-//   exposing POST /admin/refresh for cache invalidation (§7.5).
-//
-// See Kozou v0.1 design spec §9.1 and §7.
+//   transport, binding to localhost by default and
+//   exposing POST /admin/refresh for cache invalidation.
 
 import { SchemaCache, startHttpServer, startStdioServer } from '@kozou/mcp';
 import { loadConfig } from '../config.js';

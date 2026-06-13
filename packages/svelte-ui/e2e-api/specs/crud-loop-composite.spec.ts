@@ -2,7 +2,7 @@
 // (KOZOU_ADAPTER_KIND=api, wired in global-setup). The same Admin UI build
 // drives a two-column key (order_lines: order_id, line_no) end-to-end: the
 // item path is the comma-joined `300,1` segment, which the API splits back
-// into per-column key filters (Kozou v1.0 dev spec §3.6). Mirrors the
+// into per-column key filters. Mirrors the
 // single-key crud-loop.spec.ts; only the backend differs from the sibling
 // e2e/ suite. The loop creates then deletes its row, leaving the three
 // seeded lines.

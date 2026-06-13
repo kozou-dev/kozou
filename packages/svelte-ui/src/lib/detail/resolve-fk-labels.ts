@@ -4,17 +4,15 @@
 // Pure function (modulo the injected `loadRow`) so the unit test can
 // drive every branch without spinning up a DataAdapter. The detail
 // route loader wires `loadRow` to a FkRowCache-backed call into the
-// real DataAdapter. Tracks Kozou v0.1 design spec §16.1.1 B (FK
-// label resolution).
+// real DataAdapter. Tracks FK label resolution.
 //
 // Behaviour:
 // - Skip FK columns whose row value is `null` / `undefined`.
 // - Look up the referenced table inside the SchemaContext. If it is
 //   absent (orphaned FK, schema drift) emit an entry with `label: null`
 //   so the template can fall back to the raw value.
-// - If the referenced table has no `displayField` heuristic
-//   (Kozou v0.1 spec §6.5), or the loaded row does not carry that
-//   field, emit `label: null` similarly.
+// - If the referenced table has no `displayField` heuristic, or the
+//   loaded row does not carry that field, emit `label: null` similarly.
 // - A composite (multi-column) relation resolves through the target's
 //   primary key: its entry is keyed by the relation's first column and
 //   carries the encoded composite id as `value` (the detail-link

@@ -6,8 +6,7 @@
 //
 // Consolidates what used to be copy-pasted into each package's
 // test/setup.ts plus the inline SQL fixtures duplicated across the
-// introspect / mcp suites (Kozou v0.1 design spec §16.1.1 B, Codex 3rd
-// pass N1).
+// introspect / mcp suites.
 
 import { randomBytes } from 'node:crypto';
 import { PostgreSqlContainer } from '@testcontainers/postgresql';
@@ -84,7 +83,7 @@ COMMENT ON TABLE books IS 'Books authored by an author.';
  * + the vw_inventory_for_sale view) used by the schema-introspection and MCP
  * tool suites. Carries representative COMMENT metadata: @ai / @widget tags
  * and an @example block on the view, so the suites exercise the full
- * COMMENT-parsing surface. Mirrors Kozou v0.1 design spec §10.2 / §11.
+ * COMMENT-parsing surface.
  */
 export const GENERIC_FIXTURE_SQL = `
 CREATE TABLE authors (

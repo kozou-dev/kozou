@@ -47,7 +47,7 @@
   );
 
   // The `[id]` path segment for a row: a single key is the encoded value, a
-  // composite key joins its columns (Kozou v1.0 dev spec §3.2 / §3.6). Used
+  // composite key joins its columns. Used
   // both as the keyed-`{#each}` key and the per-row link target; falls back to
   // the row index when the key is absent (e.g. a view).
   function rowKey(row: Record<string, unknown>, idx: number): string {

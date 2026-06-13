@@ -3,12 +3,12 @@
 // synchronously via PageServerLoad / Actions. The TTL + in-flight
 // dedupe live in $lib/server/schema-cache; this file is a thin
 // adapter that wires DATABASE_URL into the introspect + buildSchema
-// Context pipeline (Kozou v0.1 design spec §8.5).
+// Context pipeline.
 //
 // `fkRowCache` is a sibling singleton kept alive for the same
 // process lifetime; the detail route resolves each FK column on the
 // page through it so navigating between sibling detail pages reuses
-// the same referenced rows (Kozou v0.1 design spec §16.1.1 B).
+// the same referenced rows.
 
 import type { Handle } from '@sveltejs/kit';
 

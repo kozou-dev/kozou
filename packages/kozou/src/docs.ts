@@ -1,6 +1,6 @@
 // Render a human-readable Markdown document from a SchemaContext.
 //
-// This is the "docs" emit target (product_architecture_v3 §3.4): alongside the
+// This is the "docs" emit target: alongside the
 // Admin UI, MCP context, REST API, and TypeScript types, Kozou turns the same
 // DDL + COMMENT into a schema document a person can read, commit, and publish.
 //

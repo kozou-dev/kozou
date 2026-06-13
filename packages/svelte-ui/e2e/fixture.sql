@@ -3,8 +3,7 @@
 -- Mirrors the generic English schema used by the @kozou/introspect unit
 -- tests (authors / books / editions / inventory_items + the
 -- vw_inventory_for_sale view) so the E2E suite exercises a realistic
--- schema-with-COMMENTs surface end-to-end. Tracks Kozou v0.1 design spec
--- §10.2 (sample schema shape) and §11 (comparison demo shape).
+-- schema-with-COMMENTs surface end-to-end.
 --
 -- The fixture also seeds three authors / books / editions and three
 -- inventory items in distinct states (for_sale, for_sale, reserved) so
@@ -14,7 +13,7 @@
 -- ---------------------------------------------------------------------------
 -- PostgREST anonymous role.
 -- ---------------------------------------------------------------------------
--- v0.1 wires PostgREST without auth (dev_spec §1.3, §7.1). The anonymous
+-- v0.1 wires PostgREST without auth. The anonymous
 -- role gets full CRUD on the fixture tables so the Admin UI can exercise
 -- the read + write paths.
 CREATE ROLE web_anon NOLOGIN;
@@ -64,7 +63,7 @@ COMMENT ON COLUMN inventory_items.selling_price IS 'Actual selling price.
 @widget: currency';
 
 -- A composite-primary-key table so the suite can exercise item-by-id CRUD
--- across both adapters (Kozou v1.0 dev spec §3.6 / §3.7). Integer key
+-- across both adapters. Integer key
 -- columns keep the browser CRUD loop's form values easy to type.
 CREATE TABLE order_lines (
   order_id integer NOT NULL,
@@ -77,8 +76,8 @@ COMMENT ON TABLE order_lines IS 'Line items on an order (composite primary key).
 
 -- A composite-key target with a text display column ("name" satisfies the
 -- displayField heuristic), plus a child whose composite FOREIGN KEY points at
--- it, so the suite can exercise the composite relation picker (Kozou v1.0 dev
--- spec §5.2 Stage 2b) and the composite detail-page label.
+-- it, so the suite can exercise the composite relation picker and the
+-- composite detail-page label.
 CREATE TABLE warehouse_bins (
   aisle integer NOT NULL,
   shelf integer NOT NULL,

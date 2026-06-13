@@ -10,8 +10,7 @@
 //
 // Both swallow per-field backend errors and fall back gracefully (an empty
 // list, or the raw value as its own label) so one unreachable target does
-// not break the whole form, mirroring the detail route's FK label cache
-// (Kozou v0.1 design spec §16.1.1 B).
+// not break the whole form, mirroring the detail route's FK label cache.
 //
 // `searchRelationOptions` backs the `/relation-options` endpoint: it is the
 // trust boundary for the browser's live search, so it validates the request

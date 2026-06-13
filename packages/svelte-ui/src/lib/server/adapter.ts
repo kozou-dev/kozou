@@ -2,7 +2,7 @@
 //
 // Routes never import a concrete adapter directly; they ask for the
 // configured DataAdapter through this getter so the eslint adapter-
-// boundary rule (Kozou v0.1 design spec §18.1.1) keeps the backend
+// boundary rule keeps the backend
 // plumbing hidden inside `src/lib/{adapter,server}`.
 //
 // KOZOU_ADAPTER_KIND selects the backend (Kozou v0.2 Phase 4):

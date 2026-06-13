@@ -2,8 +2,6 @@
 // projection the dashboard route renders. Sorting + projection live
 // here so the .svelte template stays declarative and the unit test
 // targets a pure function.
-//
-// See Kozou v0.1 design spec §8.3.1 (Dashboard).
 
 import type {
   FunctionContext,

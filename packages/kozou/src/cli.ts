@@ -1,6 +1,5 @@
 #!/usr/bin/env node
-// `kozou` CLI entry point. Wires up the sub-commands defined in
-// Kozou v0.1 design spec §9.1 via commander.
+// `kozou` CLI entry point. Wires up the sub-commands via commander.
 
 import { Command } from 'commander';
 import { inspectCommand } from './commands/inspect.js';

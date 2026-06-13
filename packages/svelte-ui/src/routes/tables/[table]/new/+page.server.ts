@@ -2,8 +2,6 @@
 // hands it to sveltekit-superforms for client + server validation,
 // and on submit calls DataAdapter.create + redirects to the
 // freshly-created row's detail page.
-//
-// See Kozou v0.1 design spec §8.3.3.
 
 import { error, fail, redirect } from '@sveltejs/kit';
 import { superValidate } from 'sveltekit-superforms';

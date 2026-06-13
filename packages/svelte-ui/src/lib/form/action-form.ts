@@ -1,5 +1,5 @@
-// Build the Admin UI "Actions" form for an exposed RPC function (issue #103,
-// RPC design §5.4). A function's arguments are turned into a synthetic set of
+// Build the Admin UI "Actions" form for an exposed RPC function (issue #103).
+// A function's arguments are turned into a synthetic set of
 // ColumnContexts so the existing form pipeline — zodFromColumn / zodFromTable,
 // the widget registry, buildMutationPayload — drives validation, rendering, and
 // the named-args payload without a parallel implementation.

@@ -1,7 +1,7 @@
 // Emit a TypeScript module of row / entity types from a SchemaContext.
 //
-// This is the compiler-native half of Kozou's type story (Kozou v0.2 spec
-// §5.2): one `export interface` per table and view, describing the JSON row a
+// This is the compiler-native half of Kozou's type story: one
+// `export interface` per table and view, describing the JSON row a
 // client receives from @kozou/api. It is a pure function — no I/O — so the
 // `kozou codegen` CLI (and tests) drive it directly.
 //

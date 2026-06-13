@@ -1,4 +1,4 @@
-# Dependabot config (Codex W2, Step 4-A3-c):
+# Dependabot config (Step 4-A3-c):
 # Keep SHA-pinned GitHub Actions and npm dependencies up to date.
 # Major upgrades land as PRs that need a manual review. Patch/minor can
 # auto-merge if the repository's auto-merge setting is enabled (this file

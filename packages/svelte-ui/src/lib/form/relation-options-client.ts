@@ -1,8 +1,8 @@
 // Browser-side fetch for relation-select options.
 //
 // The DataAdapter is server-only (it carries backend URLs / tokens and is
-// kept behind the adapter-boundary eslint rule, Kozou v0.1 design spec
-// §18.1.1), so the live picker search runs through the app's own
+// kept behind the adapter-boundary eslint rule), so the live picker search
+// runs through the app's own
 // `/relation-options` endpoint instead of touching an adapter in the
 // browser. The endpoint forwards to DataAdapter.searchRelation on the
 // server and returns `{ options }`.

@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-// describe_functions (RPC design §5.3, issue #103): return the signature +
+// describe_functions (issue #103): return the signature +
 // COMMENT of every exposed RPC function so an AI agent knows what business
 // actions it can take and how to call them. No input (like list_concepts);
 // rejects extra fields. The agent's advisory metadata (`@ai` / `@policy`) is

@@ -1,4 +1,4 @@
-// Action route for an exposed RPC function (issue #103, RPC design §5.4).
+// Action route for an exposed RPC function (issue #103).
 // Builds an argument form from the function's signature — reusing the table
 // form pipeline via a synthetic column set (see action-form.ts) — and on
 // submit calls DataAdapter.callFunction and shows the result. Works with and

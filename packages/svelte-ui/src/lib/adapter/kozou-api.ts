@@ -1,5 +1,5 @@
 // KozouApiDataAdapter — DataAdapter implementation that speaks the
-// in-house @kozou/api REST wire format (Kozou v0.2 spec §2-§4). It is a
+// in-house @kozou/api REST wire format. It is a
 // sibling of the other adapter in this directory; getAdapter() selects it
 // when the operator opts into the in-house API layer
 // (KOZOU_ADAPTER_KIND=api). Like its sibling it ships no server code, only
@@ -167,8 +167,8 @@ export class KozouApiDataAdapter implements DataAdapter {
   }
 
   // Item path: `/<resource>/<id>`. A composite key encodes each component
-  // and joins them with an unescaped comma (Kozou v0.2/v1.0 wire format,
-  // §3.2); the server decodes the segment, then splits on commas. A scalar
+  // and joins them with an unescaped comma; the server decodes the segment,
+  // then splits on commas. A scalar
   // key is encoded verbatim, so single-column keys are unchanged.
   private itemUrl(resource: string, id: ResourceId): string {
     const segment = Array.isArray(id)

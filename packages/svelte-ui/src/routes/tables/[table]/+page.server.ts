@@ -2,8 +2,6 @@
 // picks display columns + searchable text columns from the schema,
 // translates URL params into a DataAdapter list call, and ships
 // the result to the .svelte template.
-//
-// See Kozou v0.1 design spec §8.3.2.
 
 import { error } from '@sveltejs/kit';
 

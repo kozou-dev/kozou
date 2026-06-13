@@ -62,8 +62,7 @@ module.exports = {
         'no-inner-declarations': 'off',
       },
     },
-    // Kozou v0.1 spec §18.1.1 + Kozou v0.1 license compliance §3:
-    // forbid direct PostgREST URL hardcoding. Everything outside
+    // Forbid direct PostgREST URL hardcoding. Everything outside
     // svelte-ui's adapter / server is barred from talking to PostgREST
     // directly so that swapping in `@kozou/api` for v1.0 is not a
     // breaking change. This rule is a regression guard.
@@ -79,7 +78,7 @@ module.exports = {
           {
             selector: "Literal[value=/postgrest/i]",
             message:
-              'Direct references to PostgREST are forbidden; route the call through DataAdapter (Kozou v0.1 spec §18.1, Kozou v0.1 license compliance §3).',
+              'Direct references to PostgREST are forbidden; route the call through DataAdapter.',
           },
           {
             selector: "Literal[value=/^https?:\\/\\/postgrest/i]",

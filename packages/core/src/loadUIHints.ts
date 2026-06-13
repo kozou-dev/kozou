@@ -19,7 +19,7 @@ export class KozouUIHintsError extends Error {
   }
 }
 
-// Codex N2: by default the error message only includes the file basename.
+// By default the error message only includes the file basename.
 // The absolute path is kept on KozouUIHintsError.filePath; callers can decide
 // whether to surface it in debug logs. This prevents user-environment paths
 // from leaking through CLI / MCP error responses.
