@@ -12,6 +12,8 @@ import {
   listConceptsOutputSchema,
   getConceptContextInputSchema,
   getConceptContextOutputSchema,
+  describeFunctionsInputSchema,
+  describeFunctionsOutputSchema,
 } from '../src/index.js';
 
 describe('list_tables schemas', () => {
@@ -254,5 +256,63 @@ describe('get_concept_context schemas', () => {
         exampleQueries: [],
       }),
     ).not.toThrow();
+  });
+});
+
+describe('describe_functions schemas', () => {
+  it('input: empty object pass', () => {
+    expect(() => describeFunctionsInputSchema.parse({})).not.toThrow();
+  });
+  it('input: rejects extra fields (strict)', () => {
+    expect(() => describeFunctionsInputSchema.parse({ foo: 'bar' })).toThrow();
+  });
+  it('output: valid pass', () => {
+    expect(() =>
+      describeFunctionsOutputSchema.parse({
+        functions: [
+          {
+            qualifiedName: 'public.approve_order',
+            label: 'Approve an order',
+            description: 'desc',
+            aiDescription: 'not idempotent',
+            policy: ['managers only'],
+            volatility: 'volatile',
+            security: 'invoker',
+            publicCallable: false,
+            args: [
+              {
+                name: 'order_id',
+                typeName: 'uuid',
+                hasDefault: false,
+                enumValues: null,
+                relation: 'public.orders.id',
+                widget: 'relation-select',
+              },
+            ],
+            returns: { kind: 'scalar', typeName: 'integer', columns: null },
+          },
+        ],
+      }),
+    ).not.toThrow();
+  });
+  it('output: throws on an unknown return kind', () => {
+    expect(() =>
+      describeFunctionsOutputSchema.parse({
+        functions: [
+          {
+            qualifiedName: 'public.f',
+            label: 'f',
+            description: null,
+            aiDescription: null,
+            policy: [],
+            volatility: 'stable',
+            security: 'definer',
+            publicCallable: true,
+            args: [],
+            returns: { kind: 'table', typeName: 'x', columns: null },
+          },
+        ],
+      }),
+    ).toThrow();
   });
 });

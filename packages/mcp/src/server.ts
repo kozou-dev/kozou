@@ -12,6 +12,7 @@ import { listViews } from './tools/list_views.js';
 import { describeView } from './tools/describe_view.js';
 import { listConcepts } from './tools/list_concepts.js';
 import { getConceptContext } from './tools/get_concept_context.js';
+import { describeFunctions } from './tools/describe_functions.js';
 import type { SchemaCache } from './schemaCache.js';
 
 // Read the advertised server version from this package's package.json so
@@ -76,6 +77,14 @@ const TOOL_DEFINITIONS = [
       required: ['name'],
     },
   },
+  {
+    name: 'describe_functions',
+    description:
+      'List the functions exposed as RPC actions (issue #103): each with its ' +
+      'arguments, return shape, volatility/security, and the schema author’s ' +
+      '@ai / @policy advisory. Call one with POST /rpc/<schema>.<fn>.',
+    inputSchema: { type: 'object', properties: {} },
+  },
 ] as const;
 
 type ToolName = (typeof TOOL_DEFINITIONS)[number]['name'];
@@ -119,6 +128,8 @@ export function createMcpServer(cache: SchemaCache): Server {
           return successResult(listConcepts(args, ctx));
         case 'get_concept_context':
           return successResult(getConceptContext(args as { name: string }, ctx));
+        case 'describe_functions':
+          return successResult(describeFunctions(args, ctx));
         default:
           return errorResult(`Unknown tool: ${name as string}`);
       }
