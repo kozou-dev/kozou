@@ -454,6 +454,32 @@ describe('@kozou/api integration (generic fixture)', () => {
     expect(status).toBe(400);
   });
 
+  it('an in.() filter matches a value containing a comma via double-quoting (#77)', async () => {
+    // Create a row whose value contains a literal comma, then filter for it with
+    // the value double-quoted so its comma is not treated as a list separator.
+    const created = await fetch(`${base}/authors`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ display_name: 'Wayne Enterprises, Inc' }),
+    });
+    expect(created.status).toBe(201);
+    const id = ((await created.json()) as { id: string }).id;
+    try {
+      // The first value's comma is inside double quotes (one value); the bare
+      // comma before "Nobody" is the separator.
+      const hit = await getJson<ListBody>(
+        '/authors?display_name=in.("Wayne Enterprises, Inc",Nobody)',
+      );
+      expect(hit.status).toBe(200);
+      expect(hit.body.total).toBe(1);
+      expect((hit.body.rows[0] as { display_name: string }).display_name).toBe(
+        'Wayne Enterprises, Inc',
+      );
+    } finally {
+      await fetch(`${base}/authors/${id}`, { method: 'DELETE' });
+    }
+  });
+
   it('runs a full create -> get -> update -> delete loop', async () => {
     const created = await fetch(`${base}/authors`, {
       method: 'POST',

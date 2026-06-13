@@ -446,6 +446,44 @@ describe('parseListParams', () => {
     ]);
   });
 
+  it('an in.() value may contain a comma when double-quoted (#77)', () => {
+    const p = parseListParams(new URLSearchParams({ tag: 'in.("a,b",c)' }));
+    expect(p.filters).toEqual([{ column: 'tag', op: 'in', values: ['a,b', 'c'] }]);
+  });
+
+  it('in.() unescapes a backslash-quote and backslash-backslash in a quoted value (#77)', () => {
+    // raw inner: "a\"b","c\\d"  ->  values a"b and c\d
+    const p = parseListParams(new URLSearchParams({ tag: 'in.("a\\"b","c\\\\d")' }));
+    expect(p.filters).toEqual([{ column: 'tag', op: 'in', values: ['a"b', 'c\\d'] }]);
+  });
+
+  it('an unquoted in.() list is unchanged, and a literal " in an unquoted value stays literal (#77)', () => {
+    // Backward compatibility: no leading quote -> verbatim comma split, embedded
+    // quote kept; a percent-encoded comma already decoded to a separator.
+    const p = parseListParams(new URLSearchParams({ tag: 'in.(a,b,c)', note: 'in.(x"y,z)' }));
+    expect(p.filters).toEqual([
+      { column: 'tag', op: 'in', values: ['a', 'b', 'c'] },
+      { column: 'note', op: 'in', values: ['x"y', 'z'] },
+    ]);
+  });
+
+  it('an unterminated quoted in.() value is a 400 (#77)', () => {
+    expect(() => parseListParams(new URLSearchParams({ tag: 'in.("a,b)' }))).toThrow(
+      /unterminated quoted value/,
+    );
+  });
+
+  it('in.() rejects text after a closing quote (#77)', () => {
+    expect(() => parseListParams(new URLSearchParams({ tag: 'in.("a"x)' }))).toThrow(
+      /unexpected text after a quoted value/,
+    );
+  });
+
+  it('in.() keeps a trailing comma after a quoted value as a final empty value (#77)', () => {
+    const p = parseListParams(new URLSearchParams({ tag: 'in.("a",)' }));
+    expect(p.filters).toEqual([{ column: 'tag', op: 'in', values: ['a', ''] }]);
+  });
+
   it('treats an unknown operator prefix as a literal equality value', () => {
     // "1.5" has a dot but "1" is not an operator -> eq on the whole value.
     const p = parseListParams(new URLSearchParams('price=1.5&note=foo.bar'));

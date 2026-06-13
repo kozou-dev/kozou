@@ -394,10 +394,7 @@ function buildFilter(column: string, op: FilterOperator, rhs: string): Filter {
     if (rhs.length < 2 || rhs[0] !== '(' || rhs[rhs.length - 1] !== ')') {
       throw badRequest(`Filter "${column}=in.${rhs}" must look like "in.(v1,v2,...)".`);
     }
-    const inner = rhs.slice(1, -1);
-    // Note: values cannot contain a comma (no quoting is supported in v1.0).
-    const values = inner.length === 0 ? [] : inner.split(',');
-    return { column, op: 'in', values };
+    return { column, op: 'in', values: splitInList(rhs.slice(1, -1), column) };
   }
   if (op === 'is') {
     if (rhs === 'null' || rhs === 'notnull' || rhs === 'true' || rhs === 'false') {
@@ -408,6 +405,77 @@ function buildFilter(column: string, op: FilterOperator, rhs: string): Filter {
     );
   }
   return { column, op, value: rhs };
+}
+
+/**
+ * Split an `in.(...)` inner list on its separator commas, with optional
+ * double-quoting so a value may itself contain a comma (issue #77). A value
+ * that begins with `"` is read up to its matching closing `"`; inside the
+ * quotes a comma is literal, `\"` is a literal quote and `\\` a literal
+ * backslash. A value that does NOT begin with a quote is taken verbatim up to
+ * the next comma (an embedded `"` stays literal), so every list that parsed
+ * before quoting was introduced still parses identically — quoting is opt-in by
+ * a leading quote, and a percent-encoded comma still decodes to a separator, so
+ * existing requests are unaffected. Linear character scan (no regex), per this
+ * module's ReDoS-avoidance convention.
+ */
+function splitInList(inner: string, column: string): string[] {
+  if (inner.length === 0) return [];
+  const values: string[] = [];
+  let i = 0;
+  for (;;) {
+    if (inner[i] === '"') {
+      // Quoted value: read to the matching unescaped closing quote.
+      let value = '';
+      i += 1;
+      let closed = false;
+      while (i < inner.length) {
+        const ch = inner[i]!;
+        if (ch === '\\' && (inner[i + 1] === '"' || inner[i + 1] === '\\')) {
+          value += inner[i + 1];
+          i += 2;
+          continue;
+        }
+        if (ch === '"') {
+          closed = true;
+          i += 1;
+          break;
+        }
+        value += ch;
+        i += 1;
+      }
+      if (!closed) {
+        throw badRequest(
+          `Filter "${column}=in.(...)" has an unterminated quoted value (close it with ").`,
+        );
+      }
+      if (i < inner.length && inner[i] !== ',') {
+        throw badRequest(
+          `Filter "${column}=in.(...)" has unexpected text after a quoted value; ` +
+            'a quoted value must be followed by a comma or the closing paren.',
+        );
+      }
+      values.push(value);
+    } else {
+      // Unquoted value: taken verbatim up to the next comma.
+      const comma = inner.indexOf(',', i);
+      if (comma === -1) {
+        values.push(inner.slice(i));
+        break;
+      }
+      values.push(inner.slice(i, comma));
+      i = comma + 1;
+      continue;
+    }
+    // After a quoted value we are at a separator comma or the end of the list.
+    if (i >= inner.length) break;
+    i += 1; // consume the separator comma
+    if (i >= inner.length) {
+      values.push(''); // a trailing comma → a final empty value
+      break;
+    }
+  }
+  return values;
 }
 
 function parsePositiveInt(raw: string | null): number | undefined {
