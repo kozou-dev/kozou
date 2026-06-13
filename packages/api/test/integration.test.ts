@@ -83,6 +83,23 @@ describe('@kozou/api integration (generic fixture)', () => {
       );
       await client.query(`INSERT INTO float_samples (id, approx) VALUES (1, 1.5)`);
 
+      // Domain-backed columns (issue #85): an invalid value for a DOMAIN column
+      // must be caught by the pre-flight (400) instead of reaching PostgreSQL as
+      // a 500. `amount` is a domain over numeric(12,2); the PK `id` is a domain
+      // over integer; `label` is a domain over text (exercises ?search= and
+      // relation-options, which judge text-likeness by the resolved base type).
+      await client.query(`
+        CREATE DOMAIN usd AS numeric(12,2);
+        CREATE DOMAIN positive_id AS integer;
+        CREATE DOMAIN label_text AS text;
+        CREATE TABLE invoices (
+          id positive_id PRIMARY KEY,
+          amount usd NOT NULL,
+          label label_text
+        );
+        INSERT INTO invoices (id, amount, label) VALUES (1, 100.00, 'alpha'), (2, 200.00, 'beta');
+      `);
+
       // RPC functions (issue #103). Each is tagged @expose: rpc and has its
       // PUBLIC EXECUTE revoked (else the exposure decision hard-skips it).
       // The connecting role is a superuser, so it can still call them.
@@ -479,6 +496,49 @@ describe('@kozou/api integration (generic fixture)', () => {
     });
     expect(r.status).toBe(400);
     expect(((await r.json()) as { error?: { code: string } }).error?.code).toBe('bad_request');
+  });
+
+  it('400s domain-backed columns on filter / id / write, not 500 (#85)', async () => {
+    // amount is DOMAIN usd over numeric(12,2): a non-numeric filter value and an
+    // out-of-precision overflow are caught against the resolved base type.
+    const filterBad = await getJson<{ error?: { code: string } }>(`/invoices?amount=eq.not-money`);
+    expect(filterBad.status).toBe(400);
+    expect(filterBad.body.error?.code).toBe('bad_request');
+    const overflow = await getJson(`/invoices?amount=eq.999999999999999999999`);
+    expect(overflow.status).toBe(400);
+    // A value valid for the base type still runs (no false reject).
+    const ok = await getJson<ListBody>(`/invoices?amount=lte.1000.00`);
+    expect(ok.status).toBe(200);
+    // id is DOMAIN positive_id over integer: a non-integer id segment 400s, a
+    // valid one resolves.
+    const badId = await getJson(`/invoices/not-an-int`);
+    expect(badId.status).toBe(400);
+    const goodId = await getJson<{ id: number }>(`/invoices/1`);
+    expect(goodId.status).toBe(200);
+    // write-body: a malformed scalar for the domain column 400s, not 500.
+    const badWrite = await fetch(`${base}/invoices`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ id: 3, amount: 'not-money' }),
+    });
+    expect(badWrite.status).toBe(400);
+  });
+
+  it('treats a domain-over-text column as searchable / relation-eligible (#85)', async () => {
+    // label is DOMAIN label_text over text. Without resolving the domain to its
+    // base type, ?search= would silently drop it (returning unfiltered rows) and
+    // relation-options would 400 the field — both judge text-likeness by the
+    // resolved base type now.
+    const hit = await getJson<ListBody>(`/invoices?search=alpha`);
+    expect(hit.status).toBe(200);
+    expect(hit.body.total).toBe(1);
+    const miss = await getJson<ListBody>(`/invoices?search=zzz-no-match`);
+    expect(miss.body.total).toBe(0);
+    const opts = await getJson<{ options: { id: unknown; label: string }[] }>(
+      `/invoices?as=options&label=label&fields=label&q=alpha`,
+    );
+    expect(opts.status).toBe(200);
+    expect(opts.body.options).toHaveLength(1);
   });
 
   it('returns relation-select options via ?as=options', async () => {

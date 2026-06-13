@@ -104,6 +104,7 @@ function buildColumn(input: {
   return {
     name: column.name,
     dataType: column.dataType,
+    effectiveType: column.effectiveType ?? column.dataType,
     nullable: column.nullable,
     defaultExpr: column.defaultExpr,
     isPrimaryKey,
@@ -301,6 +302,7 @@ function buildViewContext(input: {
     return {
       name: c.name,
       dataType: c.dataType,
+      effectiveType: c.effectiveType ?? c.dataType,
       nullable: c.nullable,
       defaultExpr: c.defaultExpr,
       isPrimaryKey: false,

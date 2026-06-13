@@ -14,6 +14,9 @@ type ColumnRow = {
   table: string;
   name: string;
   data_type: string;
+  /** `format_type` with one level of DOMAIN resolved to its base type + typmod
+   *  (issue #85); equals data_type for non-domain columns. */
+  effective_type: string;
   udt_name: string;
   is_nullable: boolean;
   column_default: string | null;
@@ -75,6 +78,16 @@ export async function fetchTables(client: Client, schemas: string[]): Promise<Ra
        a.attname AS name,
        format_type(a.atttypid, a.atttypmod) AS data_type,
        t.typname AS udt_name,
+       -- Resolve one level of DOMAIN to its base type, carrying the domain's own
+       -- typmod (so a domain over numeric(12,2) yields 'numeric(12,2)'), so value
+       -- pre-flight sees the base type rather than the opaque domain name
+       -- (issue #85). A domain over a domain stays a domain name here and is
+       -- left unchecked downstream (fail-open for that exotic nesting).
+       CASE
+         WHEN t.typtype = 'd' AND t.typbasetype <> 0
+           THEN format_type(t.typbasetype, t.typtypmod)
+         ELSE format_type(a.atttypid, a.atttypmod)
+       END AS effective_type,
        NOT a.attnotnull AS is_nullable,
        pg_get_expr(ad.adbin, ad.adrelid) AS column_default,
        d.description AS comment,
@@ -146,6 +159,7 @@ export async function fetchTables(client: Client, schemas: string[]): Promise<Ra
     columnsByTable.get(key)!.push({
       name: row.name,
       dataType: row.data_type,
+      effectiveType: row.effective_type,
       udtName: row.udt_name,
       nullable: row.is_nullable,
       defaultExpr: row.column_default,

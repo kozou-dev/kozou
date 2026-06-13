@@ -65,6 +65,12 @@ export type RawColumn = {
   name: string;
   /** e.g. "uuid", "text", "numeric(12,2)", "timestamptz" */
   dataType: string;
+  /** `dataType` with one level of DOMAIN resolved to its base type + typmod
+   *  (e.g. a domain over numeric(12,2) yields "numeric(12,2)", not the domain
+   *  name); equals `dataType` for non-domain columns. Introspection always
+   *  populates it; absent only on a raw record built before this field existed,
+   *  so consumers normalize with `effectiveType ?? dataType` (issue #85). */
+  effectiveType?: string;
   /** information_schema.columns.udt_name */
   udtName: string;
   nullable: boolean;

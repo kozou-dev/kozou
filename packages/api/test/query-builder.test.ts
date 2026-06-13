@@ -760,6 +760,76 @@ describe('write-body value pre-flight (#110)', () => {
   });
 });
 
+describe('domain-backed column pre-flight (#85)', () => {
+  // A DOMAIN column's dataType is the opaque domain name; introspection resolves
+  // one level to the base type + typmod and carries it on `effectiveType`, which
+  // the pre-flight consults so an invalid value is a 400 up front, not a 500.
+  const t = tableResource('orders', [
+    col('id', 'number', {
+      dataType: 'posint',
+      effectiveType: 'integer',
+      isPrimaryKey: true,
+      nullable: false,
+    }),
+    col('price', 'currency', { dataType: 'price', effectiveType: 'numeric(12,2)' }),
+    col('ref', 'uuid', { dataType: 'ref_id', effectiveType: 'uuid' }),
+    col('label', 'text', { dataType: 'short_text', effectiveType: 'text' }),
+  ]);
+
+  it('pre-flights a filter against the domain base type (400, not a 500)', () => {
+    expect(() =>
+      buildListQuery(t, { filters: [{ column: 'price', op: 'eq', value: 'abc' }] }),
+    ).toThrow(/is not valid for column "price"/);
+    // Out-of-precision overflow is caught against the resolved numeric(12,2).
+    expect(() =>
+      buildListQuery(t, { filters: [{ column: 'price', op: 'eq', value: '1e40' }] }),
+    ).toThrow(/is not valid for column "price"/);
+    expect(() =>
+      buildListQuery(t, { filters: [{ column: 'ref', op: 'eq', value: 'not-a-uuid' }] }),
+    ).toThrow(/is not valid for column "ref"/);
+    // A value valid for the base type still passes.
+    expect(() =>
+      buildListQuery(t, { filters: [{ column: 'price', op: 'eq', value: '12.34' }] }),
+    ).not.toThrow();
+  });
+
+  it('pre-flights an item id and write-body value against the domain base type', () => {
+    expect(() => buildGetQuery(t, 'abc')).toThrow(
+      /Item id component "abc" is not valid for primary-key column "id" \(posint\)/,
+    );
+    expect(() => buildGetQuery(t, '42')).not.toThrow();
+    expect(() => buildInsertQuery(t, { ref: 'zzz' })).toThrow(
+      /Value "zzz" is not valid for column "ref" \(ref_id\)/,
+    );
+    expect(() => buildInsertQuery(t, { price: 'not-money' })).toThrow(/column "price" \(price\)/);
+    expect(() => buildInsertQuery(t, { ref: SAMPLE_UUID, price: '9.99' })).not.toThrow();
+  });
+
+  it('resolves operator compatibility against the base type (like on a domain-over-text)', () => {
+    // like/ilike require a text-like base; a domain over text qualifies, a domain
+    // over numeric does not.
+    expect(() =>
+      buildListQuery(t, { filters: [{ column: 'label', op: 'ilike', value: 'foo' }] }),
+    ).not.toThrow();
+    expect(() =>
+      buildListQuery(t, { filters: [{ column: 'price', op: 'like', value: 'foo' }] }),
+    ).toThrow(/requires a text-like column/);
+  });
+
+  it('without a resolved effectiveType, a domain name falls through unchecked (back-compat)', () => {
+    // A ColumnContext built before #85 (no effectiveType) keeps the pre-#85
+    // behavior: the opaque domain name is not a checkable family, so the value is
+    // left to PostgreSQL. `effectiveType ?? dataType` is the fallback.
+    const legacy = tableResource('legacy', [
+      col('id', 'uuid', { isPrimaryKey: true, nullable: false }),
+      col('price', 'currency', { dataType: 'price' }), // no effectiveType
+    ]);
+    expect(() =>
+      buildListQuery(legacy, { filters: [{ column: 'price', op: 'eq', value: 'abc' }] }),
+    ).not.toThrow();
+  });
+});
+
 describe('buildRelationOptionsQuery', () => {
   it('searches the given fields and selects pk + label', () => {
     const q = buildRelationOptionsQuery(authors, {

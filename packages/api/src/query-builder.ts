@@ -100,6 +100,16 @@ function baseScalarType(dataType: string): string | null {
   return (paren === -1 ? lower : lower.slice(0, paren)).trim();
 }
 
+/** The column type string to use for value pre-flight and operator-compatibility
+ *  checks: a DOMAIN column's `dataType` is the opaque domain name (e.g. "price"),
+ *  which masks the base type from `baseScalarType` / `valueFitsType` and lets an
+ *  invalid value reach PostgreSQL as a 500 (issue #85). `effectiveType` carries
+ *  the base type + typmod resolved one level during introspection (e.g.
+ *  "numeric(12,2)"); fall back to `dataType` for columns built without it. */
+function preflightType(column: ColumnContext): string {
+  return column.effectiveType ?? column.dataType;
+}
+
 /** Base scalar types that accept `LIKE` / `ILIKE`. Judged by the underlying
  *  PostgreSQL type, not the widget — a `varchar` surfaced as an `enum-select`
  *  still accepts `ilike` (Kozou v1.0 issue #76). Exact-match on the normalized
@@ -445,11 +455,12 @@ function assertFilterValueParsable(
   resource: Resource,
 ): void {
   if (filter.op === 'is') return; // fixed keyword clause, no bound value
-  const base = baseScalarType(column.dataType);
+  const type = preflightType(column);
+  const base = baseScalarType(type);
   if (base === null) return; // array etc. — not value-checked here
   const values = filter.op === 'in' ? filter.values : [filter.value];
   for (const value of values) {
-    if (!valueFitsType(base, column.dataType, value)) {
+    if (!valueFitsType(base, type, value)) {
       throw badRequest(
         `Filter value "${value}" is not valid for column "${filter.column}" (${column.dataType}) ` +
           `on resource "${resource.name}".`,
@@ -470,7 +481,7 @@ function assertFilterTypeCompatible(
   column: ColumnContext,
   resource: Resource,
 ): void {
-  if ((filter.op === 'like' || filter.op === 'ilike') && !isTextLikeType(column.dataType)) {
+  if ((filter.op === 'like' || filter.op === 'ilike') && !isTextLikeType(preflightType(column))) {
     throw badRequest(
       `Operator "${filter.op}" requires a text-like column; "${filter.column}" on resource ` +
         `"${resource.name}" is ${column.dataType}.`,
@@ -479,7 +490,7 @@ function assertFilterTypeCompatible(
   if (
     filter.op === 'is' &&
     (filter.keyword === 'true' || filter.keyword === 'false') &&
-    !isBooleanType(column.dataType)
+    !isBooleanType(preflightType(column))
   ) {
     throw badRequest(
       `Filter "is.${filter.keyword}" requires a boolean column; "${filter.column}" on resource ` +
@@ -510,9 +521,10 @@ function assertKeyValuesParsable(
   for (let i = 0; i < keyColumns.length; i++) {
     const column = columnsByName.get(keyColumns[i]);
     if (column === undefined) continue; // key column absent from the exposed column set
-    const base = baseScalarType(column.dataType);
+    const type = preflightType(column);
+    const base = baseScalarType(type);
     if (base === null || !isPreflightableScalar(base)) continue;
-    if (!valueFitsType(base, column.dataType, keyValues[i])) {
+    if (!valueFitsType(base, type, keyValues[i])) {
       throw badRequest(
         `Item id component "${keyValues[i]}" is not valid for primary-key column ` +
           `"${keyColumns[i]}" (${column.dataType}) on resource "${resource.name}".`,
@@ -539,9 +551,10 @@ function assertWriteValuesParsable(resource: Resource, data: Record<string, unkn
     if (typeof value !== 'string') continue;
     const column = columnsByName.get(key);
     if (column === undefined) continue; // unknown columns already rejected upstream
-    const base = baseScalarType(column.dataType);
+    const type = preflightType(column);
+    const base = baseScalarType(type);
     if (base === null || !isPreflightableScalar(base)) continue;
-    if (!valueFitsType(base, column.dataType, value)) {
+    if (!valueFitsType(base, type, value)) {
       throw badRequest(
         `Value "${value}" is not valid for column "${key}" (${column.dataType}) ` +
           `on resource "${resource.name}".`,
@@ -573,13 +586,16 @@ function selectColumns(resource: Resource): string {
 /** Columns that free-text search targets: text-like widgets whose underlying
  *  type is also text-like. uuid / enum / numeric columns are excluded (an
  *  `ILIKE` against them either errors or is meaningless), as are text-widget
- *  columns whose real type is an array / domain / other non-text scalar — the
- *  base-type guard keeps `?search=` from emitting an ILIKE that PostgreSQL
- *  rejects (Kozou v1.0 issue #76). */
+ *  columns whose real type is an array / non-text scalar — the base-type guard
+ *  keeps `?search=` from emitting an ILIKE that PostgreSQL rejects (Kozou v1.0
+ *  issue #76). A DOMAIN column is judged by its resolved base type
+ *  (`preflightType`), so a domain over text is searchable while a domain over
+ *  numeric is not (issue #85) — otherwise a domain-over-text column would be
+ *  silently dropped and `?search=` would return unfiltered rows. */
 function searchableColumns(resource: Resource): string[] {
   return resource.columns
     .filter(
-      (c) => (c.widget === 'text' || c.widget === 'textarea') && isTextLikeType(c.dataType),
+      (c) => (c.widget === 'text' || c.widget === 'textarea') && isTextLikeType(preflightType(c)),
     )
     .map((c) => c.name);
 }
@@ -887,7 +903,7 @@ export function buildRelationOptionsQuery(
   const columnsByName = new Map(resource.columns.map((c) => [c.name, c]));
   for (const field of params.searchFields) {
     const column = columnsByName.get(field);
-    if (column !== undefined && !isTextLikeType(column.dataType)) {
+    if (column !== undefined && !isTextLikeType(preflightType(column))) {
       throw badRequest(
         `Relation search field "${field}" must be a text-like column; it is ${column.dataType}.`,
       );
