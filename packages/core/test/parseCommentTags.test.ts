@@ -197,6 +197,29 @@ describe('parseCommentTags', () => {
     expect(r.body).toContain('Trailing remark.');
   });
 
+  it('@example block terminates on an indented known tag (not captured as SQL) (#71)', () => {
+    const r = parseCommentTags(
+      '@example: get active rows\n' +
+        '  SELECT 1;\n' +
+        '  @ai: this note must not be swallowed into the example SQL\n' +
+        '  @policy: nor this one',
+    );
+    // The example keeps only its SQL; the indented tags are lifted out into
+    // their own fields rather than absorbed (and leaked) as example text.
+    expect(r.examples).toEqual([{ description: 'get active rows', sql: 'SELECT 1;' }]);
+    expect(r.ai).toEqual(['this note must not be swallowed into the example SQL']);
+    expect(r.policy).toEqual(['nor this one']);
+    expect(r.examples[0]!.sql).not.toContain('@ai');
+  });
+
+  it('an indented unknown @token inside an @example stays SQL (#71)', () => {
+    const r = parseCommentTags(
+      '@example: demo\n  SELECT 1;\n  @notatag: still part of the example',
+    );
+    expect(r.examples).toHaveLength(1);
+    expect(r.examples[0]!.sql).toContain('@notatag: still part of the example');
+  });
+
   it('@example dedents the longest common leading whitespace', () => {
     const r = parseCommentTags(
       '@example: Indented SQL\n' +

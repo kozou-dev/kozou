@@ -113,6 +113,16 @@ function warnMidlineTag(token: string): void {
   );
 }
 
+// Whether a line begins (after optional indentation) with a *known* tag —
+// `@ai:`, `@policy:`, `@example:`, etc. Used to end an open `@example` block
+// when a real tag follows its SQL on an indented line, while leaving an
+// unknown `@token:` (or a mid-line `@…` inside SQL) untouched, since example
+// bodies legitimately contain `@` text (issue #71).
+function startsWithKnownTag(line: string): boolean {
+  const m = TAG_RE.exec(line);
+  return m !== null && KNOWN_TAGS.has(m[1]!.toLowerCase());
+}
+
 export type ExampleQuery = {
   description: string;
   sql: string;
@@ -238,8 +248,12 @@ export function parseCommentTags(comment: string | null): ParsedComment {
     if (pending !== null) {
       if (pending.kind === 'example') {
         // Indented (or blank) lines extend the SQL body. A blank line is
-        // kept so multi-statement examples can include separators.
-        if (line.length === 0 || INDENT_RE.test(line)) {
+        // kept so multi-statement examples can include separators. An
+        // indented line that is itself a known tag (e.g. `  @ai: ...`)
+        // instead ends the example and is reprocessed as a tag below; an
+        // unknown `@token:` stays SQL, as example bodies contain `@` text
+        // (issue #71).
+        if ((line.length === 0 || INDENT_RE.test(line)) && !startsWithKnownTag(line)) {
           pending.sqlLines.push(line);
           continue;
         }
