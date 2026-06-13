@@ -1,6 +1,6 @@
 {
   "name": "kozou",
-  "version": "1.4.1",
+  "version": "1.4.2",
   "description": "Kozou CLI: scaffolding, schema introspection, and MCP server entry points.",
   "license": "Apache-2.0",
   "repository": {
