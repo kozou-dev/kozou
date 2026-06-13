@@ -227,6 +227,67 @@ jobs:
             expected_files: |
               build/handler.js
               build/index.js
+          # The remaining five publish targets (#74). Each ships only
+          # `dist/`, carries no forbidden vocabulary in its built output
+          # (verified), and so runs the full `forbidden_regex` with no
+          # excludes. `@kozou/api` is the in-house REST layer (the
+          # external-REST alternative) and is the one to keep on the FULL
+          # regex on purpose: dropping the terms here, as svelte-ui's
+          # bundled-identifier leg does, would silently weaken exactly the
+          # artifact where that vocabulary leaking in would matter most.
+          - pkg: api
+            filter: '@kozou/api'
+            tgz_glob: 'kozou-api-*.tgz'
+            forbidden_regex: 'postgrest|pgrst|agpl|gnu affero|gpl-3|gnu general public'
+            extra_excludes: ""
+            expected_files: |
+              dist/index.js
+              dist/index.d.ts
+              dist/handler.js
+              dist/startApiServer.js
+              dist/query-builder.js
+              dist/rpc.js
+              dist/openapi.js
+          - pkg: codegen
+            filter: '@kozou/codegen'
+            tgz_glob: 'kozou-codegen-*.tgz'
+            forbidden_regex: 'postgrest|pgrst|agpl|gnu affero|gpl-3|gnu general public'
+            extra_excludes: ""
+            expected_files: |
+              dist/index.js
+              dist/index.d.ts
+              dist/emitRowTypes.js
+              dist/mapType.js
+          - pkg: core
+            filter: '@kozou/core'
+            tgz_glob: 'kozou-core-*.tgz'
+            forbidden_regex: 'postgrest|pgrst|agpl|gnu affero|gpl-3|gnu general public'
+            extra_excludes: ""
+            expected_files: |
+              dist/index.js
+              dist/index.d.ts
+              dist/buildSchemaContext.js
+              dist/parseCommentTags.js
+          - pkg: introspect
+            filter: '@kozou/introspect'
+            tgz_glob: 'kozou-introspect-*.tgz'
+            forbidden_regex: 'postgrest|pgrst|agpl|gnu affero|gpl-3|gnu general public'
+            extra_excludes: ""
+            expected_files: |
+              dist/index.js
+              dist/index.d.ts
+              dist/tables.js
+              dist/functions.js
+          - pkg: mcp
+            filter: '@kozou/mcp'
+            tgz_glob: 'kozou-mcp-*.tgz'
+            forbidden_regex: 'postgrest|pgrst|agpl|gnu affero|gpl-3|gnu general public'
+            extra_excludes: ""
+            expected_files: |
+              dist/index.js
+              dist/index.d.ts
+              dist/cli.js
+              dist/server.js
     env:
       # `svelte-check` / Svelte 5 + the @kozou/svelte-ui workspace
       # push past the runner's default ~2 GB Node heap during the
