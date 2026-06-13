@@ -545,7 +545,9 @@ function filterParameters(resource: ResourceLike): JsonObject[] {
         { type: 'string' },
         `Filter on \`${c.name}\`: \`<op>.<value>\` where op is one of ${FILTER_OPERATORS_DOC} ` +
           `(e.g. \`${c.name}=gte.10\`, \`${c.name}=in.(a,b)\`, \`${c.name}=is.null\`). ` +
-          `A bare value means \`eq\`. Repeat the key to AND several conditions.`,
+          `A bare value means \`eq\`. In an \`in.(...)\` list, double-quote a value to ` +
+          `include a comma (\`in.("a,b",c)\`; inside quotes a literal quote is \\" and a ` +
+          `literal backslash is \\\\). Repeat the key to AND several conditions.`,
       ),
     );
 }
