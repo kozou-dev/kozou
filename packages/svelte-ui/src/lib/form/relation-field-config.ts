@@ -128,6 +128,37 @@ function searchableLabel(
   return { labelField, searchFields: [labelField] };
 }
 
+/**
+ * Build the single-column relation-select config for an RPC function argument
+ * carrying an `@arg: <name> relation(<schema.table.column>)` hint (issue #103).
+ *
+ * The picker can only round-trip when the hint targets the referenced table's
+ * single-column primary key — `searchRelation` projects that key as each
+ * option's id, which is exactly the value the argument receives — and the
+ * target has a text-searchable label. Otherwise (a hint at a non-PK column, a
+ * composite-key target, an absent table, or an unsearchable label) the argument
+ * falls back to a scalar input the operator types, so this returns null. Mirrors
+ * the per-relation acceptance in {@link relationFieldConfigs} for a single
+ * foreign key.
+ */
+export function buildArgRelationConfig(
+  argName: string,
+  relation: { schema: string; table: string; column: string },
+  schema: SchemaContext,
+): RelationFieldConfig | null {
+  const resource = `${relation.schema}.${relation.table}`;
+  const target = schema.tables.find((t) => t.qualifiedName === resource);
+  if (target === undefined) return null;
+  // Single-column PK only: the option id is the target's primary key, so the
+  // hint must reference exactly that one key column.
+  if (target.primaryKey.length !== 1 || target.primaryKey[0] !== relation.column) {
+    return null;
+  }
+  const label = searchableLabel(target);
+  if (label === null) return null;
+  return { field: argName, resource, ...label };
+}
+
 export function relationFieldConfigs(
   table: TableContext,
   schema: SchemaContext,

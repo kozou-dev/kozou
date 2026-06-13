@@ -16,7 +16,7 @@
 //
 // See Kozou v0.1 design spec §8.3.3 (create) / §8.3.5 (update).
 
-import type { TableContext } from '@kozou/core';
+import type { ColumnContext } from '@kozou/core';
 
 import { dbCanSupplyColumn } from './zod-from-column.js';
 
@@ -24,8 +24,12 @@ function isEmpty(value: unknown): boolean {
   return value === '' || value === undefined;
 }
 
+// Accepts anything with `columns` (a TableContext, or the synthetic column set
+// the RPC action form builds from a function's arguments — where `mode:
+// 'create'` drops a defaulted-and-empty argument so PostgreSQL applies the
+// function's DEFAULT, exactly as it drops a DB-suppliable column).
 export function buildMutationPayload(
-  table: TableContext,
+  table: { columns: ColumnContext[] },
   data: Record<string, unknown>,
   mode: 'create' | 'update' = 'create',
 ): Record<string, unknown> {

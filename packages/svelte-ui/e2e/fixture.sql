@@ -150,3 +150,25 @@ INSERT INTO bin_assignments (id, aisle, shelf, note) VALUES
 -- ---------------------------------------------------------------------------
 GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO web_anon;
 GRANT SELECT ON vw_inventory_for_sale TO web_anon;
+
+-- ---------------------------------------------------------------------------
+-- An exposed RPC function (issue #103) for the in-house @kozou/api suite's
+-- "Actions" surface. Invoker + PUBLIC EXECUTE revoked, so the exposure
+-- decision keeps it; the api server connects as the superuser and can still
+-- call it. Under the PostgREST opt-out the Actions surface is hidden (the REST
+-- adapter has no callFunction), so this is inert there.
+-- ---------------------------------------------------------------------------
+CREATE FUNCTION double_it(n integer) RETURNS integer LANGUAGE sql AS $$ SELECT n * 2 $$;
+COMMENT ON FUNCTION double_it(integer) IS 'Double a number.
+@ai: pure; safe to call repeatedly.
+@expose: rpc';
+REVOKE EXECUTE ON FUNCTION double_it(integer) FROM PUBLIC;
+
+-- A second action with a DEFAULTed (non-text) argument, so the no-JS path
+-- exercises a defaulted numeric argument: omitting it must drop it from the
+-- call so PostgreSQL applies the DEFAULT (not send 0 / '' / fail).
+CREATE FUNCTION bump_total(base integer, bonus integer DEFAULT 100) RETURNS integer
+  LANGUAGE sql AS $$ SELECT base + bonus $$;
+COMMENT ON FUNCTION bump_total(integer, integer) IS 'Add a bonus (default 100) to a base.
+@expose: rpc';
+REVOKE EXECUTE ON FUNCTION bump_total(integer, integer) FROM PUBLIC;

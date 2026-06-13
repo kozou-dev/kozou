@@ -95,13 +95,23 @@ export function buildAdminUiEnv(
     } else {
       delete env.KOZOU_ADAPTER_TOKEN;
     }
+    // RPC exposure config (issue #103): forward the operator's api.rpc
+    // allowlists so the UI's "Actions" surface exposes the same functions the
+    // API serves (including the SECURITY DEFINER / public ones opted in). Set
+    // authoritatively from config so a stray inherited value cannot widen it.
+    env.KOZOU_RPC_ALLOW_DEFINER = config.api.rpc.allowDefiner.join(',');
+    env.KOZOU_RPC_ALLOW_PUBLIC_EXECUTE = config.api.rpc.allowPublicExecute.join(',');
   } else {
     // External REST opt-out: the UI uses its REST adapter at the config url.
     // Clear any inherited KOZOU_ADAPTER_KIND / token so a stray value in the
     // parent environment cannot flip the UI onto the api adapter (or leak a
-    // token) — the opt-out selection must be authoritative.
+    // token) — the opt-out selection must be authoritative. The REST adapter
+    // has no callFunction, so the Actions surface stays hidden; clear the RPC
+    // allowlists too so an inherited value cannot list functions there.
     delete env.KOZOU_ADAPTER_KIND;
     delete env.KOZOU_ADAPTER_TOKEN;
+    delete env.KOZOU_RPC_ALLOW_DEFINER;
+    delete env.KOZOU_RPC_ALLOW_PUBLIC_EXECUTE;
     env.KOZOU_ADAPTER_URL = config.adapter.url;
   }
   return env;

@@ -29,6 +29,46 @@ import {
   compositeParamName,
 } from '$lib/form/relation-field-config.js';
 
+/** A native FormData submission converted to a plain object, with blank
+ *  fields omitted so the schema defaults apply (mirroring how superforms
+ *  parses blank FormData entries). */
+function formDataToObject(data: FormData): Record<string, unknown> {
+  const fields: Record<string, unknown> = {};
+  for (const [key, value] of data.entries()) {
+    // These forms have no file inputs; skip File entries defensively. Blank
+    // fields are OMITTED so the schema defaults apply.
+    if (typeof value === 'string' && value !== '') fields[key] = value;
+  }
+  return fields;
+}
+
+/**
+ * What the RPC action route should hand to `superValidate`. A defaulted
+ * argument carries a `z.union([literal(''), <base>])` schema, and superforms
+ * rejects unions when parsing FormData directly ("Unions are only supported
+ * when the dataType option for superForm is set to 'json'"); parsing a plain
+ * object has no such restriction. So a native (no-JS) submission is converted
+ * to an object — unconditionally, since an action form can carry a defaulted
+ * non-text argument with no relation pickers at all. The enhanced path's
+ * superforms JSON envelope is passed through untouched (superValidate handles
+ * it), as is a non-form (JSON) body. Single-column relation-select arguments
+ * submit as plain fields, so no composite decoding is needed here.
+ */
+export async function readActionFormSubmission(
+  request: Request,
+): Promise<Request | FormData | Record<string, unknown>> {
+  const contentType = request.headers.get('content-type') ?? '';
+  if (
+    !contentType.includes('application/x-www-form-urlencoded') &&
+    !contentType.includes('multipart/form-data')
+  ) {
+    return request;
+  }
+  const data = await request.formData();
+  if (data.has('__superform_json')) return data;
+  return formDataToObject(data);
+}
+
 /**
  * Return what the route action should hand to `superValidate`: the request
  * itself when the table has no pickers, the raw FormData when it carries the
@@ -60,17 +100,13 @@ export async function readFormWithCompositePicks(
   // JSON envelope; superValidate ignores plain fields then.
   if (data.has('__superform_json')) return data;
 
-  const fields: Record<string, unknown> = {};
-  for (const [key, value] of data.entries()) {
-    // These forms have no file inputs; skip File entries defensively. Blank
-    // fields are OMITTED so the schema defaults apply — mirroring how
-    // superforms itself parses blank FormData entries. Feeding '' through
-    // the object path instead would skew unrelated scalars (a blank
-    // nullable date fails validation, a blank nullable text becomes ''
-    // instead of null); the picker columns are unaffected either way, since
-    // their promoted schema default IS ''.
-    if (typeof value === 'string' && value !== '') fields[key] = value;
-  }
+  // Blank fields are OMITTED so the schema defaults apply — mirroring how
+  // superforms itself parses blank FormData entries. Feeding '' through the
+  // object path instead would skew unrelated scalars (a blank nullable date
+  // fails validation, a blank nullable text becomes '' instead of null); the
+  // picker columns are unaffected either way, since their promoted schema
+  // default IS ''.
+  const fields = formDataToObject(data);
 
   for (const config of relations) {
     const keyFields = config.keyFields ?? [config.field];

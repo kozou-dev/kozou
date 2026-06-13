@@ -4,7 +4,10 @@ import {
   COMPOSITE_CLEAR_VALUE,
   type RelationFieldConfig,
 } from '../../src/lib/form/relation-field-config.js';
-import { readFormWithCompositePicks } from '../../src/lib/server/composite-form.js';
+import {
+  readActionFormSubmission,
+  readFormWithCompositePicks,
+} from '../../src/lib/server/composite-form.js';
 
 const binRelation: RelationFieldConfig = {
   field: 'aisle',
@@ -193,5 +196,32 @@ describe('readFormWithCompositePicks', () => {
   it('rejects hostile percent-encoding without throwing (no 500)', async () => {
     const request = formRequest({ __composite__aisle: '%,%E0%A4%A' });
     expect(await readFormWithCompositePicks(request, [binRelation])).toBeNull();
+  });
+});
+
+describe('readActionFormSubmission (RPC action form)', () => {
+  it('converts a native submission to a plain object, omitting blank fields', async () => {
+    // A defaulted argument left blank must be DROPPED (so PostgreSQL applies
+    // its DEFAULT) — and the object form is what lets superValidate parse the
+    // defaulted argument's multi-type union at all (FormData would be rejected).
+    const request = formRequest({ base: '5', bonus: '' });
+    const result = await readActionFormSubmission(request);
+    expect(result).toEqual({ base: '5' });
+  });
+
+  it('leaves the enhanced superforms envelope as FormData (parsed as JSON)', async () => {
+    const request = formRequest({ __superform_json: '[{"base":5}]' });
+    const result = await readActionFormSubmission(request);
+    expect(typeof (result as FormData).get).toBe('function');
+    expect((result as FormData).get('__superform_json')).toBe('[{"base":5}]');
+  });
+
+  it('returns the request untouched for a non-form content type', async () => {
+    const request = new Request('http://ui.local/actions/public.f', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ base: 5 }),
+    });
+    expect(await readActionFormSubmission(request)).toBe(request);
   });
 });

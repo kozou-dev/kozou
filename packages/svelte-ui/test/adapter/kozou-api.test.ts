@@ -187,3 +187,30 @@ describe('KozouApiDataAdapter.searchRelation', () => {
     expect(options).toEqual([{ id: 1, label: 'Ada' }]);
   });
 });
+
+describe('KozouApiDataAdapter.callFunction', () => {
+  it('POSTs the named-args body to /rpc/<schema>.<fn> and returns the result', async () => {
+    const { calls, adapter } = adapterWith(() => jsonResponse(42));
+    const result = await adapter.callFunction('public.add_two', { a: 40, b: 2 });
+    expect(calls[0].method).toBe('POST');
+    expect(calls[0].url).toBe('http://api.example/rpc/public.add_two');
+    expect(JSON.parse(calls[0].body ?? '{}')).toEqual({ a: 40, b: 2 });
+    expect(calls[0].headers['Content-Type']).toBe('application/json');
+    expect(result).toBe(42);
+  });
+
+  it('returns null for a 204 (void) response without parsing a body', async () => {
+    const { adapter } = adapterWith(() => new Response(null, { status: 204 }));
+    expect(await adapter.callFunction('public.noop', {})).toBeNull();
+  });
+
+  it('throws a KozouApiAdapterError carrying the status on a non-ok response', async () => {
+    const { adapter } = adapterWith(() =>
+      jsonResponse({ error: { code: 'forbidden', message: 'Permission denied.' } }, 403),
+    );
+    await expect(adapter.callFunction('public.secret_op', {})).rejects.toMatchObject({
+      name: 'KozouApiAdapterError',
+      status: 403,
+    });
+  });
+});

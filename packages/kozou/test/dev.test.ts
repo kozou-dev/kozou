@@ -168,6 +168,29 @@ describe('buildAdminUiEnv', () => {
     expect(env.KOZOU_ADAPTER_KIND).toBeUndefined();
     expect(env.KOZOU_ADAPTER_URL).toBe(config.adapter.url);
   });
+
+  it('forwards api.rpc allowlists to the UI on the api path (issue #103)', async () => {
+    const base = await makeConfig();
+    const config: KozouConfig = {
+      ...base,
+      api: { rpc: { allowDefiner: ['public.approve'], allowPublicExecute: ['public.search'] } },
+    };
+    const env = buildAdminUiEnv(config, 'http://localhost:3333', {}, 'http://127.0.0.1:3335');
+    expect(env.KOZOU_RPC_ALLOW_DEFINER).toBe('public.approve');
+    expect(env.KOZOU_RPC_ALLOW_PUBLIC_EXECUTE).toBe('public.search');
+  });
+
+  it('clears inherited RPC allowlists on the REST opt-out path (no widening)', async () => {
+    // A stray parent KOZOU_RPC_ALLOW_* must not list functions on the opt-out
+    // path (where the Actions surface is hidden anyway).
+    const config = await makeConfig();
+    const env = buildAdminUiEnv(config, 'http://localhost:3333', {
+      KOZOU_RPC_ALLOW_DEFINER: 'public.evil',
+      KOZOU_RPC_ALLOW_PUBLIC_EXECUTE: 'public.evil',
+    });
+    expect(env.KOZOU_RPC_ALLOW_DEFINER).toBeUndefined();
+    expect(env.KOZOU_RPC_ALLOW_PUBLIC_EXECUTE).toBeUndefined();
+  });
 });
 
 describe('resolveAdminUiToken', () => {

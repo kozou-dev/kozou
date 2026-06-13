@@ -41,6 +41,19 @@ export interface DataAdapter {
     resource: string,
     params: SearchRelationParams,
   ): Promise<RelationOption[]>;
+
+  /**
+   * Invoke an exposed RPC function (issue #103). `qualifiedName` is the
+   * schema-qualified identity (`schema.function`); `args` is the named-argument
+   * object. Resolves to the function's result: a scalar, an object, an array,
+   * or null for a void function. Optional — only the in-house @kozou/api
+   * backend serves the `/rpc/` surface; an adapter without it has no RPC
+   * actions and the Admin UI hides the "Actions" surface.
+   */
+  callFunction?(
+    qualifiedName: string,
+    args: Record<string, unknown>,
+  ): Promise<unknown>;
 }
 
 export type ListParams = {
