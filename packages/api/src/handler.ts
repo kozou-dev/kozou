@@ -24,6 +24,7 @@ import {
   type FilterOperator,
 } from './query-builder.js';
 import { parseEmbedParam, resolveEmbedSpec } from './embed.js';
+import { buildRpcCall, shapeRpcResult, type FunctionLookup } from './rpc.js';
 
 /** Minimal query interface satisfied by both `pg.Pool` and `pg.Client`. */
 export type Queryable = {
@@ -36,6 +37,9 @@ export type Queryable = {
 export type ApiHandlerDeps = {
   db: Queryable;
   lookup: ResourceLookup;
+  /** Registry of exposed RPC functions (issue #103). Absent = no `/rpc/`
+   *  surface (no function was exposed); a `/rpc/` request then 404s. */
+  functions?: FunctionLookup;
   /** Advertised in `GET /`. Optional; defaults to null. */
   version?: string;
   /** Prebuilt OpenAPI document served at `GET /openapi.json`. */
@@ -97,8 +101,27 @@ async function route(deps: ApiHandlerDeps, req: ApiHttpRequest): Promise<ApiHttp
     requireMethod(method, 'GET');
     return {
       status: 200,
-      body: { name: 'kozou-api', version: deps.version ?? null, resources: deps.lookup.list() },
+      body: {
+        name: 'kozou-api',
+        version: deps.version ?? null,
+        resources: deps.lookup.list(),
+        functions: deps.functions?.list() ?? [],
+      },
     };
+  }
+
+  // RPC namespace (issue #103): `POST /rpc/<schema>.<fn>`. The function is
+  // addressed by its schema-qualified identity (§5.0), which contains a dot, so
+  // it never collides with a `/<resource>/<id>` item route. Reserved as
+  // POST-only (volatility does not split GET/POST in v1, §2). `rpc` is a
+  // reserved top-level segment: a table literally named `rpc` is still
+  // reachable by its qualified name (`/<schema>.rpc/<id>`), but its bare-name
+  // item routes are shadowed by this namespace.
+  if (segments.length === 2 && segments[0] === 'rpc') {
+    if (m !== 'POST') {
+      throw methodNotAllowed(`Method ${method} not allowed on /rpc; use POST.`);
+    }
+    return callFunction(deps, segments[1]!, req.body);
   }
 
   if (segments.length === 1 && segments[0] === 'openapi.json') {
@@ -236,6 +259,35 @@ async function relationOptions(
     label: String(row[built.labelField] ?? ''),
   }));
   return { status: 200, body: { options } };
+}
+
+async function callFunction(
+  deps: ApiHandlerDeps,
+  qualifiedName: string,
+  body: unknown,
+): Promise<ApiHttpResult> {
+  const fn = deps.functions?.resolve(qualifiedName);
+  if (fn === undefined) {
+    // Same shape as an unknown resource: a function that was not exposed is
+    // indistinguishable from one that does not exist (no enumeration channel).
+    throw notFound(`Unknown function "${qualifiedName}".`);
+  }
+  const built = buildRpcCall(fn, requireRpcBody(body));
+  // Runs on deps.db — under the request's role + claims in the authed path — so
+  // PostgreSQL's EXECUTE privilege and the function's own RLS apply. A 42501
+  // (no EXECUTE / RLS denial) maps to 403 in the handler's error classifier.
+  const result = await deps.db.query<Record<string, unknown>>(built.text, built.values);
+  return shapeRpcResult(built.returns, result.rows);
+}
+
+/** RPC body: a JSON object of named arguments. An absent body is an empty
+ *  argument set (valid for a no-argument or all-default function). */
+function requireRpcBody(body: unknown): Record<string, unknown> {
+  if (body === undefined || body === null) return {};
+  if (typeof body !== 'object' || Array.isArray(body)) {
+    throw badRequest('RPC request body must be a JSON object of named arguments.');
+  }
+  return body as Record<string, unknown>;
 }
 
 function notFoundResult(resource: Resource, id: string): ApiHttpResult {

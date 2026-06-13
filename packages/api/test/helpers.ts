@@ -8,6 +8,9 @@ import type {
   TableContext,
   ViewContext,
   RelationContext,
+  FunctionContext,
+  FunctionArgContext,
+  FunctionReturnContext,
 } from '@kozou/core';
 import type { Resource } from '../src/schema-lookup.js';
 import type { Queryable } from '../src/handler.js';
@@ -99,6 +102,49 @@ export function viewResource(name: string, columns: ColumnContext[], schema = 'p
   };
 }
 
+export function fnArg(
+  name: string,
+  typeName = 'text',
+  extra: Partial<FunctionArgContext> = {},
+): FunctionArgContext {
+  return { name, typeName, hasDefault: false, widget: 'text', ...extra };
+}
+
+/** A FunctionContext for the RPC tests. Defaults to an invoker, void-returning
+ *  function with no args. */
+export function functionContext(
+  name: string,
+  opts: {
+    schema?: string;
+    args?: FunctionArgContext[];
+    returns?: FunctionReturnContext;
+    security?: 'invoker' | 'definer';
+    publicCallable?: boolean;
+    volatility?: 'immutable' | 'stable' | 'volatile';
+    label?: string;
+    description?: string | null;
+    aiDescription?: string | null;
+    policy?: string[];
+  } = {},
+): FunctionContext {
+  const schema = opts.schema ?? 'public';
+  return {
+    schema,
+    name,
+    qualifiedName: `${schema}.${name}`,
+    label: opts.label ?? name,
+    description: opts.description ?? null,
+    aiDescription: opts.aiDescription ?? null,
+    policy: opts.policy,
+    args: opts.args ?? [],
+    returns: opts.returns ?? { kind: 'void', typeName: 'void' },
+    volatility: opts.volatility ?? 'volatile',
+    security: opts.security ?? 'invoker',
+    publicCallable: opts.publicCallable ?? false,
+    rawFunction: {} as unknown as FunctionContext['rawFunction'],
+  };
+}
+
 type TableSpec = {
   schema?: string;
   name: string;
@@ -113,7 +159,11 @@ type TableSpec = {
 type ViewSpec = Omit<TableSpec, 'primaryKey'>;
 
 /** A SchemaContext carrying the fields the lookup + OpenAPI builder read. */
-export function schemaOf(tables: TableSpec[], views: ViewSpec[] = []): SchemaContext {
+export function schemaOf(
+  tables: TableSpec[],
+  views: ViewSpec[] = [],
+  functions: FunctionContext[] = [],
+): SchemaContext {
   return {
     meta: { serverVersion: '16', builtAt: '2026-01-01T00:00:00Z', sourceSchemas: ['public'] },
     tables: tables.map(
@@ -146,6 +196,7 @@ export function schemaOf(tables: TableSpec[], views: ViewSpec[] = []): SchemaCon
     ),
     enums: [],
     concepts: [],
+    functions,
   } as unknown as SchemaContext;
 }
 

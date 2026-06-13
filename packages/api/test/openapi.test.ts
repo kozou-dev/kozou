@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import type { WidgetType, RelationContext } from '@kozou/core';
 import { buildOpenApiDocument } from '../src/openapi.js';
-import { schemaOf, col, relation, compositeRelation } from './helpers.js';
+import { schemaOf, col, relation, compositeRelation, functionContext, fnArg } from './helpers.js';
 
 type EmbedHint = { field: string; key: string; target: string; cardinality: string };
 type SchemaObj = {
@@ -708,5 +708,83 @@ describe('buildOpenApiDocument', () => {
     expect(authorsDesc).toMatch(/child table/);
     // and the forward (to-one nested object) case is still documented.
     expect(embedDesc(doc.paths['/books'].get)).toMatch(/to-one|nested object/);
+  });
+});
+
+describe('buildOpenApiDocument — RPC operations (issue #103)', () => {
+  function rpcDoc(): Doc {
+    const schema = schemaOf([], [], [
+      functionContext('approve_order', {
+        label: 'Approve an order',
+        description: 'Approve an order and reserve stock.',
+        aiDescription: 'Not idempotent; check status before re-calling.',
+        policy: ['Only managers may approve.'],
+        args: [
+          fnArg('order_id', 'uuid', { widget: 'uuid' }),
+          fnArg('status', 'order_status', {
+            widget: 'enum-select',
+            enumValues: ['pending', 'shipped'],
+          }),
+          fnArg('note', 'text', { widget: 'textarea', hasDefault: true }),
+        ],
+        returns: { kind: 'scalar', typeName: 'integer' },
+      }),
+      functionContext('purge', { returns: { kind: 'void', typeName: 'void' } }),
+    ]);
+    return buildOpenApiDocument(schema) as unknown as Doc;
+  }
+
+  it('adds a POST /rpc/<schema>.<fn> path with a schema-qualified operationId', () => {
+    const post = rpcDoc().paths['/rpc/public.approve_order'].post as {
+      operationId: string;
+      summary: string;
+    };
+    expect(post.operationId).toBe('rpc.public.approve_order');
+    expect(post.summary).toBe('Approve an order');
+  });
+
+  it('carries COMMENT-derived description / @ai / @policy as x-kozou-*', () => {
+    const post = rpcDoc().paths['/rpc/public.approve_order'].post as Record<string, unknown>;
+    expect(post.description).toBe('Approve an order and reserve stock.');
+    expect(post['x-kozou-ai']).toBe('Not idempotent; check status before re-calling.');
+    expect(post['x-kozou-policy']).toEqual(['Only managers may approve.']);
+    expect(post['x-kozou-security']).toBe('invoker');
+  });
+
+  it('models the request body from the arguments (required = no default)', () => {
+    const post = rpcDoc().paths['/rpc/public.approve_order'].post as {
+      requestBody: {
+        required: boolean;
+        content: Record<string, { schema: SchemaObj }>;
+      };
+    };
+    const body = post.requestBody;
+    expect(body.required).toBe(true);
+    const schema = body.content['application/json'].schema;
+    expect(schema.additionalProperties).toBe(false);
+    expect(Object.keys(schema.properties ?? {})).toEqual(['order_id', 'status', 'note']);
+    // note has a DEFAULT, so it is not required.
+    expect(schema.required).toEqual(['order_id', 'status']);
+    expect(schema.properties?.status.enum).toEqual(['pending', 'shipped']);
+    expect(schema.properties?.order_id['x-kozou-widget']).toBe('uuid');
+  });
+
+  it('advertises 200 / 400 / 403 / 409 for a value-returning function', () => {
+    const responses = (
+      rpcDoc().paths['/rpc/public.approve_order'].post as {
+        responses: Record<string, unknown>;
+      }
+    ).responses;
+    expect(Object.keys(responses).sort()).toEqual(['200', '400', '403', '409']);
+  });
+
+  it('uses 204 (not 200) for a void-returning function', () => {
+    const responses = (
+      rpcDoc().paths['/rpc/public.purge'].post as { responses: Record<string, unknown> }
+    ).responses;
+    expect(responses['204']).toBeDefined();
+    expect(responses['200']).toBeUndefined();
+    // The database-mapped statuses are still advertised on a void function.
+    expect(responses['409']).toBeDefined();
   });
 });

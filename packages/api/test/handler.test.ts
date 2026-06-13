@@ -63,6 +63,7 @@ describe('handleApiRequest — routing', () => {
       name: 'kozou-api',
       version: 'v-test',
       resources: ['public.authors', 'public.vw_active'],
+      functions: [],
     });
   });
 

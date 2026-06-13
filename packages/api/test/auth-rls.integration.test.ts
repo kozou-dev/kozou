@@ -84,6 +84,23 @@ describe('@kozou/api JWT + RLS (generic fixture)', () => {
         `ALTER TABLE authors ADD CONSTRAINT authors_display_name_deferred_uniq
          UNIQUE (display_name) DEFERRABLE INITIALLY DEFERRED`,
       );
+
+      // Two exposed RPC functions (issue #103) for the EXECUTE-enforcement
+      // test: both have PUBLIC EXECUTE revoked (so the exposure decision keeps
+      // them), but only `whoami` is granted to app_reader. Under SET LOCAL ROLE
+      // app_reader, calling `whoami` succeeds and `secret_op` is denied (42501).
+      await admin.query(`
+        CREATE FUNCTION whoami() RETURNS text LANGUAGE sql AS $$ SELECT current_user::text $$;
+        COMMENT ON FUNCTION whoami() IS 'Returns the executing role.
+@expose: rpc';
+        REVOKE EXECUTE ON FUNCTION whoami() FROM PUBLIC;
+        GRANT EXECUTE ON FUNCTION whoami() TO app_reader;
+
+        CREATE FUNCTION secret_op() RETURNS void LANGUAGE sql AS $$ SELECT $$;
+        COMMENT ON FUNCTION secret_op() IS 'Not granted to app_reader.
+@expose: rpc';
+        REVOKE EXECUTE ON FUNCTION secret_op() FROM PUBLIC;
+      `);
     } finally {
       await admin.end();
     }
@@ -245,6 +262,32 @@ describe('@kozou/api JWT + RLS (generic fixture)', () => {
       expect(body.error.code).toBe('conflict');
       expect(body.error.message).toBe('Unique constraint violation.');
       expect(JSON.stringify(body)).not.toContain('authors_display_name_deferred_uniq');
+    });
+  });
+
+  describe('RPC EXECUTE enforcement (issue #103, §6.1)', () => {
+    const postRpc = async (fn: string, jwt: string) => {
+      const r = await fetch(`${base}/rpc/${db.schema}.${fn}`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${jwt}`, 'content-type': 'application/json' },
+        body: '{}',
+      });
+      if (r.status === 204) return { status: 204, body: undefined as unknown };
+      return { status: r.status, body: (await r.json()) as unknown };
+    };
+
+    it('runs a granted function under SET LOCAL ROLE (current_user is the claimed role)', async () => {
+      const { status, body } = await postRpc('whoami', await token({ sub: 'ada', role: 'app_reader' }));
+      expect(status).toBe(200);
+      expect(body).toBe('app_reader');
+    });
+
+    it('maps a missing EXECUTE privilege (42501) to 403, not 500', async () => {
+      const { status, body } = await postRpc('secret_op', await token({ sub: 'ada', role: 'app_reader' }));
+      expect(status).toBe(403);
+      expect((body as { error: { code: string } }).error.code).toBe('forbidden');
+      // No raw database detail (function name / privilege wording) leaks.
+      expect(JSON.stringify(body)).not.toContain('secret_op');
     });
   });
 

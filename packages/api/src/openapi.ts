@@ -19,6 +19,9 @@ import type {
   ColumnContext,
   RelationContext,
   WidgetType,
+  FunctionContext,
+  FunctionArgContext,
+  FunctionReturnContext,
 } from '@kozou/core';
 import { RESERVED_PARAMS } from './handler.js';
 
@@ -105,6 +108,14 @@ export function buildOpenApiDocument(
         update: updateRef,
       }),
     );
+  }
+
+  // RPC operations (issue #103): one `POST /rpc/<schema>.<fn>` per exposed
+  // function, addressed by its schema-qualified identity (§5.0). COMMENT-derived
+  // metadata (@ai / @policy) rides along as x-kozou-* the same way it does for
+  // tables/views.
+  for (const fn of schema.functions ?? []) {
+    Object.assign(paths, rpcPaths(fn));
   }
 
   return {
@@ -624,4 +635,94 @@ function errorResponse(description: string): JsonObject {
       },
     },
   });
+}
+
+// ---- RPC (issue #103) ------------------------------------------------------
+
+/** The `POST /rpc/<schema>.<fn>` operation for one exposed function. The path
+ *  uses the schema-qualified identity (§5.0); the request body is the named
+ *  arguments; the response shape follows the v1 return mapping (§4.3). */
+function rpcPaths(fn: FunctionContext): JsonObject {
+  const properties: JsonObject = {};
+  const required: string[] = [];
+  for (const arg of fn.args) {
+    properties[arg.name] = argSchema(arg);
+    if (!arg.hasDefault) required.push(arg.name);
+  }
+  const requestSchema: JsonObject = { type: 'object', properties, additionalProperties: false };
+  if (required.length > 0) requestSchema.required = required;
+
+  const operation: JsonObject = {
+    operationId: `rpc.${fn.qualifiedName}`,
+    summary: fn.label || fn.name,
+    'x-kozou-volatility': fn.volatility,
+    'x-kozou-security': fn.security,
+    requestBody: {
+      // A no-argument (or all-default) function accepts an empty body.
+      required: required.length > 0,
+      content: { 'application/json': { schema: requestSchema } },
+    },
+    responses: rpcResponses(fn.returns),
+  };
+  if (fn.description) operation.description = fn.description;
+  if (fn.aiDescription) operation['x-kozou-ai'] = fn.aiDescription;
+  if (fn.policy && fn.policy.length > 0) operation['x-kozou-policy'] = fn.policy;
+
+  return { [`/rpc/${fn.qualifiedName}`]: { post: operation } };
+}
+
+/** JSON schema for one RPC argument, from its inferred widget + enum members,
+ *  with the relation target (when hinted) surfaced as `x-kozou-relation`. */
+function argSchema(arg: FunctionArgContext): JsonObject {
+  const schema: JsonObject = { ...widgetType(arg.widget) };
+  if (arg.enumValues && arg.enumValues.length > 0) schema.enum = [...arg.enumValues];
+  schema['x-kozou-widget'] = arg.widget;
+  schema['x-kozou-type'] = arg.typeName;
+  if (arg.relation) {
+    schema['x-kozou-relation'] = `${arg.relation.schema}.${arg.relation.table}.${arg.relation.column}`;
+  }
+  return schema;
+}
+
+/** Responses for an RPC operation: the success status/shape by return kind
+ *  (§4.3), plus the database-mapped 403 (no EXECUTE / RLS denial) and a 400 for
+ *  a malformed body. */
+function rpcResponses(returns: FunctionReturnContext): JsonObject {
+  const base: JsonObject = {
+    '400': errorResponse('Validation error (unknown or missing argument).'),
+    '403': errorResponse('Permission denied (no EXECUTE privilege or row-level security).'),
+    // A function that violates (or RAISEs with) a unique / foreign-key SQLSTATE
+    // maps to 409 via the same classifier as table writes (§6.3 / #98 reuse).
+    '409': errorResponse('Constraint conflict (unique or foreign-key violation).'),
+  };
+  if (returns.kind === 'void') {
+    return { '204': { description: 'The function returned no value.' }, ...base };
+  }
+  return { '200': jsonResponse('The function result.', returnSchema(returns)), ...base };
+}
+
+/** Best-effort response schema for a return shape (§4.3): a scalar is left
+ *  unconstrained (the SQL type is advisory only, in `x-kozou-type`); a composite
+ *  is an object of its columns; a SETOF is an array of objects (or of scalars
+ *  when the row has no named columns). */
+function returnSchema(returns: FunctionReturnContext): JsonObject {
+  const objectOf = (columns: { name: string; typeName: string }[]): JsonObject => ({
+    type: 'object',
+    properties: Object.fromEntries(
+      columns.map((c) => [c.name, { 'x-kozou-type': c.typeName }]),
+    ),
+  });
+  switch (returns.kind) {
+    case 'scalar':
+      return { 'x-kozou-type': returns.typeName };
+    case 'composite':
+      return returns.columns ? objectOf(returns.columns) : { type: 'object' };
+    case 'setof':
+      return {
+        type: 'array',
+        items: returns.columns && returns.columns.length > 0 ? objectOf(returns.columns) : {},
+      };
+    default:
+      return {};
+  }
 }

@@ -27,6 +27,22 @@ adapter:
   #   type: postgrest
   #   url: ${KOZOU_ADAPTER_URL:-http://postgrest:3000}
 
+# Optional: expose Postgres functions as RPC actions (POST /rpc/<schema>.<fn>).
+# A function is exposed only when its COMMENT carries `@expose: rpc`. The lists
+# below are the extra deploy-time opt-in the riskier cases require, as
+# schema-qualified names:
+# api:
+#   rpc:
+#     # SECURITY DEFINER functions (run as their owner, can bypass RLS) need to
+#     # be listed here in addition to the tag and an owner-safe search_path.
+#     allowDefiner:
+#       - public.approve_order
+#     # Functions that intentionally keep EXECUTE granted to PUBLIC (anon can
+#     # call them). Without this, a function still granting PUBLIC EXECUTE is
+#     # skipped rather than silently opened to everyone.
+#     allowPublicExecute:
+#       - public.search
+
 uiHints:
   path: ./ui-hints.yaml
 
