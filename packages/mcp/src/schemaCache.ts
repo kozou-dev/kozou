@@ -1,12 +1,19 @@
 import type { ClientConfig } from 'pg';
 import { introspect } from '@kozou/introspect';
-import { buildSchemaContext, type SchemaContext } from '@kozou/core';
+import { buildSchemaContext, type SchemaContext, type RpcBuildConfig } from '@kozou/core';
 
 export type SchemaCacheOptions = {
   connection: string | ClientConfig;
   schemas?: string[];
   /** TTL in ms (default 60_000, per Kozou v0.1 spec §7.5) */
   ttlMs?: number;
+  /** RPC exposure config (issue #103). Threaded into buildSchemaContext so
+   *  `describe_functions` advertises the same exposed set as the REST `/rpc/`
+   *  surface — including the SECURITY DEFINER / public functions the operator
+   *  opted in. Omitted on the env-only standalone CLI (only invoker functions
+   *  with PUBLIC EXECUTE revoked are then exposed). MCP stays privilege-wide:
+   *  it never sets `privilegeRole`, so EXECUTE-based hiding does not apply. */
+  rpc?: RpcBuildConfig;
 };
 
 export class SchemaCache {
@@ -49,6 +56,6 @@ export class SchemaCache {
       connection: this.opts.connection,
       schemas: this.opts.schemas,
     });
-    return buildSchemaContext({ raw });
+    return buildSchemaContext({ raw, rpc: this.opts.rpc });
   }
 }

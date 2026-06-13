@@ -194,6 +194,9 @@ export async function devCommand(opts: DevOptions = {}): Promise<void> {
     connection: config.database.url,
     schemas: config.database.schemas,
     ttlMs: config.cache.ttlMs,
+    // Same RPC exposure config as the API, so describe_functions advertises
+    // the same exposed set the /rpc/ surface serves (issue #103).
+    rpc: config.api.rpc,
   });
 
   // 1. MCP HTTP, in-process. startHttpServer already warns on a

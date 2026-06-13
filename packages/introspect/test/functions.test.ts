@@ -2,6 +2,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import pkg from 'pg';
 import { buildSchemaContext } from '@kozou/core';
 import type { RawFunction } from '@kozou/core';
+import type { RawEnum } from '@kozou/core';
 import { introspect } from '../src/index.js';
 import { setupDatabase, type DatabaseHandle } from '@kozou/test-utils';
 
@@ -87,6 +88,7 @@ const FUNCTIONS_FIXTURE_SQL = `
 describe('introspect functions (RPC, issue #103)', () => {
   let db: DatabaseHandle;
   let functions: RawFunction[];
+  let enums: RawEnum[];
   let owner: string;
 
   const byName = (name: string): RawFunction => {
@@ -110,10 +112,20 @@ describe('introspect functions (RPC, issue #103)', () => {
     }
     const raw = await introspect({ connection: db.connectionString, schemas: [db.schema] });
     functions = raw.functions;
+    enums = raw.enums;
   }, 120_000);
 
   afterAll(async () => {
     if (db) await db.cleanup();
+  });
+
+  it('returns enum members as a real string[] (name[] is cast to text[])', () => {
+    // Regression: array_agg over the `name`-typed enumlabel yields a name[] the
+    // pg driver does not parse; the ::text cast makes it a proper JS array.
+    const orderStatus = enums.find((e) => e.name === 'order_status');
+    expect(orderStatus).toBeDefined();
+    expect(Array.isArray(orderStatus!.values)).toBe(true);
+    expect(orderStatus!.values).toEqual(['pending', 'shipped']);
   });
 
   it('introspects every ordinary function in the schema', () => {

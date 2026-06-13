@@ -26,6 +26,8 @@ export async function mcpCommand(opts: McpOptions = {}): Promise<void> {
     connection: config.database.url,
     schemas: config.database.schemas,
     ttlMs: config.cache.ttlMs,
+    // describe_functions advertises the operator's exposed RPC set (issue #103).
+    rpc: config.api.rpc,
   });
 
   if (opts.http === true) {
