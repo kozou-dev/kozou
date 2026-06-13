@@ -12,6 +12,9 @@ export type {
   RawView,
   RawEnum,
   RawFunction,
+  RawFunctionArg,
+  RawFunctionReturn,
+  RawFunctionSearchPathElement,
   FkAction,
 } from './types/raw.js';
 
@@ -24,6 +27,9 @@ export type {
   ViewContext,
   EnumContext,
   ConceptContext,
+  FunctionContext,
+  FunctionArgContext,
+  FunctionReturnContext,
 } from './types/context.js';
 
 export {
@@ -45,7 +51,16 @@ export type {
   RelationOption,
 } from './types/adapter.js';
 
-export { parseCommentTags, type ParsedComment } from './parseCommentTags.js';
+export {
+  parseCommentTags,
+  type ParsedComment,
+  type ExposeKind,
+  type ArgHint,
+} from './parseCommentTags.js';
+export {
+  buildFunctionContexts,
+  type RpcBuildConfig,
+} from './buildFunctionContext.js';
 export { inferWidget, type InferWidgetInput } from './widget.js';
 export { inferDisplayField, type InferDisplayFieldInput } from './displayField.js';
 export { extractCheckEnums } from './checkEnum.js';

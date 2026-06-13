@@ -14,12 +14,17 @@ import { parseCommentTags } from './parseCommentTags.js';
 import { extractCheckEnums } from './checkEnum.js';
 import { inferWidget } from './widget.js';
 import { inferDisplayField } from './displayField.js';
+import { buildFunctionContexts, type RpcBuildConfig } from './buildFunctionContext.js';
 
 export type BuildOptions = {
   raw: RawIntrospection;
   uiHints?: UIHints;
   /** Whether to warn-only on validation issues, or throw. Default: false (warn only). */
   strict?: boolean;
+  /** RPC exposure config (issue #103). When omitted, no `security definer` or
+   *  PUBLIC-EXECUTE function can be exposed; invoker functions tagged
+   *  `@expose: rpc` (with PUBLIC EXECUTE revoked) still are. */
+  rpc?: RpcBuildConfig;
 };
 
 export type BuildIssue = {
@@ -348,7 +353,7 @@ function buildConcept(view: RawView): ConceptContext {
 }
 
 export async function buildSchemaContext(opts: BuildOptions): Promise<SchemaContext> {
-  const { raw, uiHints, strict = false } = opts;
+  const { raw, uiHints, strict = false, rpc } = opts;
   const issues: BuildIssue[] = [];
 
   const knownTables = new Set(raw.tables.map((t) => `${t.schema}.${t.name}`));
@@ -436,6 +441,15 @@ export async function buildSchemaContext(opts: BuildOptions): Promise<SchemaCont
 
   const concepts = visibleRawViews.map<ConceptContext>(buildConcept);
 
+  // RPC functions (issue #103): decide which tagged functions are exposed and
+  // shape them; skipped-but-tagged functions append loud-skip issues below.
+  const functions = buildFunctionContexts({
+    functions: raw.functions,
+    enums: raw.enums,
+    rpc,
+    issues,
+  });
+
   if (issues.length > 0) {
     if (strict) {
       throw new KozouBuildError(
@@ -458,5 +472,6 @@ export async function buildSchemaContext(opts: BuildOptions): Promise<SchemaCont
     views,
     enums,
     concepts,
+    functions,
   };
 }

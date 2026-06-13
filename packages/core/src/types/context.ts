@@ -4,7 +4,7 @@
 // input contract for @kozou/mcp and @kozou/svelte-ui. Per Kozou v0.1 spec
 // §0, the code is the source of truth.
 
-import type { RawTable, RawView } from './raw.js';
+import type { RawFunction, RawTable, RawView } from './raw.js';
 
 /** Output of core.buildSchemaContext; input to MCP / UI. */
 export type SchemaContext = {
@@ -18,6 +18,13 @@ export type SchemaContext = {
   enums: EnumContext[];
   /** Domain concepts derived from views (in v0.1, every view is a concept) */
   concepts: ConceptContext[];
+  /** Functions exposed as RPC actions (RPC design, issue #103). Contains only
+   *  the functions that pass the exposure decision (§3); functions tagged for
+   *  exposure that fail a guard are reported as build issues (loud skip, §4.4),
+   *  not listed here. Optional for back-compat: `buildSchemaContext` always
+   *  populates it (possibly empty), but a context built before this field
+   *  existed omits it, so readers normalize with `functions ?? []`. */
+  functions?: FunctionContext[];
 };
 
 export type TableContext = {
@@ -143,6 +150,66 @@ export type EnumContext = {
   name: string;
   values: string[];
   description: string | null;
+};
+
+/** One input argument of an exposed RPC function, shaped for the surfaces
+ *  (RPC design §4.2 / §5.4). Only input args (`in` / `inout` / `variadic`)
+ *  reach here; the builder excludes OUT / TABLE columns. */
+export type FunctionArgContext = {
+  name: string;
+  /** `format_type` rendering of the argument's SQL type. */
+  typeName: string;
+  /** Whether the argument has a DEFAULT, so the RPC body may omit it. */
+  hasDefault: boolean;
+  /** ENUM members when the argument's type is a PostgreSQL ENUM (drives
+   *  enum-select in the Admin UI action form). */
+  enumValues?: string[];
+  /** Relation target resolved from an `@arg: <name> relation(<ref>)` hint
+   *  (RPC design §5.4), for a relation-select argument widget. */
+  relation?: { schema: string; table: string; column: string };
+  /** Widget for the Admin UI action form: relation-select (relation hint),
+   *  enum-select (enum type), else a type-based scalar widget. */
+  widget: WidgetType;
+};
+
+/** Return shape of an exposed RPC function, mapped to the v1 wire (§4.3). */
+export type FunctionReturnContext = {
+  kind: 'scalar' | 'composite' | 'setof' | 'void';
+  typeName: string;
+  /** Columns of a composite / SETOF return, when resolvable. */
+  columns?: { name: string; typeName: string }[];
+};
+
+/** A function compiled into the RPC surface (RPC design, issue #103). Only
+ *  functions that pass the exposure decision (§3) become a FunctionContext;
+ *  skipped-but-tagged functions are reported as build issues instead (§4.4).
+ *  The canonical external identity is the schema-qualified `qualifiedName`
+ *  (§5.0); REST path / OpenAPI operationId / MCP tool name all derive from it. */
+export type FunctionContext = {
+  schema: string;
+  name: string;
+  /** "schema.name" — the canonical external identity (RPC design §5.0). */
+  qualifiedName: string;
+  /** Order: first line of COMMENT > name. */
+  label: string;
+  /** Full COMMENT body (plain text; `@ai:` / `@policy:` lines retained inline). */
+  description: string | null;
+  /** `@ai:` lines from the COMMENT. */
+  aiDescription: string | null;
+  /** `@policy:` advisory lines from the COMMENT (never enforced by kozou; see
+   *  TableContext.policy). */
+  policy?: string[];
+  /** Input arguments, in declaration order. */
+  args: FunctionArgContext[];
+  returns: FunctionReturnContext;
+  volatility: 'immutable' | 'stable' | 'volatile';
+  security: 'invoker' | 'definer';
+  /** Whether this function is intentionally public-callable: PUBLIC keeps
+   *  EXECUTE by deliberate override (`@expose: rpc public` / `allowPublicExecute`,
+   *  §6.1). Default false: the function is callable only by roles with EXECUTE. */
+  publicCallable: boolean;
+  /** Raw record kept for downstream consumers. */
+  rawFunction: RawFunction;
 };
 
 /** v0.1: ConceptContext is a thin wrapper around ViewContext. See end of Kozou v0.1 spec §4.2. */
