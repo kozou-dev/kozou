@@ -8,12 +8,28 @@ describe('parseCommentTags', () => {
 
   it('null comment -> default fields', () => {
     const r = parseCommentTags(null);
-    expect(r).toEqual({ body: '', ai: [], widget: null, policy: [], examples: [] });
+    expect(r).toEqual({
+      body: '',
+      ai: [],
+      widget: null,
+      policy: [],
+      examples: [],
+      expose: 'none',
+      args: [],
+    });
   });
 
   it('empty string -> default fields', () => {
     const r = parseCommentTags('');
-    expect(r).toEqual({ body: '', ai: [], widget: null, policy: [], examples: [] });
+    expect(r).toEqual({
+      body: '',
+      ai: [],
+      widget: null,
+      policy: [],
+      examples: [],
+      expose: 'none',
+      args: [],
+    });
   });
 
   it('plain text with no tags -> body retains the text, tag fields empty', () => {
@@ -325,6 +341,105 @@ describe('parseCommentTags', () => {
       const r2 = parseCommentTags(identifiers);
       expect(r2.body).toBe(identifiers);
       expect(warn).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('@expose (RPC exposure marker, issue #103)', () => {
+    it('absent -> expose: none', () => {
+      expect(parseCommentTags('Approve an order.').expose).toBe('none');
+    });
+
+    it('@expose: rpc -> rpc', () => {
+      const r = parseCommentTags('Approve an order.\n@expose: rpc');
+      expect(r.expose).toBe('rpc');
+      // The directive is lifted out of body (like @widget), not retained.
+      expect(r.body).toBe('Approve an order.');
+    });
+
+    it('@expose: rpc public -> rpc-public', () => {
+      expect(parseCommentTags('@expose: rpc public').expose).toBe('rpc-public');
+    });
+
+    it('is case-insensitive and whitespace-tolerant', () => {
+      expect(parseCommentTags('@expose: RPC').expose).toBe('rpc');
+      expect(parseCommentTags('@expose:  rpc   public  ').expose).toBe('rpc-public');
+    });
+
+    it('last @expose wins', () => {
+      expect(parseCommentTags('@expose: rpc\n@expose: rpc public').expose).toBe('rpc-public');
+    });
+
+    it('invalid value warns and stays none', () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const r = parseCommentTags('@expose: graphql');
+      expect(r.expose).toBe('none');
+      expect(warn).toHaveBeenCalledOnce();
+      expect(warn.mock.calls[0]![0]).toMatch(/invalid @expose value "graphql"/);
+    });
+
+    it('fails closed: a later invalid value resets an earlier valid exposure', () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      // A malformed change must not leave the prior allow active.
+      expect(parseCommentTags('@expose: rpc\n@expose: disabled').expose).toBe('none');
+      expect(warn).toHaveBeenCalled();
+    });
+  });
+
+  describe('@arg (function argument hints, issue #103)', () => {
+    it('absent -> args: []', () => {
+      expect(parseCommentTags('Approve an order.').args).toEqual([]);
+    });
+
+    it('relation(table.col) -> schema null (defaulted by the builder)', () => {
+      const r = parseCommentTags('@arg: order_id relation(orders.id)');
+      expect(r.args).toEqual([
+        { name: 'order_id', relation: { schema: null, table: 'orders', column: 'id' } },
+      ]);
+    });
+
+    it('relation(schema.table.col) -> fully qualified', () => {
+      const r = parseCommentTags('@arg: order_id relation(public.orders.id)');
+      expect(r.args).toEqual([
+        { name: 'order_id', relation: { schema: 'public', table: 'orders', column: 'id' } },
+      ]);
+    });
+
+    it('widget(<type>) -> widget hint', () => {
+      const r = parseCommentTags('@arg: note widget(textarea)');
+      expect(r.args).toEqual([{ name: 'note', widget: 'textarea' }]);
+    });
+
+    it('collects multiple @arg hints in source order, lifted out of body', () => {
+      const r = parseCommentTags(
+        'Approve.\n@arg: order_id relation(orders.id)\n@arg: status widget(enum-select)',
+      );
+      expect(r.args.map((a) => a.name)).toEqual(['order_id', 'status']);
+      expect(r.body).toBe('Approve.');
+    });
+
+    it('warns and skips a malformed relation ref (wrong part count)', () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const r = parseCommentTags('@arg: x relation(a.b.c.d)');
+      expect(r.args).toEqual([]);
+      expect(warn.mock.calls[0]![0]).toMatch(/invalid @arg value/);
+    });
+
+    it('warns and skips an unknown widget', () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      expect(parseCommentTags('@arg: x widget(bogus)').args).toEqual([]);
+      expect(warn).toHaveBeenCalledOnce();
+    });
+
+    it('warns and skips an unknown directive', () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      expect(parseCommentTags('@arg: x default(1)').args).toEqual([]);
+      expect(warn).toHaveBeenCalledOnce();
+    });
+
+    it('warns and skips a bare name with no directive', () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      expect(parseCommentTags('@arg: order_id').args).toEqual([]);
+      expect(warn).toHaveBeenCalledOnce();
     });
   });
 });

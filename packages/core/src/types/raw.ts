@@ -132,10 +132,83 @@ export type RawEnum = {
   values: string[];
 };
 
+/** One declared argument of a function, as introspected from pg_proc. Covers
+ *  all modes; the function-context builder keeps only the input ones (`in` /
+ *  `inout` / `variadic`) when shaping the RPC surface, and treats `variadic` /
+ *  unnamed args as a loud skip per the RPC design §4.4. */
+export type RawFunctionArg = {
+  /** Argument name, or '' for an unnamed positional argument. */
+  name: string;
+  /** `format_type` rendering, e.g. "uuid", "integer", "public.order_status". */
+  typeName: string;
+  /** `pg_type.typname` of the argument's type, e.g. "uuid", "order_status".
+   *  Used for widget inference (mirrors RawColumn.udtName). */
+  udtName: string;
+  /** `pg_type.oid` of the argument's type. */
+  typeOid: number;
+  /** Argument mode. `table` is an OUT column of a `RETURNS TABLE(...)` function. */
+  mode: 'in' | 'out' | 'inout' | 'variadic' | 'table';
+  /** Whether the argument has a DEFAULT (so the RPC body may omit it). */
+  hasDefault: boolean;
+};
+
+/** Classification of a function's return type for the RPC wire shape (RPC
+ *  design §4.3). `unsupported` covers OUT/INOUT composite, record, polymorphic,
+ *  and anything else v1 does not map — a loud skip when the function is tagged
+ *  for exposure (§4.4). */
+export type RawFunctionReturn = {
+  kind: 'scalar' | 'composite' | 'setof' | 'void' | 'unsupported';
+  /** `format_type` rendering of the return type, e.g. "integer", "SETOF orders". */
+  typeName: string;
+  /** True for `SETOF` / `RETURNS TABLE(...)` (the array wire shape). */
+  returnsSet: boolean;
+  /** Columns of a composite / TABLE(...) return, when resolvable. */
+  columns?: { name: string; typeName: string; typeOid: number }[];
+};
+
+/** One element of a `security definer` function's declared `SET search_path`,
+ *  used by the owner-relative safe-search_path predicate (RPC design §3.2). */
+export type RawFunctionSearchPathElement = {
+  /** Raw element text from proconfig, e.g. "public", "pg_catalog", "$user". */
+  raw: string;
+  /** Resolved schema name, or null for a dynamic / unresolvable element
+   *  (`$user`, a non-existent schema) — treated as unsafe (fail-closed). */
+  schema: string | null;
+  /** Whether PUBLIC, or any role other than the function owner, may CREATE in
+   *  this schema (the hijack surface). `null` = could not be determined, which
+   *  the predicate treats as unsafe (fail-closed, §3.2). Not evaluated for the
+   *  `pg_temp` element (`isTemp: true`), whose hazard is presence/position. */
+  writableByOthers: boolean | null;
+  /** True for the `pg_temp` element (the session temp schema). */
+  isTemp: boolean;
+};
+
+/** A function pulled from pg_proc. Populated by @kozou/introspect for the RPC
+ *  surface (RPC design §4). All fields beyond schema/name/comment are used by
+ *  the exposure decision and the wire mapping; see RawFunctionArg / return /
+ *  search-path types above. */
 export type RawFunction = {
   schema: string;
   name: string;
-  returnType: string;
-  arguments: { name: string; type: string }[];
+  /** Human-readable signature from `pg_get_function_arguments`, e.g.
+   *  "order_id uuid, qty integer DEFAULT 1". Kept for diagnostics / docs. */
+  argumentSignature: string;
+  arguments: RawFunctionArg[];
+  returns: RawFunctionReturn;
+  volatility: 'immutable' | 'stable' | 'volatile';
+  /** `prosecdef`: a `security definer` function runs as its owner and needs the
+   *  double opt-in + safe search_path of RPC design §3.2. */
+  security: 'invoker' | 'definer';
+  /** `proowner`: the role the function runs as under `security definer`, and
+   *  the "only role allowed to CREATE" anchor of the safe-search_path predicate
+   *  (§3.2 / §4.2). */
+  owner: { oid: number; name: string };
+  /** Whether PUBLIC holds EXECUTE on this function — the default-grant footgun
+   *  (`CREATE FUNCTION` grants EXECUTE to PUBLIC by default). RPC design §6.1
+   *  hard-skips a tagged function that still has this unless overridden. */
+  publicExecute: boolean;
+  /** Parsed `proconfig` `search_path` elements; null = none declared. Drives the
+   *  safe-search_path predicate for `security definer` functions (§3.2). */
+  searchPath: RawFunctionSearchPathElement[] | null;
   comment: string | null;
 };

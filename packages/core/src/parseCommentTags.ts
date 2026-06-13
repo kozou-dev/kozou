@@ -2,6 +2,13 @@
 // `@policy:`, `@example:`). See Kozou v0.1 design spec §10.1 for the
 // tag vocabulary and §7.3.6 for the `exampleQueries` MCP surface.
 //
+// Two single-line tags were added for the RPC surface (issue #103, RPC
+// design §3 / §5.4): `@expose:` marks a function for RPC exposure
+// (`@expose: rpc`, or `@expose: rpc public` to keep PUBLIC callable),
+// and `@arg: <name> relation(<ref>)` / `@arg: <name> widget(<type>)`
+// hints a function argument toward a relation-select / specific widget
+// in the Admin UI action form.
+//
 // Tags are recognized at line start only (after optional leading
 // whitespace). A known tag written mid-line is NOT parsed — the text
 // stays in `body` verbatim — and emits a warning so the leak into
@@ -37,7 +44,7 @@ const KNOWN_WIDGETS: ReadonlySet<WidgetType> = new Set<WidgetType>([
   'currency',
 ]);
 
-const KNOWN_TAGS = new Set(['ai', 'widget', 'policy', 'example']);
+const KNOWN_TAGS = new Set(['ai', 'widget', 'policy', 'example', 'expose', 'arg']);
 // Note: no `\s*` after the `:` — the captured value is `.trim()`ed in
 // code, and a `\s*` directly before `(.*)` makes this a polynomial-ReDoS
 // shape (both match spaces) that CodeQL flags. Leading/intra whitespace
@@ -112,12 +119,31 @@ export type ExampleQuery = {
   sql: string;
 };
 
+/** RPC exposure marker from `@expose:` (RPC design §3 / §6.1). `none` = the
+ *  function is not exposed (the default); `rpc` = exposed; `rpc-public` =
+ *  exposed and intentionally public-callable (PUBLIC EXECUTE override, §6.1). */
+export type ExposeKind = 'none' | 'rpc' | 'rpc-public';
+
+/** Per-argument hint from `@arg: <name> ...` on a function COMMENT (RPC design
+ *  §5.4). `relation` targets a relation-select; `widget` forces a widget. The
+ *  relation `schema` is null when the ref was 2-part (`table.col`); the
+ *  function-context builder defaults it to the function's schema. */
+export type ArgHint = {
+  name: string;
+  relation?: { schema: string | null; table: string; column: string };
+  widget?: WidgetType;
+};
+
 export type ParsedComment = {
   body: string;
   ai: string[];
   widget: WidgetType | null;
   policy: string[];
   examples: ExampleQuery[];
+  /** RPC exposure marker (`@expose:`); `none` when the tag is absent. */
+  expose: ExposeKind;
+  /** `@arg:` hints, in source order (RPC design §5.4). */
+  args: ArgHint[];
 };
 
 function isWidgetType(value: string): value is WidgetType {
@@ -131,6 +157,52 @@ type Pending =
   // multi-line note is captured whole, not just its first line.
   | { kind: 'ai' | 'policy'; lines: string[] };
 
+/** Index of the first whitespace character, or -1. Manual scan (no regex) to
+ *  stay off CodeQL's polynomial-ReDoS radar, like the rest of this module. */
+function firstWhitespaceIndex(s: string): number {
+  for (let i = 0; i < s.length; i += 1) {
+    if (LINE_WS_RE.test(s[i]!)) return i;
+  }
+  return -1;
+}
+
+/** Extract `<inner>` from a `<name>(<inner>)` directive token (trimmed), or
+ *  null when the token is not exactly that shape. Manual scan, no regex. */
+function parenDirective(directive: string, name: string): string | null {
+  const prefix = `${name}(`;
+  if (!directive.startsWith(prefix) || !directive.endsWith(')')) return null;
+  return directive.slice(prefix.length, -1).trim();
+}
+
+/** Parse an `@arg:` value — "<argname> relation(<ref>)" or
+ *  "<argname> widget(<type>)". Returns null on any malformed shape so the
+ *  caller can warn (no silent drop). `<ref>` is `table.col` (schema defaulted
+ *  later) or `schema.table.col`. */
+function parseArgHint(value: string): ArgHint | null {
+  const ws = firstWhitespaceIndex(value);
+  if (ws === -1) return null; // bare name, no directive
+  const name = value.slice(0, ws);
+  const directive = value.slice(ws + 1).trim();
+  if (name === '' || directive === '') return null;
+
+  const rel = parenDirective(directive, 'relation');
+  if (rel !== null) {
+    const parts = rel.split('.').map((p) => p.trim());
+    if (parts.length === 2 && parts.every((p) => p !== '')) {
+      return { name, relation: { schema: null, table: parts[0]!, column: parts[1]! } };
+    }
+    if (parts.length === 3 && parts.every((p) => p !== '')) {
+      return { name, relation: { schema: parts[0]!, table: parts[1]!, column: parts[2]! } };
+    }
+    return null;
+  }
+  const wid = parenDirective(directive, 'widget');
+  if (wid !== null) {
+    return isWidgetType(wid) ? { name, widget: wid } : null;
+  }
+  return null;
+}
+
 export function parseCommentTags(comment: string | null): ParsedComment {
   const result: ParsedComment = {
     body: '',
@@ -138,6 +210,8 @@ export function parseCommentTags(comment: string | null): ParsedComment {
     widget: null,
     policy: [],
     examples: [],
+    expose: 'none',
+    args: [],
   };
   if (comment === null || comment === '') return result;
 
@@ -231,6 +305,40 @@ export function parseCommentTags(comment: string | null): ParsedComment {
       // pushing indented lines into `sqlLines` until the next non-
       // indented line, the next tag, or the end of the comment.
       pending = { kind: 'example', description: value, sqlLines: [] };
+      continue;
+    }
+    if (tag === 'expose') {
+      // Single-line directive, lifted out of `body` like `@widget`. Accept
+      // `rpc` (exposed) and `rpc public` (exposed + public-callable, §6.1);
+      // a later `@expose:` line wins (last-write). Whitespace-normalized so
+      // "rpc  public" still parses.
+      const tokens = value.toLowerCase().split(/\s+/).filter((t) => t !== '');
+      if (tokens.length === 1 && tokens[0] === 'rpc') {
+        result.expose = 'rpc';
+      } else if (tokens.length === 2 && tokens[0] === 'rpc' && tokens[1] === 'public') {
+        result.expose = 'rpc-public';
+      } else {
+        // Fail closed: an invalid value resets exposure to none so a malformed
+        // later line (`@expose: rpc` then `@expose: disabled`) cannot leave an
+        // earlier allow active — exposure is a security gate.
+        result.expose = 'none';
+        console.warn(
+          `[@kozou/core] parseCommentTags: invalid @expose value "${value}" ` +
+            '(expected "rpc" or "rpc public"; not exposed)',
+        );
+      }
+      continue;
+    }
+    if (tag === 'arg') {
+      const hint = parseArgHint(value);
+      if (hint !== null) {
+        result.args.push(hint);
+      } else {
+        console.warn(
+          `[@kozou/core] parseCommentTags: invalid @arg value "${value}" ` +
+            '(expected "<name> relation(<table.col>)" or "<name> widget(<type>)"; skip)',
+        );
+      }
       continue;
     }
     if (!KNOWN_TAGS.has(tag)) {
