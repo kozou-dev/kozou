@@ -56,6 +56,13 @@ export type TableContext = {
 export type ColumnContext = {
   name: string;
   dataType: string;
+  /** `dataType` with one level of DOMAIN resolved to its base type + typmod
+   *  (e.g. a domain over numeric(12,2) -> "numeric(12,2)"); equals `dataType`
+   *  for non-domain columns. Used by `@kozou/api` value pre-flight so a
+   *  domain-typed column is validated against its base type rather than the
+   *  opaque domain name (issue #85). Optional for back-compat: normalize with
+   *  `effectiveType ?? dataType`. */
+  effectiveType?: string;
   nullable: boolean;
   defaultExpr: string | null;
   isPrimaryKey: boolean;

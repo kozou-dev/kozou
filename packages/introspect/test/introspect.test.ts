@@ -182,6 +182,67 @@ describe('introspect (generic English fixture)', () => {
   });
 });
 
+describe('introspect domain column resolution (#85)', () => {
+  let db: DatabaseHandle;
+
+  beforeAll(async () => {
+    db = await setupDatabase();
+    const client = new pkg.Client({ connectionString: db.connectionString });
+    await client.connect();
+    try {
+      const s = db.schema;
+      await client.query(`CREATE SCHEMA "${s}"`);
+      await client.query(`SET search_path TO "${s}"`);
+      await client.query(`
+        CREATE DOMAIN usd AS numeric(12,2);
+        CREATE DOMAIN positive_id AS integer;
+        CREATE DOMAIN label_text AS text;
+        CREATE TABLE invoices (
+          id positive_id PRIMARY KEY,
+          amount usd NOT NULL,
+          label label_text,
+          plain_total numeric(8,2)
+        );
+        CREATE VIEW vw_invoices AS SELECT id, amount, label FROM invoices;
+      `);
+    } finally {
+      await client.end();
+    }
+  }, 120_000);
+
+  afterAll(async () => {
+    if (db) await db.cleanup();
+  });
+
+  it('resolves a DOMAIN column to its base type + typmod on effectiveType (table)', async () => {
+    const r = await introspect({ connection: db.connectionString, schemas: [db.schema] });
+    const inv = r.tables.find((t) => t.name === 'invoices');
+    expect(inv).toBeDefined();
+    const byName = new Map(inv!.columns.map((c) => [c.name, c]));
+    // dataType keeps the opaque domain name (schema-qualified by format_type
+    // because the domain is not in the connection's search_path); effectiveType
+    // carries the resolved base type WITH the domain's typmod (numeric(12,2),
+    // not bare numeric — the detail a half-fix would lose). The base type is a
+    // pg_catalog built-in, so it is not schema-qualified.
+    expect(byName.get('amount')!.dataType).toBe(`${db.schema}.usd`);
+    expect(byName.get('amount')!.effectiveType).toBe('numeric(12,2)');
+    expect(byName.get('id')!.effectiveType).toBe('integer');
+    expect(byName.get('label')!.effectiveType).toBe('text');
+    // A non-domain column's effectiveType equals its dataType (CASE ELSE branch).
+    expect(byName.get('plain_total')!.dataType).toBe('numeric(8,2)');
+    expect(byName.get('plain_total')!.effectiveType).toBe('numeric(8,2)');
+  });
+
+  it('resolves a DOMAIN column on a VIEW too (views.ts parity with tables.ts)', async () => {
+    const r = await introspect({ connection: db.connectionString, schemas: [db.schema] });
+    const v = r.views.find((vw) => vw.name === 'vw_invoices');
+    expect(v).toBeDefined();
+    const amount = v!.columns.find((c) => c.name === 'amount');
+    expect(amount).toBeDefined();
+    expect(amount!.effectiveType).toBe('numeric(12,2)');
+  });
+});
+
 describe('introspect privilege-aware (#99)', () => {
   let db: DatabaseHandle;
   const role = 'priv_test_role';
