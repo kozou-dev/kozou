@@ -117,6 +117,54 @@ relation-select mode is documented on the collection path with its alternate
 response shape, and the advertised embed hints match what the server
 resolves at request time.
 
+### RPC actions
+
+Beyond the table/view CRUD surface, `@kozou/api` can compile **opt-in** Postgres
+functions into callable actions — `POST /rpc/<schema>.<fn>` with a JSON body of
+named arguments. This is how the security model Kozou recommends (JWT →
+`SET LOCAL ROLE` → RLS + column GRANTs, with state changes funnelled through
+functions) stays reachable: the verb is exposed, the database still enforces who
+may run it.
+
+Nothing is exposed by default. A function is compiled only when its COMMENT
+carries the `@expose: rpc` tag:
+
+```sql
+COMMENT ON FUNCTION approve_order(order_id uuid) IS
+  'Approve an order and reserve stock.
+   @ai: not idempotent — check status before re-calling.
+   @expose: rpc';
+```
+
+Exposure ≠ permission. Whether a caller may actually run it is enforced by the
+PostgreSQL `EXECUTE` privilege under the request's role; a denial is `42501` →
+**403**. Guardrails (loud build issues when a tagged function is skipped, never a
+silent gap):
+
+- **PUBLIC EXECUTE is a hard skip.** `CREATE FUNCTION` grants `EXECUTE` to
+  PUBLIC by default, which would let anyone (incl. an anon role) call the
+  endpoint. Such a function is not exposed unless intentionally opened — `REVOKE
+  EXECUTE … FROM PUBLIC` and GRANT to the intended role, or declare it public
+  with `@expose: rpc public` / `api.rpc.allowPublicExecute`.
+- **`SECURITY DEFINER` needs a double opt-in.** It runs as its owner and can
+  bypass RLS, so it is exposed only when listed in `api.rpc.allowDefiner` **and**
+  it declares an owner-safe `SET search_path` (owner-only schemas plus a trailing
+  `pg_temp`).
+- **Overloads / unsupported shapes** (VARIADIC / polymorphic / unnamed args,
+  unmappable returns, an overloaded `schema.name`) are loudly skipped.
+
+Arguments are named (scalar / enum / FK-typed); a `DEFAULT` argument may be
+omitted. The return maps to the wire as: scalar → the value, single composite →
+an object, `SETOF` / `RETURNS TABLE` → an array, `void` → `204`. Values are
+always bound parameters; argument names are validated against the function's
+signature.
+
+The same exposed set is compiled to every surface: the OpenAPI document gains a
+`POST /rpc/<schema>.<fn>` operation (`operationId: rpc.<schema>.<fn>`, with the
+`@ai` / `@policy` advisory as `x-kozou-*`), the MCP server gains a
+`describe_functions` tool, and the Admin UI gains an "Actions" page. See the
+`kozou` package config for `api.rpc.allowDefiner` / `allowPublicExecute`.
+
 ### Errors
 
 Every non-2xx response carries the same envelope:
@@ -182,7 +230,11 @@ change without a major release):
 
 Still evolving (not yet covered by the stability guarantee):
 
-- the **`@kozou/codegen`** output (a separate package, still experimental).
+- the **`@kozou/codegen`** output (a separate package, still experimental);
+- the **RPC actions** surface (`@expose: rpc`, `POST /rpc/<schema>.<fn>`, the
+  `x-kozou-*` function metadata) — the exposure rules are settled, but the wire
+  shape may change without a major release until it is stabilized after
+  dogfooding.
 
 ## Scope: default coverage vs PostgREST opt-out
 
@@ -204,7 +256,7 @@ deliberate opt-out.
 | Sort / pagination | ✅ | `sort`, `page` / `pageSize` |
 | COMMENT-native OpenAPI 3.1 (`x-kozou-*`) | ✅ | **Kozou's differentiator** — PostgREST treats COMMENTs as opaque text |
 | JWT + RLS (`SET LOCAL ROLE`) | ✅ | |
-| RPC (Postgres functions) | ❌ opt-out | |
+| RPC (Postgres functions) | ✅ opt-in (`@expose: rpc`) | see [RPC actions](#rpc-actions); compiled to REST + OpenAPI + MCP + Admin UI. Wire is experimental |
 | Full-text search (fts) | ❌ opt-out | approximate with `ilike` |
 | Vertical select (column projection) | ❌ opt-out | always returns all columns |
 | Writable views (`INSTEAD OF`) | ❌ opt-out | views are read-only |
