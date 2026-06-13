@@ -17,8 +17,9 @@ async function runDoubleIt(page: import('@playwright/test').Page, n: string, exp
   await page.locator(`a[href="/actions/${FN}"]`).click();
   await page.waitForURL(`**/actions/${FN}`);
 
-  // The COMMENT @ai advisory rides along for the operator.
-  await expect(page.getByText('pure; safe to call repeatedly.')).toBeVisible();
+  // The COMMENT @ai advisory rides along for the operator (its own box; the
+  // phrase also appears inline in the description, so target the box heading).
+  await expect(page.getByText('AI notes', { exact: true })).toBeVisible();
 
   await page.getByRole('spinbutton', { name: 'N' }).fill(n);
   await page.getByRole('button', { name: 'Run action' }).click();
