@@ -1,6 +1,6 @@
 {
   "name": "@kozou/svelte-ui",
-  "version": "1.4.0",
+  "version": "1.4.1",
   "description": "Kozou reference Admin UI. SvelteKit + Svelte 5 admin UI that consumes SchemaContext via @kozou/core and talks to a backend via the DataAdapter interface.",
   "license": "Apache-2.0",
   "repository": {
