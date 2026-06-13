@@ -33,6 +33,20 @@ const FUNCTIONS_FIXTURE_SQL = `
   CREATE FUNCTION manyrecords(n integer) RETURNS SETOF record
     LANGUAGE sql AS $$ SELECT i, i FROM generate_series(1, n) i $$;
 
+  -- single-column RETURNS TABLE -> array of objects (named column kept),
+  -- though pg collapses it to the scalar element type internally
+  CREATE FUNCTION one_col(n integer) RETURNS TABLE(only_id uuid)
+    LANGUAGE sql AS $$ SELECT gen_random_uuid() $$;
+
+  -- DOMAIN over a scalar -> scalar return
+  CREATE DOMAIN positive AS integer CHECK (VALUE > 0);
+  CREATE FUNCTION scaled() RETURNS positive LANGUAGE sql AS $$ SELECT 1::positive $$;
+
+  -- DOMAIN over a composite -> composite return (resolved through the base type)
+  CREATE TYPE point2d AS (x integer, y integer);
+  CREATE DOMAIN pt_domain AS point2d;
+  CREATE FUNCTION origin() RETURNS pt_domain LANGUAGE sql AS $$ SELECT ROW(0, 0)::pt_domain $$;
+
   -- definer with an owner-safe search_path (pg_catalog + trailing pg_temp)
   CREATE FUNCTION settle_safe(invoice_id uuid) RETURNS void
     LANGUAGE sql SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$ SELECT $$;
@@ -109,7 +123,10 @@ describe('introspect functions (RPC, issue #103)', () => {
       'ids',
       'manyrecords',
       'noargs',
+      'one_col',
+      'origin',
       'recent',
+      'scaled',
       'settle_dynamic',
       'settle_no_path',
       'settle_public',
@@ -159,6 +176,21 @@ describe('introspect functions (RPC, issue #103)', () => {
     // SETOF record with no resolvable columns is unmappable -> unsupported,
     // so core does not expose a function with an unknown row shape.
     expect(byName('manyrecords').returns.kind).toBe('unsupported');
+
+    // A single-column RETURNS TABLE keeps its named column (array of objects),
+    // even though pg stores it as the scalar element type.
+    const oneCol = byName('one_col').returns;
+    expect(oneCol.kind).toBe('setof');
+    expect(oneCol.columns?.map((c) => c.name)).toEqual(['only_id']);
+  });
+
+  it('resolves DOMAIN returns through their base type', () => {
+    // Domain over a scalar -> scalar.
+    expect(byName('scaled').returns.kind).toBe('scalar');
+    // Domain over a composite -> composite, columns resolved from the base type.
+    const origin = byName('origin').returns;
+    expect(origin.kind).toBe('composite');
+    expect(origin.columns?.map((c) => c.name)).toEqual(['x', 'y']);
   });
 
   it('marks variadic and polymorphic shapes (for the core loud-skip)', () => {

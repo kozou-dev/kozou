@@ -83,7 +83,11 @@ const FUNCTIONS_SQL = `
     (p.prorettype = 'pg_catalog.void'::regtype) AS returns_void,
     p.proretset AS returns_set,
     format_type(p.prorettype, NULL) AS return_type,
-    rt.typtype AS return_typtype,
+    -- Resolve one level of DOMAIN to its base type so a domain over a composite
+    -- is not mistaken for a scalar (and a domain over a scalar stays scalar). A
+    -- still-domain result (domain over domain) is left as 'd' and treated as
+    -- unsupported downstream (fail-closed for that exotic nesting).
+    eff.eff_typtype AS return_typtype,
     (
       SELECT json_agg(json_build_object(
         'name', COALESCE(an.argname, ''),
@@ -100,14 +104,14 @@ const FUNCTIONS_SQL = `
       JOIN pg_type t ON t.oid = at.typeoid
     ) AS args,
     CASE
-      WHEN rt.typrelid <> 0 THEN (
+      WHEN eff.eff_typrelid <> 0 THEN (
         SELECT json_agg(json_build_object(
           'name', a.attname,
           'typeName', format_type(a.atttypid, a.atttypmod),
           'typeOid', a.atttypid::int
         ) ORDER BY a.attnum)
         FROM pg_attribute a
-        WHERE a.attrelid = rt.typrelid AND a.attnum > 0 AND NOT a.attisdropped
+        WHERE a.attrelid = eff.eff_typrelid AND a.attnum > 0 AND NOT a.attisdropped
       )
       ELSE (
         SELECT json_agg(json_build_object(
@@ -127,6 +131,14 @@ const FUNCTIONS_SQL = `
   JOIN pg_namespace n ON n.oid = p.pronamespace
   JOIN pg_roles ro ON ro.oid = p.proowner
   JOIN pg_type rt ON rt.oid = p.prorettype
+  LEFT JOIN pg_type bt ON bt.oid = rt.typbasetype
+  CROSS JOIN LATERAL (
+    SELECT
+      CASE WHEN rt.typtype = 'd' AND bt.oid IS NOT NULL THEN bt.typtype ELSE rt.typtype END
+        AS eff_typtype,
+      CASE WHEN rt.typtype = 'd' AND bt.oid IS NOT NULL THEN bt.typrelid ELSE rt.typrelid END
+        AS eff_typrelid
+  ) eff
   WHERE p.prokind = 'f'
     AND n.nspname = ANY($1)
   ORDER BY n.nspname, p.proname`;
@@ -225,33 +237,43 @@ function classifyReturn(row: FunctionRow): RawFunctionReturn {
       ? row.return_columns.map((c) => ({ name: c.name, typeName: c.typeName, typeOid: c.typeOid }))
       : undefined;
 
-  // Base / enum / domain / range / multirange are scalar element types.
-  const isScalarType = ['b', 'e', 'd', 'r', 'm'].includes(row.return_typtype);
+  // Base / enum / range / multirange are scalar element types. Domains were
+  // resolved to their base typtype by the query, so a residual 'd' means a
+  // domain over a domain — left to fall through to unsupported.
+  const isScalarType = ['b', 'e', 'r', 'm'].includes(row.return_typtype);
 
   if (row.returns_void) {
     return { kind: 'void', typeName, returnsSet: false };
   }
   if (row.returns_set) {
-    // SETOF scalar -> array of scalars (no columns).
-    if (isScalarType) {
-      return { kind: 'setof', typeName, returnsSet: true };
-    }
-    // SETOF composite / RETURNS TABLE(...) -> array of objects; the row shape
-    // must be resolvable (composite attributes, or OUT/TABLE columns). A pseudo
-    // SETOF with no columns (RETURNS SETOF record / anyelement) is unmappable.
+    // Columns first: a 1-column RETURNS TABLE(c ...) collapses to the scalar
+    // element type in pg_proc (typtype 'b'), but still carries the named OUT
+    // column — it is an array of objects, not of bare scalars. Composite /
+    // multi-column TABLE sets also land here.
     if (columns) {
       return { kind: 'setof', typeName, returnsSet: true, columns };
     }
+    // SETOF scalar with no named column -> array of scalars.
+    if (isScalarType) {
+      return { kind: 'setof', typeName, returnsSet: true };
+    }
+    // A pseudo / composite SETOF with no resolvable columns (SETOF record /
+    // anyelement, or a domain over a composite) is unmappable.
     return { kind: 'unsupported', typeName, returnsSet: true };
   }
   if (row.return_typtype === 'c') {
-    return { kind: 'composite', typeName, returnsSet: false, ...(columns ? { columns } : {}) };
+    // A composite resolves its columns (a domain over a composite too — the
+    // query resolves the base relid). A 'c' with no columns would be an unusual
+    // unresolved case; fail closed rather than emit a shapeless object.
+    return columns
+      ? { kind: 'composite', typeName, returnsSet: false, columns }
+      : { kind: 'unsupported', typeName, returnsSet: false };
   }
   if (isScalarType) {
     return { kind: 'scalar', typeName, returnsSet: false };
   }
-  // Non-set pseudo types: record without column defs, anyelement, trigger,
-  // etc. — not mappable to a v1 wire shape (loud skip in @core).
+  // Non-set pseudo types (record without column defs, anyelement, trigger) and
+  // a domain over a domain — not mappable to a v1 wire shape (loud skip in @core).
   return { kind: 'unsupported', typeName, returnsSet: false };
 }
 
