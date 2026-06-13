@@ -119,8 +119,9 @@ jobs:
             dir: introspect
           - pkg: '@kozou/mcp'
             dir: mcp
-          - pkg: kozou
-            dir: kozou
+          # `kozou` (the scaffolding CLI) is intentionally NOT here — it is
+          # published by the separate `publish-cli` job, gated on the GHCR
+          # image it pins (#105).
           - pkg: '@kozou/svelte-ui'
             dir: svelte-ui
           - pkg: '@kozou/api'
@@ -286,9 +287,74 @@ jobs:
         run: |
           cosign sign --yes "ghcr.io/kozou-dev/kozou@${DIGEST}"
 
+  publish-cli:
+    name: Publish kozou CLI to npm (gated on the image it pins)
+    # The `kozou` scaffolding CLI generates a docker-compose.yml pinned to
+    # this release's GHCR image tag, so it must not publish until that image
+    # exists (#105). It is split out of the publish-npm matrix and gated on
+    # publish-docker; the other six packages stay in publish-npm and run in
+    # parallel with the image build, so the image hang/failure only blocks the
+    # one package that pins it. Because publish-cli `needs: publish-docker`, a
+    # failed or cancelled image leg leaves this job un-run (not run-and-failed),
+    # so the window where a fresh scaffold could pin a missing tag closes by
+    # construction. On `gh run rerun --failed` after an image recovery,
+    # publish-docker re-runs and then publish-cli publishes kozou (the
+    # idempotent guard skips it if it somehow already shipped). The steps
+    # mirror one publish-npm matrix leg; keep them in sync.
+    needs: [verify, publish-docker]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@0e279bb959325dab635dd2c09392533439d90093 # v6.0.8
+
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version-file: '.nvmrc'
+          # registry-url omitted on purpose (see publish-npm): with no token
+          # line, npm CLI falls through to OIDC trusted publishing.
+          cache: 'pnpm'
+
+      - name: Configure npm registry without a token line (so OIDC takes over)
+        run: |
+          echo "registry=https://registry.npmjs.org/" > ~/.npmrc
+          cat ~/.npmrc
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build (all workspace packages so workspace:* refs resolve)
+        run: pnpm -r run build
+
+      - name: pnpm pack + npm publish (provenance via OIDC)
+        working-directory: packages/kozou
+        run: |
+          # Same idempotent publish as publish-npm, hardcoded to the kozou
+          # CLI. Real publish is gated on a `vX.Y.Z` tag push;
+          # workflow_dispatch always takes the dry-run branch.
+          if [ "$GITHUB_EVENT_NAME" = "push" ]; then
+            PKG_VERSION="$(node -p "require('./package.json').version")"
+            if npm view "kozou@${PKG_VERSION}" version >/dev/null 2>&1; then
+              echo "kozou@${PKG_VERSION} is already on npm; skipping publish."
+            else
+              echo "Publishing kozou@${PKG_VERSION} to npm via npm CLI (pnpm pack handles the workspace:* rewrite)"
+              pnpm pack
+              TGZ=$(ls *.tgz | head -1)
+              echo "Packed tarball: $TGZ"
+              npm publish "$TGZ" --access public --provenance
+            fi
+          else
+            echo "Dry-run mode (event=$GITHUB_EVENT_NAME, dry_run=${{ inputs.dry_run }}): pnpm publish --dry-run for kozou"
+            pnpm publish --access public --provenance --no-git-checks --dry-run
+          fi
+
   github-release:
     name: Create GitHub Release with signed npm tarballs
-    needs: [publish-npm, publish-docker]
+    needs: [publish-npm, publish-cli, publish-docker]
     if: ${{ inputs.dry_run != true && github.event_name == 'push' }}
     runs-on: ubuntu-latest
     permissions:
@@ -361,7 +427,7 @@ jobs:
   # ==========================================================
   update-docs-site:
     name: Open kozou-site docs bump PR
-    needs: publish-npm
+    needs: [publish-npm, publish-cli]
     if: ${{ inputs.dry_run != true && github.event_name == 'push' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
