@@ -4,11 +4,13 @@
 
 import { z } from 'zod';
 
-import type { TableContext } from '@kozou/core';
+import type { ColumnContext } from '@kozou/core';
 
 import { zodFromColumn } from './zod-from-column.js';
 
-export function zodFromTable(table: TableContext) {
+// Accepts anything with `columns` (a TableContext, or the synthetic
+// column set the RPC action form builds from a function's arguments).
+export function zodFromTable(table: { columns: ColumnContext[] }) {
   // zod 4's ZodRawShape is read-only, so accumulate the per-column schemas
   // into a plain mutable record and let z.object infer the result type.
   const shape: Record<string, ReturnType<typeof zodFromColumn>> = {};

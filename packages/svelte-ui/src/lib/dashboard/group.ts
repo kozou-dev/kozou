@@ -5,7 +5,12 @@
 //
 // See Kozou v0.1 design spec §8.3.1 (Dashboard).
 
-import type { SchemaContext, TableContext, ViewContext } from '@kozou/core';
+import type {
+  FunctionContext,
+  SchemaContext,
+  TableContext,
+  ViewContext,
+} from '@kozou/core';
 
 export interface DashboardItem {
   /** Fully-qualified `<schema>.<name>` identifier used as the URL slug. */
@@ -19,6 +24,9 @@ export interface DashboardItem {
 export interface DashboardGroups {
   tables: DashboardItem[];
   views: DashboardItem[];
+  /** Exposed RPC functions (issue #103). Rendered as the "Actions" surface;
+   *  empty when none are exposed (or the schema predates the field). */
+  functions: DashboardItem[];
 }
 
 export function groupForDashboard(schema: SchemaContext): DashboardGroups {
@@ -29,6 +37,19 @@ export function groupForDashboard(schema: SchemaContext): DashboardGroups {
     views: schema.views
       .map(toDashboardItem)
       .sort((a, b) => a.label.localeCompare(b.label)),
+    functions: (schema.functions ?? [])
+      .map(toFunctionItem)
+      .sort((a, b) => a.label.localeCompare(b.label)),
+  };
+}
+
+function toFunctionItem(fn: FunctionContext): DashboardItem {
+  return {
+    qualifiedName: fn.qualifiedName,
+    // The COMMENT body keeps the @ai/@policy advisory inline; the dashboard
+    // shows only the first line as a one-liner.
+    label: fn.label,
+    description: fn.description ? (fn.description.split('\n')[0] ?? null) : null,
   };
 }
 

@@ -39,9 +39,29 @@ const cache = new SchemaCache({
         ? { privilegeRole }
         : {}),
     });
-    return buildSchemaContext({ raw });
+    // RPC exposure config (issue #103): `kozou dev` forwards the operator's
+    // api.rpc allowlists (comma-separated, schema-qualified) so the Admin UI
+    // "Actions" surface exposes the same functions the API serves — including
+    // the SECURITY DEFINER / public ones the operator opted in. Absent => only
+    // invoker functions with PUBLIC EXECUTE revoked are exposed.
+    return buildSchemaContext({
+      raw,
+      rpc: {
+        allowDefiner: parseList(process.env.KOZOU_RPC_ALLOW_DEFINER),
+        allowPublicExecute: parseList(process.env.KOZOU_RPC_ALLOW_PUBLIC_EXECUTE),
+      },
+    });
   },
 });
+
+/** Parse a comma-separated env list into trimmed, non-empty entries. */
+function parseList(raw: string | undefined): string[] {
+  if (raw === undefined || raw.length === 0) return [];
+  return raw
+    .split(',')
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+}
 
 const fkRowCache = new FkRowCache();
 

@@ -27,7 +27,7 @@
   {/if}
 </section>
 
-<section>
+<section class="mb-10">
   <h2 class="mb-3 text-lg font-semibold">Views</h2>
   {#if data.dashboard.views.length === 0}
     <p class="text-sm text-muted-foreground">No views in the current schema.</p>
@@ -49,3 +49,26 @@
     </ul>
   {/if}
 </section>
+
+<!-- Actions surface (issue #103): only shown when the backend serves /rpc/
+     and at least one function is exposed. -->
+{#if data.actionsEnabled && data.dashboard.functions.length > 0}
+  <section>
+    <h2 class="mb-3 text-lg font-semibold">Actions</h2>
+    <ul class="space-y-2">
+      {#each data.dashboard.functions as fn (fn.qualifiedName)}
+        <li>
+          <a
+            href={`/actions/${fn.qualifiedName}`}
+            class="block rounded-md border border-border p-3 transition hover:bg-muted"
+          >
+            <div class="font-medium">{fn.label}</div>
+            {#if fn.description}
+              <div class="text-sm text-muted-foreground">{fn.description}</div>
+            {/if}
+          </a>
+        </li>
+      {/each}
+    </ul>
+  </section>
+{/if}

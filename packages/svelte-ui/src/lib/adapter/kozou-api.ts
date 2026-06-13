@@ -147,6 +147,25 @@ export class KozouApiDataAdapter implements DataAdapter {
     return Array.isArray(body.options) ? body.options : [];
   }
 
+  async callFunction(
+    qualifiedName: string,
+    args: Record<string, unknown>,
+  ): Promise<unknown> {
+    // POST /rpc/<schema>.<fn> with the named-args body (issue #103). A 204
+    // (void return) yields null; otherwise the parsed JSON result (scalar /
+    // object / array) is returned verbatim.
+    const url = `${this.baseUrl}/rpc/${encodeURIComponent(qualifiedName)}`;
+    const headers = {
+      ...this.staticHeaders,
+      Accept: 'application/json',
+      'Content-Type': 'application/json',
+    };
+    const response = await this.send('POST', url, headers, JSON.stringify(args));
+    await assertOk(response, url);
+    if (response.status === 204) return null;
+    return readJson(response, url);
+  }
+
   // Item path: `/<resource>/<id>`. A composite key encodes each component
   // and joins them with an unescaped comma (Kozou v0.2/v1.0 wire format,
   // §3.2); the server decodes the segment, then splits on commas. A scalar
