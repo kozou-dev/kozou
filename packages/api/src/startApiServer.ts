@@ -21,6 +21,7 @@ import {
   type Queryable,
 } from './handler.js';
 import { buildResourceLookup } from './schema-lookup.js';
+import { buildFunctionLookup } from './rpc.js';
 import { buildOpenApiDocument } from './openapi.js';
 import { quoteIdent } from './ident.js';
 import { createAuthenticator, type AuthConfig, type Authenticator } from './auth.js';
@@ -244,6 +245,7 @@ export async function startApiServer(opts: StartApiServerOptions): Promise<ApiSe
   const base: ApiHandlerDeps = {
     db: opts.db,
     lookup: buildResourceLookup(opts.schema),
+    functions: buildFunctionLookup(opts.schema),
     version: opts.version,
     openapi: buildOpenApiDocument(opts.schema, { version: opts.version }),
     logPrefix: prefix,

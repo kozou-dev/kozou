@@ -65,6 +65,15 @@ export {
   type IsKeyword,
 } from './query-builder.js';
 
+export {
+  buildFunctionLookup,
+  buildRpcCall,
+  shapeRpcResult,
+  type FunctionLookup,
+  type BuiltRpcCall,
+  type RpcResult,
+} from './rpc.js';
+
 export { buildOpenApiDocument, type OpenApiOptions } from './openapi.js';
 
 export {

@@ -82,6 +82,42 @@ describe('@kozou/api integration (generic fixture)', () => {
         `CREATE TABLE float_samples (id integer PRIMARY KEY, approx real NOT NULL)`,
       );
       await client.query(`INSERT INTO float_samples (id, approx) VALUES (1, 1.5)`);
+
+      // RPC functions (issue #103). Each is tagged @expose: rpc and has its
+      // PUBLIC EXECUTE revoked (else the exposure decision hard-skips it, §6.1).
+      // The connecting role is a superuser, so it can still call them.
+      await client.query(`
+        CREATE FUNCTION add_two(a integer, b integer DEFAULT 1) RETURNS integer
+          LANGUAGE sql AS $$ SELECT a + b $$;
+        COMMENT ON FUNCTION add_two(integer, integer) IS 'Add two integers.
+@ai: pure and idempotent.
+@expose: rpc';
+
+        CREATE FUNCTION noop() RETURNS void LANGUAGE sql AS $$ SELECT $$;
+        COMMENT ON FUNCTION noop() IS 'Does nothing.
+@expose: rpc';
+
+        CREATE FUNCTION series(n integer) RETURNS SETOF integer
+          LANGUAGE sql AS $$ SELECT generate_series(1, n) $$;
+        COMMENT ON FUNCTION series(integer) IS 'A set of scalars.
+@expose: rpc';
+
+        CREATE FUNCTION pairs(n integer) RETURNS TABLE(lo integer, hi integer)
+          LANGUAGE sql AS $$ SELECT i, i * 10 FROM generate_series(1, n) i $$;
+        COMMENT ON FUNCTION pairs(integer) IS 'A set of rows.
+@expose: rpc';
+
+        CREATE FUNCTION boom() RETURNS void
+          LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'nope' USING ERRCODE = 'check_violation'; END $$;
+        COMMENT ON FUNCTION boom() IS 'Always raises a mapped error.
+@expose: rpc';
+
+        REVOKE EXECUTE ON FUNCTION add_two(integer, integer) FROM PUBLIC;
+        REVOKE EXECUTE ON FUNCTION noop() FROM PUBLIC;
+        REVOKE EXECUTE ON FUNCTION series(integer) FROM PUBLIC;
+        REVOKE EXECUTE ON FUNCTION pairs(integer) FROM PUBLIC;
+        REVOKE EXECUTE ON FUNCTION boom() FROM PUBLIC;
+      `);
     } finally {
       await client.end();
     }
@@ -114,11 +150,96 @@ describe('@kozou/api integration (generic fixture)', () => {
     return { status: r.status, body: (await r.json()) as T };
   };
 
+  const postRpc = async (
+    fn: string,
+    body?: unknown,
+  ): Promise<{ status: number; body: unknown }> => {
+    const r = await fetch(`${base}/rpc/${db.schema}.${fn}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    });
+    // A 204 has no body; reading json() would throw.
+    if (r.status === 204) return { status: 204, body: undefined };
+    return { status: r.status, body: await r.json() };
+  };
+
   it('GET / lists the introspected resources', async () => {
     const { status, body } = await getJson<{ resources: string[] }>('/');
     expect(status).toBe(200);
     expect(body.resources).toContain(`${db.schema}.authors`);
     expect(body.resources).toContain(`${db.schema}.vw_inventory_for_sale`);
+  });
+
+  describe('RPC /rpc/<schema>.<fn> (issue #103)', () => {
+    it('GET / lists the exposed functions', async () => {
+      const { body } = await getJson<{ functions: string[] }>('/');
+      expect(body.functions).toContain(`${db.schema}.add_two`);
+      expect(body.functions).toContain(`${db.schema}.pairs`);
+    });
+
+    it('calls a scalar function and returns the bare value', async () => {
+      const { status, body } = await postRpc('add_two', { a: 2, b: 3 });
+      expect(status).toBe(200);
+      expect(body).toBe(5);
+    });
+
+    it('applies a DEFAULT when the argument is omitted', async () => {
+      const { status, body } = await postRpc('add_two', { a: 10 });
+      expect(status).toBe(200);
+      expect(body).toBe(11); // b defaults to 1
+    });
+
+    it('returns 204 for a void function', async () => {
+      const { status, body } = await postRpc('noop', {});
+      expect(status).toBe(204);
+      expect(body).toBeUndefined();
+    });
+
+    it('returns an array of scalars for a SETOF scalar function', async () => {
+      const { status, body } = await postRpc('series', { n: 3 });
+      expect(status).toBe(200);
+      expect(body).toEqual([1, 2, 3]);
+    });
+
+    it('returns an array of objects for a SETOF record (RETURNS TABLE) function', async () => {
+      const { status, body } = await postRpc('pairs', { n: 2 });
+      expect(status).toBe(200);
+      expect(body).toEqual([
+        { lo: 1, hi: 10 },
+        { lo: 2, hi: 20 },
+      ]);
+    });
+
+    it('maps a RAISE with a constraint SQLSTATE to its HTTP status (#98 reuse)', async () => {
+      const { status } = await postRpc('boom', {});
+      expect(status).toBe(400); // check_violation -> 400 (not a 500)
+    });
+
+    it('400s on an unknown argument (pre-flight)', async () => {
+      const { status } = await postRpc('add_two', { a: 1, bogus: 2 });
+      expect(status).toBe(400);
+    });
+
+    it('400s on a missing required argument (pre-flight)', async () => {
+      const { status } = await postRpc('add_two', {}); // a is required
+      expect(status).toBe(400);
+    });
+
+    it('404s on an unknown function', async () => {
+      const { status } = await postRpc('does_not_exist', {});
+      expect(status).toBe(404);
+    });
+
+    it('405s on a GET to the RPC namespace', async () => {
+      const r = await fetch(`${base}/rpc/${db.schema}.add_two`);
+      expect(r.status).toBe(405);
+    });
+
+    it('advertises the function in the OpenAPI document', async () => {
+      const { body } = await getJson<{ paths: Record<string, unknown> }>('/openapi.json');
+      expect(body.paths[`/rpc/${db.schema}.add_two`]).toBeDefined();
+    });
   });
 
   it('lists all rows with an exact total', async () => {

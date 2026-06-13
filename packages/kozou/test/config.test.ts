@@ -32,6 +32,29 @@ describe('loadConfig', () => {
     expect(config.adapter.url).toBe('http://postgrest:3000');
     expect(config.uiHints.path).toBeNull();
     expect(config.cache.ttlMs).toBe(60_000);
+    // RPC exposure (issue #103) defaults to nothing extra opted in.
+    expect(config.api.rpc.allowDefiner).toEqual([]);
+    expect(config.api.rpc.allowPublicExecute).toEqual([]);
+  });
+
+  it('parses api.rpc allowlists (schema-qualified function names)', async () => {
+    const dir = await makeTempDir();
+    const file = await writeYaml(
+      dir,
+      `database:
+  url: postgres://u:p@host:5432/db
+api:
+  rpc:
+    allowDefiner:
+      - public.approve_order
+      - billing.settle_invoice
+    allowPublicExecute:
+      - public.search
+`,
+    );
+    const config = await loadConfig({ path: file, env: {} });
+    expect(config.api.rpc.allowDefiner).toEqual(['public.approve_order', 'billing.settle_invoice']);
+    expect(config.api.rpc.allowPublicExecute).toEqual(['public.search']);
   });
 
   it('accepts the postgrest adapter type as an opt-out', async () => {

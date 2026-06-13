@@ -81,7 +81,10 @@ async function startInhouseApi(config: KozouConfig, port: number): Promise<Inhou
     connection: config.database.url,
     schemas: config.database.schemas,
   });
-  const schema = await buildSchemaContext({ raw });
+  // Pass the RPC exposure config (issue #103) so `@expose: rpc` functions —
+  // and the SECURITY DEFINER / public-callable ones the operator opts in to —
+  // are compiled into the API's `/rpc/` surface.
+  const schema = await buildSchemaContext({ raw, rpc: config.api.rpc });
   const pool = new pg.Pool({ connectionString: config.database.url });
   const server = await apiModule.startApiServer({
     schema,

@@ -101,6 +101,28 @@ const databaseSchema = z.object({
   schemas: z.array(z.string().min(1)).default(['public']),
 });
 
+// Opt-in RPC exposure of Postgres functions (issue #103). A function is exposed
+// only when its COMMENT carries `@expose: rpc`; these lists are the additional
+// deploy-time opt-in the riskier cases require, and hold schema-qualified names
+// (`schema.function`). `allowDefiner`: SECURITY DEFINER functions (which run as
+// their owner and can bypass RLS) need this in ADDITION to the tag and an
+// owner-safe search_path. `allowPublicExecute`: functions that intentionally
+// keep EXECUTE granted to PUBLIC (anon-callable); without it, a function still
+// granting PUBLIC EXECUTE is hard-skipped. Both default to empty (nothing extra
+// is exposed). See the RPC design doc.
+const rpcSchema = z
+  .object({
+    allowDefiner: z.array(z.string().min(1)).default([]),
+    allowPublicExecute: z.array(z.string().min(1)).default([]),
+  })
+  .prefault({});
+
+const apiSchema = z
+  .object({
+    rpc: rpcSchema,
+  })
+  .prefault({});
+
 // Opt-in JWT auth for the in-house @kozou/api backend (`kozou dev --adapter
 // api`). Absent -> the API stays unauthenticated and loopback-only. The
 // "exactly one of secret / publicKey" rule is enforced by @kozou/api at
@@ -140,6 +162,7 @@ const configSchema = z.object({
   database: databaseSchema,
   server: serverSchema,
   adapter: adapterSchema,
+  api: apiSchema,
   uiHints: uiHintsSchema,
   cache: cacheSchema,
   introspection: introspectionSchema,
