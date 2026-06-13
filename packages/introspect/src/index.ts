@@ -6,6 +6,7 @@ import { fetchForeignKeys } from './fks.js';
 import { fetchChecks } from './checks.js';
 import { fetchViews } from './views.js';
 import { fetchEnums } from './enums.js';
+import { fetchFunctions } from './functions.js';
 import { fetchAndAttachPrivileges } from './privileges.js';
 import { KozouIntrospectError, runQuery } from './errors.js';
 import { filterTables, filterViews, pruneDanglingForeignKeys } from './filter.js';
@@ -96,6 +97,7 @@ export async function introspect(opts: IntrospectOptions): Promise<RawIntrospect
 
     const allViews = await fetchViews(client, validSchemas);
     const enums = await fetchEnums(client, validSchemas);
+    const functions = await fetchFunctions(client, validSchemas);
 
     if (opts.privilegeRole !== undefined) {
       await fetchAndAttachPrivileges(
@@ -119,7 +121,7 @@ export async function introspect(opts: IntrospectOptions): Promise<RawIntrospect
       tables,
       views,
       enums,
-      functions: [],
+      functions,
     };
   } finally {
     try {
