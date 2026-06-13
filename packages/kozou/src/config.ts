@@ -82,6 +82,20 @@ const cacheSchema = z
   })
   .prefault({});
 
+// Opt-in privilege-aware introspection (issue #99). When on, the Admin UI's
+// generated surfaces reflect what the serving role may actually do: columns it
+// cannot UPDATE render read-only, columns it cannot INSERT drop from create
+// forms, and tables it cannot SELECT are hidden. Default off = current
+// (schema-faithful) behaviour. The role evaluated defaults to the Admin UI's
+// role (auth.ui.role, else auth.defaultRole); `role` overrides it explicitly.
+// The MCP server stays schema-wide regardless (it never sets this).
+const introspectionSchema = z
+  .object({
+    respectPrivileges: z.boolean().default(false),
+    role: z.string().min(1).optional(),
+  })
+  .prefault({});
+
 const databaseSchema = z.object({
   url: z.string().min(1, 'database.url is required (set DATABASE_URL or kozou.config.yaml)'),
   schemas: z.array(z.string().min(1)).default(['public']),
@@ -128,6 +142,7 @@ const configSchema = z.object({
   adapter: adapterSchema,
   uiHints: uiHintsSchema,
   cache: cacheSchema,
+  introspection: introspectionSchema,
   auth: authSchema.optional(),
 });
 
@@ -146,6 +161,49 @@ export class KozouConfigError extends Error {
     this.filePath = filePath;
     this.issues = issues;
   }
+}
+
+/**
+ * Resolve the role whose privileges privilege-aware introspection (issue #99)
+ * should evaluate, or `undefined` when the feature is off. The role defaults to
+ * the Admin UI's role (`auth.ui.role`, else `auth.defaultRole`); an explicit
+ * `introspection.role` overrides. Throws when the feature is on but no role can
+ * be resolved — privileges are role-relative, so there is nothing to evaluate.
+ */
+export function resolvePrivilegeRole(
+  config: KozouConfig,
+  opts: { suppliedToken?: boolean } = {},
+): string | undefined {
+  if (!config.introspection.respectPrivileges) return undefined;
+  // A ready-made token (auth.ui.token or the KOZOU_ADAPTER_TOKEN env — the
+  // RS256 / external-IdP path) carries its own role claim that the CLI does not
+  // mint and cannot reliably read, and it takes precedence over minting. The
+  // auth-derived fallback (auth.ui.role / defaultRole) could therefore evaluate
+  // a *different* role than the UI actually uses — hiding/locking the wrong
+  // things. Require an explicit introspection.role whenever such a token is
+  // actually in play (the caller decides: only the in-house API path forwards a
+  // token; the PostgREST opt-out clears it, so it does not gate there).
+  if (config.introspection.role === undefined && opts.suppliedToken === true) {
+    throw new KozouConfigError(
+      'introspection.respectPrivileges is on with a ready-made token (auth.ui.token / ' +
+        'KOZOU_ADAPTER_TOKEN), whose role the CLI cannot infer. Set introspection.role to the ' +
+        'role that token assumes so privilege-aware introspection evaluates the same role the ' +
+        'Admin UI runs as.',
+      null,
+      [{ path: 'introspection.role', message: 'required when a ready-made token is supplied' }],
+    );
+  }
+  const role = config.introspection.role ?? config.auth?.ui?.role ?? config.auth?.defaultRole;
+  if (role === undefined || role.length === 0) {
+    throw new KozouConfigError(
+      'introspection.respectPrivileges is on but no role to evaluate could be resolved. ' +
+        'Set introspection.role explicitly, or configure auth.ui.role / auth.defaultRole ' +
+        '(the role the Admin UI assumes).',
+      null,
+      [{ path: 'introspection.role', message: 'no privilege role could be resolved' }],
+    );
+  }
+  return role;
 }
 
 // ---- Loader --------------------------------------------------------------

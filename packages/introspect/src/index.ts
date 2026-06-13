@@ -6,6 +6,7 @@ import { fetchForeignKeys } from './fks.js';
 import { fetchChecks } from './checks.js';
 import { fetchViews } from './views.js';
 import { fetchEnums } from './enums.js';
+import { fetchAndAttachPrivileges } from './privileges.js';
 import { KozouIntrospectError, runQuery } from './errors.js';
 import { filterTables, filterViews, pruneDanglingForeignKeys } from './filter.js';
 
@@ -17,6 +18,14 @@ export type IntrospectOptions = {
   include?: string[];
   exclude?: string[];
   timeoutMs?: number;
+  /** Privilege-aware introspection (issue #99): when set, evaluate this role's
+   *  table/column privileges and attach them to the raw output (consumed by
+   *  `buildSchemaContext` to hide unreadable tables and lock non-updatable
+   *  columns). The serving role — e.g. the Admin UI's minted-token role. When
+   *  omitted, privileges are not evaluated and surfaces stay schema-faithful
+   *  (the default; the MCP server deliberately leaves this unset to stay
+   *  schema-wide). */
+  privilegeRole?: string;
 };
 
 export { KozouIntrospectError };
@@ -87,6 +96,16 @@ export async function introspect(opts: IntrospectOptions): Promise<RawIntrospect
 
     const allViews = await fetchViews(client, validSchemas);
     const enums = await fetchEnums(client, validSchemas);
+
+    if (opts.privilegeRole !== undefined) {
+      await fetchAndAttachPrivileges(
+        client,
+        validSchemas,
+        opts.privilegeRole,
+        allTables,
+        allViews,
+      );
+    }
 
     const filterOpts = { include: opts.include, exclude: opts.exclude };
     const tables = filterTables(allTables, filterOpts);

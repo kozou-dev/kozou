@@ -204,6 +204,36 @@ without it the UI is rejected with `401` and the CLI logs how to fix it
 (`auth.ui.claims` only applies to tokens the CLI mints itself).
 The minted role must satisfy `allowedRoles` or the UI gets `403`.
 
+#### Privilege-aware introspection (opt-in)
+
+By default the Admin UI reflects what the schema *declares*, not what the
+serving role may *do* with it — so a column protected by a column-level
+`GRANT` still renders editable (the write then fails at save), and a table
+the role cannot read still appears in the nav (opening it errors). Set:
+
+```yaml
+introspection:
+  respectPrivileges: true   # default false
+  # role: app_user          # optional; defaults to auth.ui.role / auth.defaultRole
+```
+
+and the UI's introspection evaluates the serving role's privileges
+(`has_table_privilege` / `has_column_privilege`, gated by schema `USAGE`) and
+folds them in **per form mode**: on the edit form a column the role cannot
+`UPDATE` renders **read-only**; on the create form a column it cannot `INSERT`
+renders read-only (so a write-once column with `INSERT` but no `UPDATE` is
+editable on create and locked on edit, and vice versa). A table **or view** the
+role cannot `SELECT` is **hidden** from the nav and resource list (a startup
+line names what was hidden). The role evaluated is the Admin UI's
+(`auth.ui.role`, else `auth.defaultRole`); set `introspection.role` to override.
+When the UI uses a **ready-made token** (`auth.ui.token` / `KOZOU_ADAPTER_TOKEN`,
+the RS256 / external-IdP path) you must set `introspection.role` explicitly —
+the CLI cannot read the token's role, so it will not guess. This shapes the
+**Admin UI** only — `@kozou/api` and the MCP server stay schema-wide (the API
+enforces per request through the database; the MCP server intentionally
+describes the whole schema). Per-request, per-role surfaces for direct API
+consumers are a future refinement.
+
 ## License
 
 Apache 2.0. See [LICENSE](../../LICENSE) at the repository root.

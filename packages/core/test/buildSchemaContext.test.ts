@@ -580,3 +580,111 @@ describe('buildSchemaContext', () => {
     expect(ctx.views[0]!.label).toBe('X view');
   });
 });
+
+describe('buildSchemaContext privilege-aware (#99)', () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  const role = 'app_user';
+
+  it('exposes insertable/updatable as the privilege truth; readonly stays hint-sourced (mode-aware lives in the UI)', async () => {
+    const raw = makeRaw({
+      tables: [
+        makeTable('orders', {
+          privileges: { role, select: true, insert: true, update: true, delete: false },
+          columns: [
+            // insertable, not updatable (write-once) — editable on create, locked on edit.
+            makeCol('created_by', 'uuid', { privileges: { insert: true, update: false } }),
+            // updatable, not insertable — locked on create, editable on edit.
+            makeCol('reviewed_at', 'timestamptz', { privileges: { insert: false, update: true } }),
+            makeCol('note', 'text', { privileges: { insert: true, update: true } }),
+          ],
+        }),
+      ],
+    });
+    const ctx = await buildSchemaContext({ raw });
+    const cols = new Map(ctx.tables[0]!.columns.map((c) => [c.name, c]));
+    // readonly is NOT derived from privileges here (mode-dependent → UI layer).
+    expect(cols.get('created_by')!.readonly).toBe(false);
+    expect(cols.get('created_by')!.insertable).toBe(true);
+    expect(cols.get('created_by')!.updatable).toBe(false);
+    expect(cols.get('reviewed_at')!.insertable).toBe(false);
+    expect(cols.get('reviewed_at')!.updatable).toBe(true);
+    expect(cols.get('note')!.insertable).toBe(true);
+    expect(cols.get('note')!.updatable).toBe(true);
+  });
+
+  it('a hint readonly:true is preserved alongside the privilege truth', async () => {
+    const raw = makeRaw({
+      tables: [
+        makeTable('orders', {
+          privileges: { role, select: true, insert: true, update: true, delete: true },
+          columns: [makeCol('locked', 'text', { privileges: { insert: true, update: true } })],
+        }),
+      ],
+    });
+    const ctx = await buildSchemaContext({
+      raw,
+      uiHints: { tables: { orders: { columns: { locked: { readonly: true } } } } },
+    });
+    expect(ctx.tables[0]!.columns[0]!.readonly).toBe(true);
+    expect(ctx.tables[0]!.columns[0]!.updatable).toBe(true);
+  });
+
+  it('a table the role cannot SELECT is hidden, with a warning (other tables kept)', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const raw = makeRaw({
+      tables: [
+        makeTable('secrets', {
+          privileges: { role, select: false, insert: false, update: false, delete: false },
+          columns: [makeCol('id', 'uuid', { privileges: { insert: false, update: false } })],
+        }),
+        makeTable('orders', {
+          privileges: { role, select: true, insert: true, update: true, delete: true },
+          columns: [makeCol('id', 'uuid', { privileges: { insert: true, update: true } })],
+        }),
+      ],
+    });
+    const ctx = await buildSchemaContext({ raw });
+    expect(ctx.tables.map((t) => t.name)).toEqual(['orders']);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('secrets'));
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining(role));
+  });
+
+  it('a view the role cannot SELECT is hidden from views and concepts', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const mkView = (name: string, select: boolean) => ({
+      schema: 'public',
+      name,
+      comment: 'a concept',
+      columns: [],
+      underlyingTables: [],
+      definition: 'SELECT 1',
+      privileges: { role, select, insert: false, update: false, delete: false },
+    });
+    const raw = makeRaw({
+      views: [mkView('vw_secret', false), mkView('vw_public', true)],
+    });
+    const ctx = await buildSchemaContext({ raw });
+    expect(ctx.views.map((v) => v.name)).toEqual(['vw_public']);
+    expect(ctx.concepts.map((c) => c.name)).toEqual(['vw_public']);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('vw_secret'));
+  });
+
+  it('default (no privileges evaluated) leaves tables/columns schema-faithful', async () => {
+    const raw = makeRaw({
+      tables: [
+        makeTable('orders', {
+          columns: [makeCol('status', 'text')],
+        }),
+      ],
+    });
+    const ctx = await buildSchemaContext({ raw });
+    const col = ctx.tables[0]!.columns[0]!;
+    expect(ctx.tables.map((t) => t.name)).toEqual(['orders']);
+    expect(col.readonly).toBe(false);
+    expect(col.insertable).toBeUndefined();
+    expect(col.updatable).toBeUndefined();
+  });
+});

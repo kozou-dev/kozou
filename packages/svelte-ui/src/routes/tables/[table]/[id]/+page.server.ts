@@ -33,6 +33,10 @@ function tableViewModel(table: TableContext) {
   return {
     qualifiedName: table.qualifiedName,
     label: table.label,
+    // Privilege-aware mode (#99): hide Delete when the serving role lacks the
+    // table DELETE privilege. `undefined` (privileges not evaluated) keeps the
+    // current behaviour — Delete shown.
+    canDelete: table.rawTable.privileges?.delete !== false,
     columns: table.columns.map((c) => ({
       name: c.name,
       label: c.label,
@@ -81,6 +85,12 @@ export const actions: Actions = {
     const table = findTable(locals.schema.tables, params.table);
     if (!table) {
       throw error(404, `Unknown table: ${params.table}`);
+    }
+    // Privilege-aware mode (#99): refuse a delete the serving role cannot
+    // perform, instead of letting it fail at the database. `undefined` keeps
+    // the current behaviour.
+    if (table.rawTable.privileges?.delete === false) {
+      throw error(403, `The configured role may not delete from ${table.qualifiedName}.`);
     }
     const id = parseResourceId(params.id, table.primaryKey);
     await getAdapter(locals.schema).delete(table.qualifiedName, id);

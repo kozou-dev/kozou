@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import pkg from 'pg';
-import { introspect } from '../src/index.js';
+import { introspect, KozouIntrospectError } from '../src/index.js';
 import {
   setupDatabase,
   type DatabaseHandle,
@@ -179,5 +179,119 @@ describe('introspect (generic English fixture)', () => {
     expect(authors).toBeDefined();
     expect(typeof authors!.rowCountEstimate).toBe('number');
     expect(authors!.rowCountEstimate).toBeGreaterThanOrEqual(5);
+  });
+});
+
+describe('introspect privilege-aware (#99)', () => {
+  let db: DatabaseHandle;
+  const role = 'priv_test_role';
+
+  beforeAll(async () => {
+    db = await setupDatabase();
+    const client = new pkg.Client({ connectionString: db.connectionString });
+    await client.connect();
+    try {
+      const s = db.schema;
+      await client.query(`CREATE SCHEMA "${s}"`);
+      await client.query(`SET search_path TO "${s}"`);
+      await client.query(GENERIC_FIXTURE_SQL);
+      // A non-login role with deliberately uneven grants, so the introspected
+      // privileges exercise table-level, column-level, and deny-by-default.
+      await client.query(`CREATE ROLE ${role} NOLOGIN`);
+      await client.query(`GRANT USAGE ON SCHEMA "${s}" TO ${role}`);
+      // authors: full table grants.
+      await client.query(`GRANT SELECT, INSERT, UPDATE, DELETE ON "${s}".authors TO ${role}`);
+      // books: read + insert, but no UPDATE (every column non-updatable).
+      await client.query(`GRANT SELECT, INSERT ON "${s}".books TO ${role}`);
+      // editions: read-only at table level, plus a single column-level UPDATE.
+      await client.query(`GRANT SELECT ON "${s}".editions TO ${role}`);
+      await client.query(`GRANT UPDATE (isbn) ON "${s}".editions TO ${role}`);
+      // inventory_items: no grants at all -> deny-by-default (hidden candidate).
+      // A second role with a table grant but NO schema USAGE: the USAGE gate
+      // must still treat authors as unreadable.
+      await client.query(`CREATE ROLE no_usage_role NOLOGIN`);
+      await client.query(`GRANT SELECT ON "${s}".authors TO no_usage_role`);
+    } finally {
+      await client.end();
+    }
+  }, 120_000);
+
+  afterAll(async () => {
+    if (db) await db.cleanup();
+  });
+
+  it('attaches table privileges for the role (table-level grants)', async () => {
+    const r = await introspect({
+      connection: db.connectionString,
+      schemas: [db.schema],
+      privilegeRole: role,
+    });
+    const byName = new Map(r.tables.map((t) => [t.name, t]));
+    expect(byName.get('authors')!.privileges).toEqual({
+      role,
+      select: true,
+      insert: true,
+      update: true,
+      delete: true,
+    });
+    expect(byName.get('books')!.privileges).toMatchObject({
+      select: true,
+      insert: true,
+      update: false,
+      delete: false,
+    });
+    expect(byName.get('inventory_items')!.privileges).toMatchObject({ select: false });
+    // The view carries no grant to the role -> hidden by the same SELECT rule.
+    const view = r.views.find((v) => v.name === 'vw_inventory_for_sale');
+    expect(view!.privileges).toMatchObject({ select: false });
+  });
+
+  it('gates on schema USAGE: a table grant without schema USAGE reads as denied', async () => {
+    const r = await introspect({
+      connection: db.connectionString,
+      schemas: [db.schema],
+      privilegeRole: 'no_usage_role',
+    });
+    // no_usage_role holds SELECT on authors at the table ACL, but lacks USAGE
+    // on the schema, so the effective select must be false (not "shown but 403").
+    const authors = r.tables.find((t) => t.name === 'authors')!;
+    expect(authors.privileges).toMatchObject({ select: false });
+  });
+
+  it('attaches column privileges, including a single column-level UPDATE grant', async () => {
+    const r = await introspect({
+      connection: db.connectionString,
+      schemas: [db.schema],
+      privilegeRole: role,
+    });
+    const editions = r.tables.find((t) => t.name === 'editions')!;
+    const cols = new Map(editions.columns.map((c) => [c.name, c]));
+    // Only `isbn` carries the column-level UPDATE grant.
+    expect(cols.get('isbn')!.privileges).toEqual({ insert: false, update: true });
+    expect(cols.get('id')!.privileges).toEqual({ insert: false, update: false });
+
+    // books has table-wide INSERT but no UPDATE -> every column insertable, none updatable.
+    const books = r.tables.find((t) => t.name === 'books')!;
+    for (const c of books.columns) {
+      expect(c.privileges).toEqual({ insert: true, update: false });
+    }
+  });
+
+  it('leaves privileges undefined when privilegeRole is not set (default mode)', async () => {
+    const r = await introspect({ connection: db.connectionString, schemas: [db.schema] });
+    for (const t of r.tables) {
+      expect(t.privileges).toBeUndefined();
+      for (const c of t.columns) expect(c.privileges).toBeUndefined();
+    }
+  });
+
+  it('throws a clear error when the privilege role does not exist', async () => {
+    await expect(
+      introspect({
+        connection: db.connectionString,
+        schemas: [db.schema],
+        privilegeRole: 'role_that_does_not_exist',
+      }),
+    ).rejects.toBeInstanceOf(KozouIntrospectError);
   });
 });

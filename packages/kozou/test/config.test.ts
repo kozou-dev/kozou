@@ -3,7 +3,8 @@ import { writeFile, mkdtemp } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomBytes } from 'node:crypto';
-import { loadConfig, KozouConfigError } from '../src/config.js';
+import { loadConfig, resolvePrivilegeRole, KozouConfigError } from '../src/config.js';
+import type { KozouConfig } from '../src/config.js';
 
 async function makeTempDir(): Promise<string> {
   return mkdtemp(join(tmpdir(), `kozou-config-${randomBytes(4).toString('hex')}-`));
@@ -586,5 +587,84 @@ auth:
       env: { DATABASE_URL: 'postgres://u:p@h:5432/db', KOZOU_JWT_SECRET: 'env-secret' },
     });
     expect(config.auth?.ui).toBeUndefined();
+  });
+});
+
+describe('resolvePrivilegeRole (#99)', () => {
+  async function base(): Promise<KozouConfig> {
+    return loadConfig({ skipFile: true, env: { DATABASE_URL: 'postgres://u:p@h:5432/db' } });
+  }
+
+  it('returns undefined when respectPrivileges is off (default)', async () => {
+    const config = await base();
+    expect(config.introspection.respectPrivileges).toBe(false);
+    expect(resolvePrivilegeRole(config)).toBeUndefined();
+  });
+
+  it('resolves auth.ui.role when respectPrivileges is on', async () => {
+    const config: KozouConfig = {
+      ...(await base()),
+      introspection: { respectPrivileges: true },
+      auth: { jwt: { secret: 's' }, ui: { role: 'app_user' } },
+    };
+    expect(resolvePrivilegeRole(config)).toBe('app_user');
+  });
+
+  it('falls back to auth.defaultRole when ui.role is unset', async () => {
+    const config: KozouConfig = {
+      ...(await base()),
+      introspection: { respectPrivileges: true },
+      auth: { jwt: { secret: 's' }, defaultRole: 'app_default' },
+    };
+    expect(resolvePrivilegeRole(config)).toBe('app_default');
+  });
+
+  it('introspection.role overrides the auth-derived role', async () => {
+    const config: KozouConfig = {
+      ...(await base()),
+      introspection: { respectPrivileges: true, role: 'explicit_role' },
+      auth: { jwt: { secret: 's' }, ui: { role: 'app_user' } },
+    };
+    expect(resolvePrivilegeRole(config)).toBe('explicit_role');
+  });
+
+  it('throws when on but no role can be resolved', async () => {
+    const config: KozouConfig = {
+      ...(await base()),
+      introspection: { respectPrivileges: true },
+    };
+    expect(() => resolvePrivilegeRole(config)).toThrow(KozouConfigError);
+  });
+
+  it('throws when a ready-made token is in play (suppliedToken) without an explicit introspection.role', async () => {
+    const config: KozouConfig = {
+      ...(await base()),
+      introspection: { respectPrivileges: true },
+      // defaultRole would otherwise resolve, but the supplied token's role is
+      // unknown and may differ — so it must be made explicit.
+      auth: { jwt: { publicKey: 'pem' }, defaultRole: 'app_reader' },
+    };
+    expect(() => resolvePrivilegeRole(config, { suppliedToken: true })).toThrow(KozouConfigError);
+  });
+
+  it('accepts a supplied token when introspection.role is explicit', async () => {
+    const config: KozouConfig = {
+      ...(await base()),
+      introspection: { respectPrivileges: true, role: 'app_admin' },
+      auth: { jwt: { publicKey: 'pem' }, ui: { token: 'ready.made.jwt' } },
+    };
+    expect(resolvePrivilegeRole(config, { suppliedToken: true })).toBe('app_admin');
+  });
+
+  it('does NOT gate when no token is in play (suppliedToken false) — the mint path resolves auth.ui.role', async () => {
+    const config: KozouConfig = {
+      ...(await base()),
+      introspection: { respectPrivileges: true },
+      auth: { jwt: { secret: 's' }, ui: { role: 'app_user' } },
+    };
+    // The caller (buildAdminUiEnv) only sets suppliedToken on the API path with
+    // a real ready-made token; the HS256 mint path passes false.
+    expect(resolvePrivilegeRole(config, { suppliedToken: false })).toBe('app_user');
+    expect(resolvePrivilegeRole(config)).toBe('app_user');
   });
 });

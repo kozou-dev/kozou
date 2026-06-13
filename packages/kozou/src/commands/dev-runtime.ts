@@ -8,6 +8,7 @@ import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
 
 import type { KozouConfig } from '../config.js';
+import { resolvePrivilegeRole } from '../config.js';
 
 // Resolve the Admin UI's adapter-node standalone server entry. The
 // `build/` directory ships in @kozou/svelte-ui's published `files`, and
@@ -63,6 +64,26 @@ export function buildAdminUiEnv(
     if (key.startsWith('KOZOU_JWT_') || key === 'KOZOU_UI_ROLE' || key === 'KOZOU_UI_CLAIMS') {
       delete env[key];
     }
+  }
+  // Privilege-aware introspection (issue #99): pass the resolved role through to
+  // the UI child so its introspection reflects what that role may do (hide
+  // unreadable tables, lock non-updatable columns). Set it authoritatively from
+  // config — delete any inherited value when the feature is off, so a stray
+  // parent KOZOU_INTROSPECTION_ROLE cannot silently turn it on.
+  // A ready-made token only actually gates role resolution on the in-house API
+  // path: the external REST opt-out below clears KOZOU_ADAPTER_TOKEN and the UI
+  // never forwards it, so an inherited token there must not force
+  // introspection.role. Detect a real ready-made token (config or inherited
+  // env) only when the API path is active.
+  const suppliedToken =
+    apiAdapterUrl !== undefined &&
+    ((config.auth?.ui?.token !== undefined && config.auth.ui.token.length > 0) ||
+      (baseEnv.KOZOU_ADAPTER_TOKEN !== undefined && baseEnv.KOZOU_ADAPTER_TOKEN.length > 0));
+  const privilegeRole = resolvePrivilegeRole(config, { suppliedToken });
+  if (privilegeRole !== undefined) {
+    env.KOZOU_INTROSPECTION_ROLE = privilegeRole;
+  } else {
+    delete env.KOZOU_INTROSPECTION_ROLE;
   }
   if (apiAdapterUrl !== undefined) {
     // In-house @kozou/api backend: point the UI at it and attach the token

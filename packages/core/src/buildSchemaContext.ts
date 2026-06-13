@@ -85,6 +85,17 @@ function buildColumn(input: {
 
   const label = hints?.label ?? deriveLabel(column.name);
 
+  // Privilege-aware mode (issue #99): when the serving role's privileges were
+  // evaluated, surface them as `insertable` / `updatable` (the privilege
+  // truth). `readonly` stays sourced from UI Hints only — applying the grant
+  // to read-only is mode-dependent (a column may be insertable but not
+  // updatable, or vice versa), so the Admin UI derives a per-mode read-only
+  // from `insertable` (create) / `updatable` (edit). Keeping it out of the
+  // shared `readonly` leaves `@kozou/api` / MCP schema-wide.
+  const priv = column.privileges;
+  const insertable = priv === undefined ? undefined : priv.insert;
+  const updatable = priv === undefined ? undefined : priv.update;
+
   return {
     name: column.name,
     dataType: column.dataType,
@@ -99,6 +110,8 @@ function buildColumn(input: {
     widget,
     enumValues,
     readonly: hints?.readonly ?? false,
+    ...(insertable === undefined ? {} : { insertable }),
+    ...(updatable === undefined ? {} : { updatable }),
   };
 }
 
@@ -362,7 +375,42 @@ export async function buildSchemaContext(opts: BuildOptions): Promise<SchemaCont
     }
   }
 
-  const tables = raw.tables.map<TableContext>((t) =>
+  // Privilege-aware mode (issue #99): a table / view the serving role cannot
+  // SELECT (or whose schema it cannot USAGE — both folded into `select`) is
+  // hidden from the generated surfaces rather than listed and erroring on open.
+  // Hiding is intended behaviour, not a validation issue, so it is reported on a
+  // separate informational channel (never thrown, even under strict). Relations
+  // whose privileges were not evaluated (`undefined`) are always kept. Relation
+  // targets are still resolved against the full `knownTables`, so a relation
+  // pointing at a hidden table is not flagged as missing; such an embed would be
+  // denied at query time (mapped to 403) — see issue #99 known limitations.
+  const hiddenNames: string[] = [];
+  const visibleRawTables = raw.tables.filter((t) => {
+    if (t.privileges?.select === false) {
+      hiddenNames.push(t.name);
+      return false;
+    }
+    return true;
+  });
+  const visibleRawViews = raw.views.filter((v) => {
+    if (v.privileges?.select === false) {
+      hiddenNames.push(v.name);
+      return false;
+    }
+    return true;
+  });
+  if (hiddenNames.length > 0) {
+    const role =
+      raw.tables.find((t) => t.privileges !== undefined)?.privileges?.role ??
+      raw.views.find((v) => v.privileges !== undefined)?.privileges?.role ??
+      'the role';
+    console.warn(
+      `[@kozou/core] privilege-aware introspection: hid ${hiddenNames.length} relation(s) ` +
+        `that "${role}" cannot SELECT: ${hiddenNames.join(', ')}`,
+    );
+  }
+
+  const tables = visibleRawTables.map<TableContext>((t) =>
     buildTableContext({
       table: t,
       hints: uiHints?.tables?.[t.name],
@@ -371,7 +419,7 @@ export async function buildSchemaContext(opts: BuildOptions): Promise<SchemaCont
     }),
   );
 
-  const views = raw.views.map<ViewContext>((v) =>
+  const views = visibleRawViews.map<ViewContext>((v) =>
     buildViewContext({
       view: v,
       hints: uiHints?.views?.[v.name],
@@ -386,7 +434,7 @@ export async function buildSchemaContext(opts: BuildOptions): Promise<SchemaCont
     description: null,
   }));
 
-  const concepts = raw.views.map<ConceptContext>(buildConcept);
+  const concepts = visibleRawViews.map<ConceptContext>(buildConcept);
 
   if (issues.length > 0) {
     if (strict) {
