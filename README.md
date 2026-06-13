@@ -6,7 +6,7 @@ Kozou reads a PostgreSQL schema once and produces every form a modern team and i
 
 ## Status
 
-v1.3.0 (latest release). The CLI, schema introspection, MCP server (stdio + HTTP), reference Admin UI (now with composite-foreign-key support, including a composite relation picker in the create/edit forms), Markdown schema-document generation (`kozou docs`), and Kozou's in-house REST backend (`@kozou/api`, the default `kozou dev` data layer) are all available on npm; the runtime image lives on GHCR as a multi-arch manifest (linux/amd64 + linux/arm64). Releases land via the workflow in `.github/workflows/release.yml`.
+v1.4.0 (latest release). The CLI, schema introspection, MCP server (stdio + HTTP), reference Admin UI (now with opt-in RPC actions — a Postgres function tagged `@expose: rpc` is compiled into a callable form across REST, OpenAPI, MCP, and an Admin UI "Actions" page), Markdown schema-document generation (`kozou docs`), and Kozou's in-house REST backend (`@kozou/api`, the default `kozou dev` data layer) are all available on npm; the runtime image lives on GHCR as a multi-arch manifest (linux/amd64 + linux/arm64). Releases land via the workflow in `.github/workflows/release.yml`.
 
 ## Quickstart
 
@@ -29,9 +29,9 @@ docker compose up
 Or pull the CLI runtime image directly:
 
 ```bash
-docker pull ghcr.io/kozou-dev/kozou:v1.3.0
-docker run --rm ghcr.io/kozou-dev/kozou:v1.3.0 inspect --help
-docker run --rm ghcr.io/kozou-dev/kozou:v1.3.0 mcp --help
+docker pull ghcr.io/kozou-dev/kozou:v1.4.0
+docker run --rm ghcr.io/kozou-dev/kozou:v1.4.0 inspect --help
+docker run --rm ghcr.io/kozou-dev/kozou:v1.4.0 mcp --help
 ```
 
 For library use (custom hosts, embedded MCP), install the workspace packages from npm:
@@ -56,7 +56,7 @@ On the access-control axis, **Kozou is a resource server and enforcement layer, 
 
 ## Requirements
 
-Runtime requirements for v1.3.0:
+Runtime requirements for v1.4.0:
 
 - **PostgreSQL 16 or later** — the canonical source of truth
 - **Docker 24 or later** (optional) — recommended for the `docker compose up` stack, which brings up PostgreSQL and a `kozou` service running `kozou dev` (the bundled Admin UI + MCP HTTP server, plus Kozou's in-house REST backend served in-process) from `ghcr.io/kozou-dev/kozou` (a multi-arch image, native on linux/amd64 and linux/arm64). The default stack needs **no separate REST container**; to opt out and use an external PostgREST instead, set `adapter.type: postgrest` and add the (commented) service in the scaffold's `docker-compose.yml`.
