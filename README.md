@@ -6,7 +6,7 @@ Kozou reads a PostgreSQL schema once and produces every form a modern team and i
 
 ## Status
 
-v1.2.0 (latest release). The CLI, schema introspection, MCP server (stdio + HTTP), reference Admin UI (now with composite-foreign-key support, including a composite relation picker in the create/edit forms), Markdown schema-document generation (`kozou docs`), and Kozou's in-house REST backend (`@kozou/api`, the default `kozou dev` data layer) are all available on npm; the runtime image lives on GHCR as a multi-arch manifest (linux/amd64 + linux/arm64). Releases land via the workflow in `.github/workflows/release.yml`.
+v1.3.0 (latest release). The CLI, schema introspection, MCP server (stdio + HTTP), reference Admin UI (now with composite-foreign-key support, including a composite relation picker in the create/edit forms), Markdown schema-document generation (`kozou docs`), and Kozou's in-house REST backend (`@kozou/api`, the default `kozou dev` data layer) are all available on npm; the runtime image lives on GHCR as a multi-arch manifest (linux/amd64 + linux/arm64). Releases land via the workflow in `.github/workflows/release.yml`.
 
 ## Quickstart
 
@@ -29,9 +29,9 @@ docker compose up
 Or pull the CLI runtime image directly:
 
 ```bash
-docker pull ghcr.io/kozou-dev/kozou:v1.2.0
-docker run --rm ghcr.io/kozou-dev/kozou:v1.2.0 inspect --help
-docker run --rm ghcr.io/kozou-dev/kozou:v1.2.0 mcp --help
+docker pull ghcr.io/kozou-dev/kozou:v1.3.0
+docker run --rm ghcr.io/kozou-dev/kozou:v1.3.0 inspect --help
+docker run --rm ghcr.io/kozou-dev/kozou:v1.3.0 mcp --help
 ```
 
 For library use (custom hosts, embedded MCP), install the workspace packages from npm:
@@ -56,7 +56,7 @@ On the access-control axis, **Kozou is a resource server and enforcement layer, 
 
 ## Requirements
 
-Runtime requirements for v1.2.0:
+Runtime requirements for v1.3.0:
 
 - **PostgreSQL 16 or later** — the canonical source of truth
 - **Docker 24 or later** (optional) — recommended for the `docker compose up` stack, which brings up PostgreSQL and a `kozou` service running `kozou dev` (the bundled Admin UI + MCP HTTP server, plus Kozou's in-house REST backend served in-process) from `ghcr.io/kozou-dev/kozou` (a multi-arch image, native on linux/amd64 and linux/arm64). The default stack needs **no separate REST container**; to opt out and use an external PostgREST instead, set `adapter.type: postgrest` and add the (commented) service in the scaffold's `docker-compose.yml`.
@@ -74,7 +74,8 @@ Contributors additionally need **pnpm 9 or later**. See [CONTRIBUTING.md](CONTRI
 - v1.1.0 (shipped): composite foreign keys become first-class — they embed as relations (multi-column joins, `x-kozou-embeds` hints carrying the foreign-key column set, MCP / `kozou docs` visibility), the relation-select endpoint serves composite-key targets (array option ids), and the Admin UI's create/edit forms gain a relation picker: single-column FKs get a searchable picker, and an eligible composite FK becomes one picker that fills every key column at once, with a non-enhanced (no-JS) form path. See the `@kozou/svelte-ui` README for the picker's eligibility rules and known limitations. The OpenAPI document is also faithful to runtime request bodies and modes.
 - v1.1.1 (shipped): a patch release of fixes from v1.0/v1.1 field reports. The scaffold's docker-compose now forwards the documented `KOZOU_JWT_*` auth variables (they previously never reached the container, leaving auth silently off) and `kozou dev` prints an unambiguous `api auth:` state line at startup. `@kozou/api` maps database outcomes to stable HTTP statuses — privilege / row-level-security denials return 403, constraint conflicts 409/400 — with raw database text kept out of response bodies (see the Errors section of the `@kozou/api` README). The Admin UI can create rows that leave defaulted NOT NULL columns empty, two long-standing form bugs are fixed (defaulted non-text columns no longer 500 the create/edit forms; manual uuid entry submits again), and runtime warnings no longer carry stale version pins.
 - v1.2.0 (shipped): the auto-minted Admin UI service token (the HS256 development convenience) can now carry custom JWT claims via `auth.ui.claims` (or the `KOZOU_UI_CLAIMS` environment variable), so RLS policies keyed on claims beyond `role` can be exercised from the bundled UI in local development. The `role` claim stays reserved — a colliding entry is dropped so a custom claim can never smuggle in a role — and `iat` is always set by the mint; a configured `iss` / `aud` wins over a custom one, while a custom temporal claim (`exp` / `nbf`) is passed through but warned about when it would make the token rejected. Schema introspection also warns when a known COMMENT tag (`@ai`, `@policy`, …) appears mid-line instead of at the start of a line — such tags are not parsed and would otherwise leak verbatim into the surrounding description.
-- Beyond v1.2: React UI exploration
+- v1.3.0 (shipped): **opt-in privilege-aware introspection** (`introspection.respectPrivileges`, default off) makes the bundled Admin UI faithful to what the serving role may *do*, not just what the schema declares. A table or view the role cannot `SELECT` (gated by schema `USAGE`) is hidden from the nav; a column it cannot write renders read-only **per form mode** (no `INSERT` → read-only on create, no `UPDATE` → read-only on edit); and Delete is hidden where the role lacks it. The role evaluated is the Admin UI's (`auth.ui.role` / `auth.defaultRole`, or an explicit `introspection.role`). `@kozou/api` and the MCP server stay schema-wide.
+- Beyond v1.3: React UI exploration
 
 ## Name
 
