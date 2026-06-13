@@ -23,6 +23,11 @@ const authors = tableResource('authors', [
   col('rank', 'number'),
 ]);
 
+// A well-formed uuid for the `authors` / `books` fixtures, whose primary key is
+// a uuid: an id segment is now pre-flighted against the key type (#110), so a
+// throwaway id like 'abc' would (correctly) 400 before the SQL is built.
+const SAMPLE_UUID = 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11';
+
 describe('quoteIdent', () => {
   it('wraps in double quotes and escapes embedded quotes', () => {
     expect(quoteIdent('display_name')).toBe('"display_name"');
@@ -230,12 +235,13 @@ describe('buildListQuery', () => {
     }
   });
 
-  it('accepts well-formed values for numeric / integer / boolean columns', () => {
+  it('accepts well-formed values for numeric / integer / boolean / uuid columns', () => {
     const t = tableResource('t', [
       col('id', 'uuid', { isPrimaryKey: true, nullable: false }),
       col('amount', 'currency', { dataType: 'numeric' }),
       col('count', 'number', { dataType: 'integer' }),
       col('active', 'boolean', { dataType: 'boolean' }),
+      col('note', 'text', { dataType: 'text' }),
     ]);
     expect(() =>
       buildListQuery(t, { filters: [{ column: 'amount', op: 'gte', value: '42.50' }] }),
@@ -261,9 +267,23 @@ describe('buildListQuery', () => {
     expect(() =>
       buildListQuery(t, { filters: [{ column: 'active', op: 'eq', value: 'true' }] }),
     ).not.toThrow();
-    // A non-numeric column does not get value-checked here (text passes through).
+    // The non-finite literals PostgreSQL accepts for the decimal/float family.
+    for (const special of ['NaN', 'Infinity', '-Infinity', 'inf']) {
+      expect(() =>
+        buildListQuery(t, { filters: [{ column: 'amount', op: 'eq', value: special }] }),
+      ).not.toThrow();
+    }
+    // A well-formed uuid is accepted (uuid is now a pre-flighted family, #110),
+    // including the brace-wrapped form PostgreSQL accepts.
     expect(() =>
-      buildListQuery(t, { filters: [{ column: 'id', op: 'eq', value: 'anything' }] }),
+      buildListQuery(t, { filters: [{ column: 'id', op: 'eq', value: SAMPLE_UUID }] }),
+    ).not.toThrow();
+    expect(() =>
+      buildListQuery(t, { filters: [{ column: 'id', op: 'eq', value: `{${SAMPLE_UUID}}` }] }),
+    ).not.toThrow();
+    // A type without a checked lexical form (text) passes through unchecked.
+    expect(() =>
+      buildListQuery(t, { filters: [{ column: 'note', op: 'eq', value: 'anything' }] }),
     ).not.toThrow();
   });
 
@@ -470,11 +490,11 @@ describe('buildListQuery', () => {
 
 describe('buildGetQuery', () => {
   it('builds a fetch-by-id query against the single-column primary key', () => {
-    const q = buildGetQuery(authors, 'abc');
+    const q = buildGetQuery(authors, SAMPLE_UUID);
     expect(q.text).toBe(
       'SELECT "id", "display_name", "bio", "rank" FROM "public"."authors" WHERE "id" = $1 LIMIT 1',
     );
-    expect(q.values).toEqual(['abc']);
+    expect(q.values).toEqual([SAMPLE_UUID]);
   });
 
   it('builds a fetch-by-id query against a composite primary key', () => {
@@ -499,7 +519,13 @@ describe('buildGetQuery', () => {
   });
 
   it('does not split a single-column key, so a comma in the value is preserved', () => {
-    const q = buildGetQuery(authors, 'a,b');
+    // A text key (not a pre-flighted family) so the comma value is not also
+    // rejected by the #110 id pre-flight — the point here is the no-split rule.
+    const textKeyed = tableResource('tk', [
+      col('id', 'text', { isPrimaryKey: true, nullable: false }),
+      col('name', 'text'),
+    ]);
+    const q = buildGetQuery(textKeyed, 'a,b');
     expect(q.text).toContain('WHERE "id" = $1 LIMIT 1');
     expect(q.values).toEqual(['a,b']);
   });
@@ -534,11 +560,11 @@ describe('buildInsertQuery', () => {
 
 describe('buildUpdateQuery', () => {
   it('sets the supplied columns and matches on the primary key', () => {
-    const q = buildUpdateQuery(authors, 'abc', { display_name: 'Ada2', rank: 2 });
+    const q = buildUpdateQuery(authors, SAMPLE_UUID, { display_name: 'Ada2', rank: 2 });
     expect(q.text).toBe(
       'UPDATE "public"."authors" SET "display_name" = $1, "rank" = $2 WHERE "id" = $3 RETURNING "id", "display_name", "bio", "rank"',
     );
-    expect(q.values).toEqual(['Ada2', 2, 'abc']);
+    expect(q.values).toEqual(['Ada2', 2, SAMPLE_UUID]);
   });
 
   it('rejects an empty update', () => {
@@ -570,11 +596,11 @@ describe('buildUpdateQuery', () => {
 
 describe('buildDeleteQuery', () => {
   it('deletes by primary key and RETURNs the row', () => {
-    const q = buildDeleteQuery(authors, 'abc');
+    const q = buildDeleteQuery(authors, SAMPLE_UUID);
     expect(q.text).toBe(
       'DELETE FROM "public"."authors" WHERE "id" = $1 RETURNING "id", "display_name", "bio", "rank"',
     );
-    expect(q.values).toEqual(['abc']);
+    expect(q.values).toEqual([SAMPLE_UUID]);
   });
 
   it('deletes by every column of a composite primary key', () => {
@@ -589,6 +615,148 @@ describe('buildDeleteQuery', () => {
   it('rejects a PK-less resource (400)', () => {
     const v = viewResource('vw', [col('a', 'text')]);
     expect(() => buildDeleteQuery(v, '1')).toThrow(/no primary key/);
+  });
+});
+
+describe('item id pre-flight (#110)', () => {
+  const intKeyed = tableResource('counters', [
+    col('id', 'number', { dataType: 'integer', isPrimaryKey: true, nullable: false }),
+    col('label', 'text'),
+  ]);
+  const textKeyed = tableResource('slugs', [
+    col('id', 'text', { isPrimaryKey: true, nullable: false }),
+    col('label', 'text'),
+  ]);
+  const composite = tableResource(
+    'order_lines',
+    [
+      col('order_id', 'uuid', { isPrimaryKey: true, nullable: false }),
+      col('line_no', 'number', { dataType: 'integer', isPrimaryKey: true, nullable: false }),
+      col('note', 'text'),
+    ],
+    ['order_id', 'line_no'],
+  );
+
+  it('rejects a non-uuid id against a uuid key (400) on get / update / delete', () => {
+    const runs = [
+      () => buildGetQuery(authors, 'not-a-uuid'),
+      () => buildUpdateQuery(authors, 'not-a-uuid', { display_name: 'x' }),
+      () => buildDeleteQuery(authors, 'not-a-uuid'),
+    ];
+    for (const run of runs) {
+      try {
+        run();
+        expect.unreachable('expected a 400');
+      } catch (err) {
+        expect(err).toBeInstanceOf(KozouApiError);
+        expect((err as KozouApiError).status).toBe(400);
+        expect((err as KozouApiError).message).toMatch(
+          /Item id component "not-a-uuid" is not valid for primary-key column "id" \(uuid\)/,
+        );
+      }
+    }
+  });
+
+  it('rejects a non-integer id against an integer key (400)', () => {
+    expect(() => buildGetQuery(intKeyed, 'abc')).toThrow(
+      /not valid for primary-key column "id" \(integer\)/,
+    );
+    expect(() => buildGetQuery(intKeyed, '1.5')).toThrow(/primary-key column "id"/);
+    // Parses as an integer but overflows int4.
+    expect(() => buildGetQuery(intKeyed, '9999999999')).toThrow(/primary-key column "id"/);
+  });
+
+  it('accepts a well-formed uuid / integer id (brace-wrapped uuid included)', () => {
+    expect(() => buildGetQuery(authors, SAMPLE_UUID)).not.toThrow();
+    expect(() => buildGetQuery(authors, `{${SAMPLE_UUID}}`)).not.toThrow();
+    expect(() => buildGetQuery(intKeyed, '42')).not.toThrow();
+    expect(() => buildGetQuery(intKeyed, '-7')).not.toThrow();
+  });
+
+  it('does not pre-flight a text key — any string (commas included) is a valid id', () => {
+    expect(() => buildGetQuery(textKeyed, 'anything,with,commas')).not.toThrow();
+  });
+
+  it('validates each component of a composite key by its own type', () => {
+    expect(() => buildGetQuery(composite, 'not-a-uuid,1')).toThrow(/"order_id" \(uuid\)/);
+    expect(() => buildGetQuery(composite, `${SAMPLE_UUID},abc`)).toThrow(/"line_no" \(integer\)/);
+    expect(() => buildGetQuery(composite, `${SAMPLE_UUID},5`)).not.toThrow();
+  });
+
+  it('checks composite arity before component type (a wrong count is still the arity 400)', () => {
+    expect(() => buildGetQuery(composite, 'only-one')).toThrow(
+      /composite primary key.*expected 2/,
+    );
+  });
+});
+
+describe('write-body value pre-flight (#110)', () => {
+  const t = tableResource('widgets', [
+    col('id', 'uuid', { isPrimaryKey: true, nullable: false }),
+    col('ref', 'uuid'),
+    col('count', 'number', { dataType: 'integer' }),
+    col('amount', 'currency', { dataType: 'numeric(12,2)' }),
+    col('approx', 'number', { dataType: 'double precision' }),
+    col('active', 'boolean', { dataType: 'boolean' }),
+    col('note', 'text', { dataType: 'text' }),
+    col('payload', 'text', { dataType: 'jsonb' }),
+  ]);
+
+  it('rejects a malformed string scalar for the column type (400), on insert and update', () => {
+    expect(() => buildInsertQuery(t, { ref: 'zzz' })).toThrow(
+      /Value "zzz" is not valid for column "ref" \(uuid\)/,
+    );
+    expect(() => buildInsertQuery(t, { count: 'abc' })).toThrow(/column "count" \(integer\)/);
+    expect(() => buildInsertQuery(t, { count: '1.5' })).toThrow(/column "count"/);
+    expect(() => buildInsertQuery(t, { amount: 'not-money' })).toThrow(/column "amount"/);
+    expect(() => buildInsertQuery(t, { active: 'maybe' })).toThrow(/column "active" \(boolean\)/);
+    expect(() => buildUpdateQuery(t, SAMPLE_UUID, { ref: 'zzz' })).toThrow(/column "ref" \(uuid\)/);
+  });
+
+  it('accepts well-formed string scalars', () => {
+    expect(() =>
+      buildInsertQuery(t, { ref: SAMPLE_UUID, count: '3', amount: '9.99', active: 'true' }),
+    ).not.toThrow();
+  });
+
+  it('accepts NaN for any decimal type and ±Infinity for the float types', () => {
+    // NaN is valid for every decimal/float type, including numeric(p,s).
+    expect(() => buildInsertQuery(t, { amount: 'NaN' })).not.toThrow();
+    expect(() => buildInsertQuery(t, { approx: 'NaN' })).not.toThrow();
+    // ±Infinity is valid for the float types.
+    for (const special of ['Infinity', '-Infinity', 'inf']) {
+      expect(() => buildInsertQuery(t, { approx: special })).not.toThrow();
+    }
+  });
+
+  it('rejects ±Infinity for a constrained numeric(p,s) (400, not a 22003 500)', () => {
+    // A numeric(12,2) cannot hold an infinite value (PostgreSQL 22003), so it is
+    // caught up front rather than surfacing as a server error.
+    expect(() => buildInsertQuery(t, { amount: 'Infinity' })).toThrow(/column "amount"/);
+    expect(() => buildInsertQuery(t, { amount: '-Infinity' })).toThrow(/column "amount"/);
+    // NaN, by contrast, is valid even for numeric(p,s).
+    expect(() => buildInsertQuery(t, { amount: 'NaN' })).not.toThrow();
+  });
+
+  it('does not reject an empty string for a text column (empty text is valid)', () => {
+    expect(() => buildInsertQuery(t, { note: '' })).not.toThrow();
+  });
+
+  it('rejects an empty string for a checked family (empty is invalid for an integer)', () => {
+    expect(() => buildInsertQuery(t, { count: '' })).toThrow(/column "count"/);
+  });
+
+  it('leaves non-string JSON values to PostgreSQL (number / boolean / null / object)', () => {
+    expect(() =>
+      buildInsertQuery(t, { count: 5, active: true, ref: null, payload: { a: 1 } }),
+    ).not.toThrow();
+    // Even a JS number against a uuid column is left to PostgreSQL — only
+    // string-valued fields are pre-flighted.
+    expect(() => buildInsertQuery(t, { ref: 12345 })).not.toThrow();
+  });
+
+  it('does not pre-flight a json or text column carrying a string', () => {
+    expect(() => buildInsertQuery(t, { payload: 'not-json', note: 'anything' })).not.toThrow();
   });
 });
 
@@ -728,13 +896,13 @@ describe('embed in read queries', () => {
 
   it('keeps $n numbering when embed combines with a filter and search', () => {
     const q = buildListQuery(books, {
-      filters: [{ column: 'author_id', op: 'eq', value: 'x' }],
+      filters: [{ column: 'author_id', op: 'eq', value: SAMPLE_UUID }],
       search: 'foo',
       embed: embedAuthors,
     });
     expect(q.dataText).toContain('WHERE "author_id" = $1 AND ("title" ILIKE $2)');
     expect(q.dataText).toContain('LIMIT $3 OFFSET $4');
-    expect(q.dataValues).toEqual(['x', '%foo%', DEFAULT_PAGE_SIZE, 0]);
+    expect(q.dataValues).toEqual([SAMPLE_UUID, '%foo%', DEFAULT_PAGE_SIZE, 0]);
   });
 
   it('leaves the count query untouched when embedding', () => {
@@ -744,10 +912,10 @@ describe('embed in read queries', () => {
   });
 
   it('splices an embed fragment into the by-id query and keeps $1', () => {
-    const q = buildGetQuery(books, 'abc', embedAuthors);
+    const q = buildGetQuery(books, SAMPLE_UUID, embedAuthors);
     expect(q.text).toContain('AS "authors"');
     expect(q.text).toContain('WHERE "id" = $1 LIMIT 1');
-    expect(q.values).toEqual(['abc']);
+    expect(q.values).toEqual([SAMPLE_UUID]);
   });
 
   it('splices a reverse to-many aggregate capped at MAX_EMBED_CHILDREN', () => {

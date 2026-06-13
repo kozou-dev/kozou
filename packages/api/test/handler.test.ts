@@ -29,6 +29,13 @@ const authors = tableResource('authors', [
 ]);
 const vw = viewResource('vw_active', [col('id', 'uuid'), col('label', 'text')]);
 
+// `authors` / `books` have a uuid primary key, and an item-id segment is now
+// pre-flighted against the key type (#110): a non-uuid id segment 400s before
+// the query runs. These valid uuids stand in for the prior throwaway ids.
+const AUTHOR_ID = 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11';
+const ABSENT_UUID = '00000000-0000-0000-0000-000000000000';
+const BOOK_ID = '11111111-1111-1111-1111-111111111111';
+
 function reqOf(method: string, path: string, qs = '', body?: unknown): {
   method: string;
   segments: string[];
@@ -87,14 +94,14 @@ describe('handleApiRequest — routing', () => {
 
   it('GET /<table>/<id> returns the row when found', async () => {
     const { deps } = depsWith(() => ({ rows: [{ id: 'abc', display_name: 'Ada' }], rowCount: 1 }));
-    const r = await handleApiRequest(deps, reqOf('GET', '/authors/abc'));
+    const r = await handleApiRequest(deps, reqOf('GET', `/authors/${AUTHOR_ID}`));
     expect(r.status).toBe(200);
     expect(r.body).toEqual({ id: 'abc', display_name: 'Ada' });
   });
 
   it('GET /<table>/<id> returns 404 when the row is missing', async () => {
     const { deps } = depsWith(() => ({ rows: [], rowCount: 0 }));
-    const r = await handleApiRequest(deps, reqOf('GET', '/authors/missing'));
+    const r = await handleApiRequest(deps, reqOf('GET', `/authors/${ABSENT_UUID}`));
     expect(r.status).toBe(404);
     expect(errorOf(r.body).code).toBe('not_found');
   });
@@ -132,14 +139,14 @@ describe('handleApiRequest — routing', () => {
         ? { rows: [{ id: 'abc', display_name: 'Ada2' }], rowCount: 1 }
         : { rows: [], rowCount: 0 },
     );
-    const r = await handleApiRequest(deps, reqOf('PATCH', '/authors/abc', '', { display_name: 'Ada2' }));
+    const r = await handleApiRequest(deps, reqOf('PATCH', `/authors/${AUTHOR_ID}`, '', { display_name: 'Ada2' }));
     expect(r.status).toBe(200);
     expect(r.body).toEqual({ id: 'abc', display_name: 'Ada2' });
   });
 
   it('PATCH returns 404 when the row is missing', async () => {
     const { deps } = depsWith(() => ({ rows: [], rowCount: 0 }));
-    const r = await handleApiRequest(deps, reqOf('PATCH', '/authors/missing', '', { display_name: 'x' }));
+    const r = await handleApiRequest(deps, reqOf('PATCH', `/authors/${ABSENT_UUID}`, '', { display_name: 'x' }));
     expect(r.status).toBe(404);
   });
 
@@ -147,15 +154,31 @@ describe('handleApiRequest — routing', () => {
     const { deps } = depsWith((text) =>
       text.startsWith('DELETE') ? { rows: [{ id: 'abc' }], rowCount: 1 } : { rows: [], rowCount: 0 },
     );
-    const r = await handleApiRequest(deps, reqOf('DELETE', '/authors/abc'));
+    const r = await handleApiRequest(deps, reqOf('DELETE', `/authors/${AUTHOR_ID}`));
     expect(r.status).toBe(200);
     expect(r.body).toEqual({ id: 'abc' });
   });
 
   it('DELETE returns 404 when the row is missing', async () => {
     const { deps } = depsWith(() => ({ rows: [], rowCount: 0 }));
-    const r = await handleApiRequest(deps, reqOf('DELETE', '/authors/missing'));
+    const r = await handleApiRequest(deps, reqOf('DELETE', `/authors/${ABSENT_UUID}`));
     expect(r.status).toBe(404);
+  });
+
+  it('400s an id segment that cannot parse as the key type, before querying (#110)', async () => {
+    const { deps, calls } = depsWith(() => ({ rows: [], rowCount: 0 }));
+    const r = await handleApiRequest(deps, reqOf('GET', '/authors/not-a-uuid'));
+    expect(r.status).toBe(400);
+    expect(errorOf(r.body).code).toBe('bad_request');
+    expect(calls).toHaveLength(0); // never reached the database (was a 500 before)
+  });
+
+  it('400s a malformed scalar write-body value, before querying (#110)', async () => {
+    const { deps, calls } = depsWith(() => ({ rows: [], rowCount: 0 }));
+    const r = await handleApiRequest(deps, reqOf('POST', '/authors', '', { id: 'zzz' }));
+    expect(r.status).toBe(400);
+    expect(errorOf(r.body).code).toBe('bad_request');
+    expect(calls).toHaveLength(0);
   });
 
   it('rejects writes to a read-only view with 405', async () => {
@@ -521,7 +544,7 @@ describe('handleApiRequest — embed', () => {
       rows: [{ id: 'b1', authors: { id: 'a1' } }],
       rowCount: 1,
     }));
-    const r = await handleApiRequest(deps, reqOf('GET', '/books/b1', 'embed=authors'));
+    const r = await handleApiRequest(deps, reqOf('GET', `/books/${BOOK_ID}`, 'embed=authors'));
     expect(r.status).toBe(200);
     expect(calls[0].text).toContain('AS "authors"');
     expect(calls[0].text).toContain('WHERE "id" = $1');

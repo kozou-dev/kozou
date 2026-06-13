@@ -286,6 +286,14 @@ describe('@kozou/api integration (generic fixture)', () => {
     expect(status).toBe(404);
   });
 
+  it('400s a non-uuid id segment, not a 500 (#110)', async () => {
+    // authors.id is a uuid; a non-uuid segment is rejected pre-execution rather
+    // than reaching PostgreSQL as a data exception (22P02 -> 500).
+    const { status, body } = await getJson<{ error?: { code: string } }>(`/authors/not-a-uuid`);
+    expect(status).toBe(400);
+    expect(body.error?.code).toBe('bad_request');
+  });
+
   it('serves a VIEW as a read-only list', async () => {
     const { status, body } = await getJson<ListBody>('/vw_inventory_for_sale');
     expect(status).toBe(200);
@@ -459,6 +467,18 @@ describe('@kozou/api integration (generic fixture)', () => {
 
     const gone = await getJson(`/authors/${id}`);
     expect(gone.status).toBe(404);
+  });
+
+  it('400s a malformed uuid in a write body, not a 500 (#110)', async () => {
+    // books.author_id is a uuid foreign key; a non-uuid string value is
+    // rejected pre-execution instead of raising a 22P02 (500) at INSERT.
+    const r = await fetch(`${base}/books`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ author_id: 'zzz', title: 'Bad Ref' }),
+    });
+    expect(r.status).toBe(400);
+    expect(((await r.json()) as { error?: { code: string } }).error?.code).toBe('bad_request');
   });
 
   it('returns relation-select options via ?as=options', async () => {
