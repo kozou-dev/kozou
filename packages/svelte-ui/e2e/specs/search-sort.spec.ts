@@ -6,8 +6,7 @@
 // The fixture seeds three authors:
 //   Margaret Atwood / Ursula K. Le Guin / Octavia Butler (insertion order)
 // `display_name` is the first display column, so the list's first cell
-// of each row carries the author name. Tracks Kozou v0.1 design spec
-// §8.3.2 / §16.1.1 B (Playwright E2E list search + sort).
+// of each row carries the author name. Tracks Playwright E2E list search + sort.
 
 import { expect, test } from '@playwright/test';
 

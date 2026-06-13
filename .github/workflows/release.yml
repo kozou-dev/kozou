@@ -1,6 +1,6 @@
 name: Release
 
-# v0.1.x release pipeline (Kozou v0.1 design spec §16.1.1 A).
+# v0.1.x release pipeline.
 #
 # Triggers:
 # - push of a `vX.Y.Z` tag - the production path
@@ -16,14 +16,13 @@ name: Release
 # 4. github-release - npm pack each tarball, cosign sign-blob, attach
 #               as Release assets with auto-generated notes
 #
-# All third-party actions are SHA-pinned (Codex W2). The pin set
+# All third-party actions are SHA-pinned. The pin set
 # was captured at Step 7-Z-6 from each action's latest stable tag
 # (docker/setup-buildx-action v3, docker/login-action v3,
 # docker/build-push-action v6, sigstore/cosign-installer v3,
 # softprops/action-gh-release v2). docker/setup-qemu-action v3.7.0
-# was added for the multi-arch publish (Kozou v0.1 design spec
-# §16.1.1 B). Dependabot keeps each pin fresh - see
-# .github/dependabot.yml.
+# was added for the multi-arch publish. Dependabot keeps each pin
+# fresh - see .github/dependabot.yml.
 
 on:
   push:
@@ -37,7 +36,7 @@ on:
         default: true
 
 # Top-level permissions stay minimal; each job upgrades to what it
-# needs (Codex W2 / supply-chain hardening).
+# needs (supply-chain hardening).
 permissions:
   contents: read
 
@@ -108,8 +107,7 @@ jobs:
       # for npmjs.com's trusted publisher exchange. Set up the
       # trusted publisher per-package in npmjs.com beforehand - the
       # post-Step-7 setup checklist in the plan covers the exact
-      # one-time registration steps (Kozou v0.1 design spec
-      # §16.1.1 A).
+      # one-time registration steps.
       id-token: write
     strategy:
       fail-fast: false
@@ -226,8 +224,7 @@ jobs:
         # Required so that buildx can cross-build the linux/arm64 leg
         # on the linux/amd64 GitHub-hosted runner. v0.1.0 shipped
         # amd64 only and Apple Silicon `docker pull` failed with
-        # `no matching manifest for linux/arm64/v8` - see Kozou v0.1
-        # design spec §16.1.1 B for the broader v0.1.1 plan.
+        # `no matching manifest for linux/arm64/v8`.
         uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3.7.0
 
       - name: Set up Docker Buildx
@@ -260,7 +257,7 @@ jobs:
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
           context: .
-          # Multi-arch build (Kozou v0.1 design spec §16.1.1 B). On a
+          # Multi-arch build. On a
           # real tag push we publish a manifest list spanning amd64 +
           # arm64; on workflow_dispatch we fall back to amd64 only
           # because (a) buildx cannot `--load` a manifest list into
@@ -324,7 +321,7 @@ jobs:
         # leaves `workspace:*` literal, which would make the
         # signed GitHub Release tarballs differ from the npm
         # registry tarballs AND make them uninstallable for any
-        # downstream consumer. (Codex 7th-pass P1.)
+        # downstream consumer.
         run: |
           mkdir -p artifacts
           for d in core introspect mcp kozou svelte-ui api codegen; do

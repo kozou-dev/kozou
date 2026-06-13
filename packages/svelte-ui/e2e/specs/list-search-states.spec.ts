@@ -2,8 +2,7 @@
 //   - a query with no matches renders the empty state ("No rows." + 0
 //     total) instead of erroring;
 //   - clearing the query and re-submitting restores the full list.
-// Both flows are read-only and leave the fixture untouched. Tracks
-// Kozou v0.1 design spec §8.3.2 / §16.1.1 B.
+// Both flows are read-only and leave the fixture untouched.
 
 import { expect, test } from '@playwright/test';
 

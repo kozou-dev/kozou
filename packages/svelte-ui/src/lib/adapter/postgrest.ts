@@ -1,5 +1,4 @@
 // PostgrestDataAdapter — DataAdapter implementation that speaks PostgREST 12+.
-// See Kozou v0.1 design spec §4.4 (DataAdapter interface) and §8.5.
 //
 // Sub-step 6-D ships list() + get() + the shared request plumbing.
 // Sub-step 6-E ships create() / update() / delete() / searchRelation().
@@ -31,8 +30,8 @@ const DEFAULT_RELATION_LIMIT = 20;
 
 const OR_FILTER_KEY = '__or';
 
-// The horizontal filter operators the in-house API list endpoint accepts
-// (Kozou v1.0 dev spec §4). The REST surface this adapter targets shares the
+// The horizontal filter operators the in-house API list endpoint accepts.
+// The REST surface this adapter targets shares the
 // same `col=op.value` grammar natively, so an already-prefixed filter value
 // is forwarded verbatim; a bare value defaults to equality for backward
 // compatibility. Detection uses indexOf, not a regex (ReDoS-safe).
@@ -205,8 +204,7 @@ export class PostgrestDataAdapter implements DataAdapter {
     const { schema, table } = splitResource(resource, this.defaultSchema);
     // The option id is the target's key: a scalar for a single-column key, an
     // array of components — in key declaration order — for a composite key,
-    // so an option id is always a valid item id for the target (Kozou v1.0
-    // dev spec §3.5 / §5.2).
+    // so an option id is always a valid item id for the target.
     const primaryKey = keyColumns(this.resolvePrimaryKey(resource));
     const limit = params.limit ?? DEFAULT_RELATION_LIMIT;
 
@@ -245,7 +243,7 @@ export class PostgrestDataAdapter implements DataAdapter {
   /**
    * Append the per-column equality filters that address a row by id. A
    * composite key expands to `?col0=eq.v0&col1=eq.v1` in `primaryKey`
-   * declaration order (Kozou v1.0 dev spec §3.7); a single-column key keeps
+   * declaration order; a single-column key keeps
    * the `?col=eq.value` form. The id component count must match the key
    * arity (else a config error, surfacing a wiring mismatch).
    */
@@ -357,8 +355,8 @@ function appendFilters(
     }
     // A value already carrying a known operator prefix (`gt.5`, `in.(a,b)`,
     // `is.null`, ...) is the REST surface's native grammar, so it is
-    // forwarded verbatim; a bare value defaults to equality (Kozou v1.0 dev
-    // spec §4, kept consistent with the in-house API adapter).
+    // forwarded verbatim; a bare value defaults to equality (kept consistent
+    // with the in-house API adapter).
     if (typeof value === 'string' && hasOperatorPrefix(value)) {
       query.set(key, value);
       continue;

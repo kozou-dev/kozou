@@ -184,9 +184,8 @@ export async function fetchTables(client: Client, schemas: string[]): Promise<Ra
       checks: [],
       indexes: indexByTable.get(key) ?? [],
       // pg returns float8 as a JS number; round to integer because
-      // the dev_spec contract (§7.3.1) types this as `number | null`
-      // and a fractional estimate would be misleading at the MCP
-      // surface.
+      // the contract types this as `number | null` and a fractional
+      // estimate would be misleading at the MCP surface.
       rowCountEstimate:
         row.row_count_estimate === null
           ? null

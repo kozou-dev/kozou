@@ -123,7 +123,7 @@ export default async function globalSetup() {
       // mutation specs reach the actual server actions. Any plain-http
       // adapter-node deployment of the Admin UI (e.g. `kozou dev` on
       // http://localhost:3333) needs the same — tracked as a v0.1.1
-      // follow-up in dev_spec §16.1.1 B.
+      // follow-up.
       ORIGIN: `http://${SVELTE_UI_HOST}:${SVELTE_UI_PORT}`,
       NODE_ENV: 'production',
     },

@@ -4,8 +4,7 @@
 // (Sub-step 6-J onwards) can compose tables -> zod -> superforms
 // without coupling the .svelte template to zod's API. dataType +
 // widget + nullable + enumValues are the inputs; CHECK constraints
-// beyond enum extraction are out of scope for v0.1 (see Kozou v0.1
-// design spec §6.4 / §6.5 / §8.3.3).
+// beyond enum extraction are out of scope for v0.1.
 
 import { z } from 'zod';
 import type { ZodTypeAny } from 'zod';
@@ -59,7 +58,7 @@ export function zodFromColumn(column: ColumnContext): ZodTypeAny {
   //  1. validation passes for the empty submission — without it the
   //     auto-generated uuid primary key fails with "Invalid uuid",
   //     which made it impossible to create a row in any table with a
-  //     uuid-default PK (dev_spec §8.3.3);
+  //     uuid-default PK;
   //  2. the schema's inferred default becomes '' (the first union
   //     member) rather than `undefined`, so the form binds a string.
   //     Binding `undefined` to the widgets — which declare

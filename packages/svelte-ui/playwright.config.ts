@@ -1,11 +1,10 @@
 // Playwright config for @kozou/svelte-ui end-to-end tests.
-// Tracks Kozou v0.1 design spec §16.1.1 B (Playwright E2E / Step 6-M).
+// Tracks Playwright E2E / Step 6-M.
 //
 // The suite spins up postgres + postgrest + svelte-ui via testcontainers
 // (see e2e/setup/global-setup.ts) and exercises the Admin UI through a
 // real browser. v0.1.1 ships a smoke set (dashboard / list / view);
-// follow-up PRs extend it across the full CRUD loop documented in dev_spec
-// §8.3.
+// follow-up PRs extend it across the full CRUD loop.
 
 import { defineConfig } from '@playwright/test';
 

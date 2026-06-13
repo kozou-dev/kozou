@@ -3,7 +3,7 @@
 // Reads the YAML config file, expands ${VAR} / ${VAR:-default} placeholders
 // against the process environment, fills in defaults, and validates the
 // result with zod. Every field has a default so kozou can run with only the
-// DATABASE_URL environment variable set, per the Kozou v0.1 design spec §9.2.
+// DATABASE_URL environment variable set.
 //
 // A literal `$$` escapes to a single `$`, so `$${VAR}` produces the literal
 // text `${VAR}` instead of expanding it. Expansion is single-level by design:
@@ -109,7 +109,7 @@ const databaseSchema = z.object({
 // owner-safe search_path. `allowPublicExecute`: functions that intentionally
 // keep EXECUTE granted to PUBLIC (anon-callable); without it, a function still
 // granting PUBLIC EXECUTE is hard-skipped. Both default to empty (nothing extra
-// is exposed). See the RPC design doc.
+// is exposed).
 const rpcSchema = z
   .object({
     allowDefiner: z.array(z.string().min(1)).default([]),

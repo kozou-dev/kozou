@@ -1,8 +1,6 @@
 // Edit-record route. Loads the current row via DataAdapter.get,
 // hydrates a zod-driven superforms form, and on submit calls
 // DataAdapter.update + redirects to the detail page.
-//
-// See Kozou v0.1 design spec §8.3.5.
 
 import { error, fail, redirect } from '@sveltejs/kit';
 import { superValidate } from 'sveltekit-superforms';

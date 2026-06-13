@@ -10,7 +10,7 @@ export default defineConfig({
       provider: 'v8',
       include: ['src/**/*.ts'],
       // functions/branches floors sit a few points below current coverage
-      // as a regression ratchet (Kozou v0.1 design spec §16.1.1 B).
+      // as a regression ratchet.
       thresholds: {
         lines: 90,
         statements: 90,

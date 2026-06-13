@@ -1,7 +1,7 @@
 // node:http wiring for the Kozou REST layer. Mirrors @kozou/mcp's
 // startHttpServer: a thin request listener over the framework-agnostic
 // handler, bound to loopback by default with a loud warning when bound to
-// a non-loopback host (Kozou v0.1 spec §18.5 — the v0.2 API has no auth).
+// a non-loopback host (the v0.2 API has no auth).
 
 import {
   createServer,

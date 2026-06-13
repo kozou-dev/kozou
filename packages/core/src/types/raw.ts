@@ -1,9 +1,7 @@
-// RawIntrospection type definitions per Kozou v0.1 spec §4.1. This is the
+// RawIntrospection type definitions. This is the
 // output contract of @kozou/introspect.
 //
-// Per Kozou v0.1 spec §0, this file is the source of truth on the code
-// side; when type changes diverge from the spec, the same PR must update
-// Kozou v0.1 spec.
+// This file is the source of truth on the code side.
 
 /** introspect output: the raw structural information pulled from PostgreSQL. */
 export type RawIntrospection = {
@@ -59,7 +57,7 @@ export type RawTable = {
    *  PostgreSQL stores -1 for "never analyzed"; that case maps to
    *  null here so consumers always see "a non-negative count, or
    *  unknown" instead of mixing the sentinel into the numeric
-   *  domain. Surfaced through `list_tables` (Kozou v0.1 spec §7.3.1). */
+   *  domain. Surfaced through `list_tables`. */
   rowCountEstimate: number | null;
 };
 
@@ -135,7 +133,7 @@ export type RawEnum = {
 /** One declared argument of a function, as introspected from pg_proc. Covers
  *  all modes; the function-context builder keeps only the input ones (`in` /
  *  `inout` / `variadic`) when shaping the RPC surface, and treats `variadic` /
- *  unnamed args as a loud skip per the RPC design §4.4. */
+ *  unnamed args as a loud skip. */
 export type RawFunctionArg = {
   /** Argument name, or '' for an unnamed positional argument. */
   name: string;
@@ -152,10 +150,10 @@ export type RawFunctionArg = {
   hasDefault: boolean;
 };
 
-/** Classification of a function's return type for the RPC wire shape (RPC
- *  design §4.3). `unsupported` covers OUT/INOUT composite, record, polymorphic,
+/** Classification of a function's return type for the RPC wire shape.
+ *  `unsupported` covers OUT/INOUT composite, record, polymorphic,
  *  and anything else v1 does not map — a loud skip when the function is tagged
- *  for exposure (§4.4). */
+ *  for exposure. */
 export type RawFunctionReturn = {
   kind: 'scalar' | 'composite' | 'setof' | 'void' | 'unsupported';
   /** `format_type` rendering of the return type, e.g. "integer", "SETOF orders". */
@@ -167,7 +165,7 @@ export type RawFunctionReturn = {
 };
 
 /** One element of a `security definer` function's declared `SET search_path`,
- *  used by the owner-relative safe-search_path predicate (RPC design §3.2). */
+ *  used by the owner-relative safe-search_path predicate. */
 export type RawFunctionSearchPathElement = {
   /** Raw element text from proconfig, e.g. "public", "pg_catalog", "$user". */
   raw: string;
@@ -176,7 +174,7 @@ export type RawFunctionSearchPathElement = {
   schema: string | null;
   /** Whether PUBLIC, or any role other than the function owner, may CREATE in
    *  this schema (the hijack surface). `null` = could not be determined, which
-   *  the predicate treats as unsafe (fail-closed, §3.2). Not evaluated for the
+   *  the predicate treats as unsafe (fail-closed). Not evaluated for the
    *  `pg_temp` element (`isTemp: true`), whose hazard is presence/position. */
   writableByOthers: boolean | null;
   /** True for the `pg_temp` element (the session temp schema). */
@@ -184,7 +182,7 @@ export type RawFunctionSearchPathElement = {
 };
 
 /** A function pulled from pg_proc. Populated by @kozou/introspect for the RPC
- *  surface (RPC design §4). All fields beyond schema/name/comment are used by
+ *  surface. All fields beyond schema/name/comment are used by
  *  the exposure decision and the wire mapping; see RawFunctionArg / return /
  *  search-path types above. */
 export type RawFunction = {
@@ -197,18 +195,18 @@ export type RawFunction = {
   returns: RawFunctionReturn;
   volatility: 'immutable' | 'stable' | 'volatile';
   /** `prosecdef`: a `security definer` function runs as its owner and needs the
-   *  double opt-in + safe search_path of RPC design §3.2. */
+   *  double opt-in + safe search_path. */
   security: 'invoker' | 'definer';
   /** `proowner`: the role the function runs as under `security definer`, and
-   *  the "only role allowed to CREATE" anchor of the safe-search_path predicate
-   *  (§3.2 / §4.2). */
+   *  the "only role allowed to CREATE" anchor of the safe-search_path
+   *  predicate. */
   owner: { oid: number; name: string };
   /** Whether PUBLIC holds EXECUTE on this function — the default-grant footgun
-   *  (`CREATE FUNCTION` grants EXECUTE to PUBLIC by default). RPC design §6.1
-   *  hard-skips a tagged function that still has this unless overridden. */
+   *  (`CREATE FUNCTION` grants EXECUTE to PUBLIC by default). A tagged
+   *  function that still has this is hard-skipped unless overridden. */
   publicExecute: boolean;
   /** Parsed `proconfig` `search_path` elements; null = none declared. Drives the
-   *  safe-search_path predicate for `security definer` functions (§3.2). */
+   *  safe-search_path predicate for `security definer` functions. */
   searchPath: RawFunctionSearchPathElement[] | null;
   comment: string | null;
 };

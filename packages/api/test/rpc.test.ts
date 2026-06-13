@@ -27,7 +27,7 @@ describe('buildFunctionLookup', () => {
   });
 });
 
-describe('buildRpcCall — pre-flight (§6.2)', () => {
+describe('buildRpcCall — pre-flight', () => {
   const fn = functionContext('approve_order', {
     args: [fnArg('order_id', 'uuid', { widget: 'uuid' }), fnArg('note', 'text', { hasDefault: true })],
     returns: { kind: 'void', typeName: 'void' },
@@ -76,7 +76,7 @@ describe('buildRpcCall — named-args call + value binding', () => {
   });
 });
 
-describe('buildRpcCall — SELECT form per return kind (§4.3)', () => {
+describe('buildRpcCall — SELECT form per return kind', () => {
   const callFor = (returns: FunctionReturnContext): string =>
     buildRpcCall(functionContext('f', { returns }), {}).text;
 
@@ -109,7 +109,7 @@ describe('buildRpcCall — SELECT form per return kind (§4.3)', () => {
   });
 });
 
-describe('shapeRpcResult — wire form (§4.3)', () => {
+describe('shapeRpcResult — wire form', () => {
   it('void -> 204 with no body', () => {
     expect(shapeRpcResult({ kind: 'void', typeName: 'void' }, [])).toEqual({
       status: 204,

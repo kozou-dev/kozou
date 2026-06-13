@@ -1,4 +1,4 @@
-// The Admin UI "Actions" surface (issue #103, RPC design §5.4) end-to-end
+// The Admin UI "Actions" surface (issue #103) end-to-end
 // against the in-house @kozou/api server: the dashboard lists the exposed
 // function, its argument form runs it through POST /rpc/<schema>.<fn>, and the
 // result is shown. The fixture exposes `double_it(n integer)` (invoker, PUBLIC

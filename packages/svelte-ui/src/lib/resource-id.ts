@@ -3,7 +3,7 @@
 // A single-column primary key is carried verbatim in the URL; a composite
 // key joins its components — in `primaryKey` declaration order — into one
 // path segment, each component percent-encoded and separated by an
-// unescaped comma (Kozou v1.0 dev spec §3.2 / §3.6). The route stays a
+// unescaped comma. The route stays a
 // single dynamic `[id]` param; only the value shape changes, so the
 // SvelteKit routing table is untouched.
 //
@@ -11,7 +11,7 @@
 // SvelteKit param (and the in-house API handler) URL-decode the whole
 // segment before splitting on commas, so an encoded `%2C` is
 // indistinguishable from a separator. Single-column keys are unaffected.
-// This matches the server's documented limit (Kozou v1.0 dev spec §3.8).
+// This matches the server's documented limit.
 
 import type { ResourceId } from '@kozou/core';
 

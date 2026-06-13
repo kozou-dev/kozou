@@ -1,9 +1,8 @@
-// DataAdapter interface as defined in Kozou v0.1 spec §4.4.
+// DataAdapter interface.
 //
 // In v0.1 the first concrete adapter ships under @kozou/core. Defining a
 // pluggable boundary up front lets v0.2's `@kozou/api` slot in as a
-// non-breaking change (see end of Kozou v0.1 spec §4.4). For the concrete
-// adapter implementation names, refer to Kozou v0.1 spec §4.4.
+// non-breaking change.
 
 /**
  * Identifier of a single record. A scalar for a single-column primary key;

@@ -62,7 +62,7 @@ describe('@kozou/api integration (generic fixture)', () => {
       );
       inventoryItemId = item.rows[0].id;
 
-      // A composite-primary-key table for the item-by-id (§3) tests.
+      // A composite-primary-key table for the item-by-id tests.
       await client.query(
         `CREATE TABLE order_lines (
            order_id uuid NOT NULL,
@@ -77,14 +77,14 @@ describe('@kozou/api integration (generic fixture)', () => {
         [ORDER_A, ORDER_B],
       );
 
-      // A real column for the float range-overflow filter check (§4 / #81).
+      // A real column for the float range-overflow filter check (#81).
       await client.query(
         `CREATE TABLE float_samples (id integer PRIMARY KEY, approx real NOT NULL)`,
       );
       await client.query(`INSERT INTO float_samples (id, approx) VALUES (1, 1.5)`);
 
       // RPC functions (issue #103). Each is tagged @expose: rpc and has its
-      // PUBLIC EXECUTE revoked (else the exposure decision hard-skips it, §6.1).
+      // PUBLIC EXECUTE revoked (else the exposure decision hard-skips it).
       // The connecting role is a superuser, so it can still call them.
       await client.query(`
         CREATE FUNCTION add_two(a integer, b integer DEFAULT 1) RETURNS integer
@@ -306,7 +306,7 @@ describe('@kozou/api integration (generic fixture)', () => {
     expect(status).toBe(400);
   });
 
-  // --- Horizontal filter operators (Kozou v1.0 spec §4) --------------------
+  // --- Horizontal filter operators ----------------------------------------
 
   const q = (col: string, expr: string): string =>
     `/authors?${col}=${encodeURIComponent(expr)}`;
@@ -634,7 +634,7 @@ describe('@kozou/api integration (generic fixture)', () => {
     expect(body.paths['/books'].get?.parameters?.some((p) => p.name === 'embed')).toBe(true);
   });
 
-  // --- Composite primary key, item-by-id (Kozou v1.0 spec §3) --------------
+  // --- Composite primary key, item-by-id -----------------------------------
 
   it('lists a composite-primary-key table', async () => {
     const { status, body } = await getJson<ListBody>('/order_lines');

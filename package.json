@@ -2,7 +2,7 @@
   "name": "@kozou/monorepo",
   "version": "0.0.0",
   "private": true,
-  "description": "Kozou monorepo (private). Public OSS packages live under packages/*. See Kozou v0.1 design spec.",
+  "description": "Kozou monorepo (private). Public OSS packages live under packages/*.",
   "license": "Apache-2.0",
   "author": "Takashi Matsuyama",
   "homepage": "https://kozou.org",

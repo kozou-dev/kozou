@@ -7,7 +7,7 @@ useDefault = true
 # Only specific demo / test literal patterns are allowlisted so any real
 # secret accidentally committed in the future still gets caught.
 #
-# Design rationale (Codex W1):
+# Design rationale:
 # Earlier revisions excluded broad paths (docs/demo, scripts/demo,
 # *.example, etc.). That setup hid real secrets that might end up under
 # those paths. The current allowlist matches narrow regexes over specific

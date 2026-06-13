@@ -11,8 +11,7 @@
 // `authors` is the simplest table to exercise: a single required,
 // user-editable column (display_name). Its `id` is a uuid PRIMARY KEY
 // with a `gen_random_uuid()` default, so the form renders it read-only
-// and the database fills it in on insert. Tracks Kozou v0.1 design spec
-// §8.3.3 / §8.3.5 / §16.1.1 B (Playwright E2E CRUD loop).
+// and the database fills it in on insert. Tracks Playwright E2E CRUD loop.
 
 import { expect, test } from '@playwright/test';
 

@@ -1,5 +1,4 @@
 // DataAdapter implementations and their shared surface.
-// See Kozou v0.1 design spec §4.4 (DataAdapter interface) and §8.5.
 //
 // Concrete adapter implementations land in sibling modules:
 //   - ./postgrest.ts  -> PostgrestDataAdapter (Sub-step 6-D and 6-E)

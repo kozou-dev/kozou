@@ -103,9 +103,9 @@ describe('introspect (generic English fixture)', () => {
     expect(r.schemas).toEqual([db.schema]);
   });
 
-  it('returns empty (warns, does not throw) for a non-existent schema (spec §5.4)', async () => {
+  it('returns empty (warns, does not throw) for a non-existent schema', async () => {
     // A schema that does not exist must be a warning + empty result, not a
-    // failure (Kozou v0.1 design spec §5.4).
+    // failure.
     const r = await introspect({
       connection: db.connectionString,
       schemas: ['kozou_missing_schema'],

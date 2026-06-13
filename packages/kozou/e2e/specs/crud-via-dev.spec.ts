@@ -11,8 +11,7 @@
 //     is accepted instead of being rejected by the CSRF guard with a 403.
 //
 // The created row is deleted again so the shared fixture is left in its
-// original three-author state for re-runs. Tracks Kozou v0.1 design spec
-// §9.1 (`kozou dev`) and §16.1.1 B.
+// original three-author state for re-runs.
 
 import { expect, test } from '@playwright/test';
 

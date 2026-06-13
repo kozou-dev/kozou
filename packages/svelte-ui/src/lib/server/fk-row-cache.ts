@@ -5,8 +5,7 @@
 // DataAdapter once per FK column per render; this cache keeps the
 // resolved rows around for `ttlMs` so navigating between sibling
 // detail pages (or re-rendering the same row) does not re-fetch the
-// same target. Tracks Kozou v0.1 design spec §16.1.1 B (FK label
-// resolution via hooks.server TTL cache).
+// same target. Tracks FK label resolution via hooks.server TTL cache.
 //
 // The cache stores null on misses too. A real fetch error (network
 // blip, 5xx) is caught by the caller's loader and surfaced as null,

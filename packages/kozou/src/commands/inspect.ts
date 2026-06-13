@@ -6,8 +6,6 @@
 //   3. Optionally load UI hints (@kozou/core.loadUIHints).
 //   4. Build a SchemaContext (@kozou/core.buildSchemaContext).
 //   5. Serialize to JSON or YAML and write to stdout or a file.
-//
-// See Kozou v0.1 design spec §9.1.
 
 import { writeFile } from 'node:fs/promises';
 import { stringify as stringifyYAML } from 'yaml';

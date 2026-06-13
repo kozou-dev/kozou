@@ -4,7 +4,7 @@
 // in the `/tables/[table]` and `/views/[view]` route components. This
 // module is their single source so the shared `ListTable.svelte` and
 // both routes agree on the URL contract defined in
-// `query/list-params.ts`. See Kozou v0.1 design spec §8.3.2 / §16.1.1 B.
+// `query/list-params.ts`.
 
 import type { SortSpec } from '@kozou/core';
 

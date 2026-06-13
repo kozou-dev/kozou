@@ -5,12 +5,10 @@
 // action calls DataAdapter.delete + redirects back to the table
 // listing.
 //
-// FK label resolution lands here in v0.1.1 (Kozou v0.1 design spec
-// §16.1.1 B). The cache keeps repeat renders / sibling detail pages
+// FK label resolution lands here in v0.1.1. The cache keeps repeat
+// renders / sibling detail pages
 // from re-fetching the same target rows; lookup misses fall back to
 // rendering the raw FK value.
-//
-// See Kozou v0.1 design spec §8.3.4.
 
 import { error, redirect } from '@sveltejs/kit';
 

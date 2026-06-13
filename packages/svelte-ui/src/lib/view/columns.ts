@@ -2,8 +2,6 @@
 // Symmetrical to the equivalents inside the table list route, but
 // kept in a separate module so the view route can stay declarative
 // and the heuristics are unit-testable in isolation.
-//
-// See Kozou v0.1 design spec §8.3.6.
 
 import type { ColumnContext, ViewContext } from '@kozou/core';
 

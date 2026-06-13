@@ -5,7 +5,7 @@ import { setupDatabase, type DatabaseHandle } from '@kozou/test-utils';
 import { introspect } from '@kozou/introspect';
 import { describeFunctions, describeFunctionsOutputSchema, SchemaCache } from '../src/index.js';
 
-// describe_functions (issue #103, RPC design §5.3): the read tool that lets an
+// describe_functions (issue #103): the read tool that lets an
 // AI agent learn the exposed RPC actions — signatures plus the schema author's
 // @ai / @policy advisory.
 const FIXTURE_SQL = `

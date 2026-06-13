@@ -1,12 +1,10 @@
-// UIHints type definitions + zod schema per Kozou v0.1 spec §4.3.
+// UIHints type definitions + zod schema.
 //
-// Kozou v0.1 spec §16.1 leaves the final YAML grammar intentionally open
-// ("finalised during implementation"). In v0.1 we treat the TypeScript
-// shape in spec §4.3 as the minimal source of truth and validate the
-// parsed YAML with zod from loadUIHints.
+// In v0.1 we treat the TypeScript shape here as the minimal source of
+// truth and validate the parsed YAML with zod from loadUIHints.
 //
 // Extension surface: when v0.2 adds relations or validation rules, extend
-// this schema and update Kozou v0.1 spec §4.3 in the same PR (§0 rule).
+// this schema here.
 
 import { z } from 'zod';
 

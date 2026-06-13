@@ -12,7 +12,7 @@ export type Clock = () => number;
 
 export interface SchemaCacheOptions {
   loader: SchemaLoader;
-  /** Cache TTL in milliseconds. Defaults to 60_000 (Kozou v0.1 spec §8.5). */
+  /** Cache TTL in milliseconds. Defaults to 60_000. */
   ttlMs?: number;
   /** Time source. Defaults to Date.now. */
   clock?: Clock;

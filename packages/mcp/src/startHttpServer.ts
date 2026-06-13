@@ -1,5 +1,5 @@
 // Convenience helper to start an MCP server with the Streamable HTTP
-// transport (Kozou v0.1 spec §7.1). Mirrors startStdioServer so callers
+// transport. Mirrors startStdioServer so callers
 // (the bundled kozou CLI and adopters embedding the server) do not need
 // to depend on @modelcontextprotocol/sdk or node:http directly.
 //
@@ -9,10 +9,10 @@
 //     the matching transport. This is the transport mode the standard MCP
 //     client (Claude Desktop / Claude Code) speaks. Sessions are torn
 //     down on transport close so nothing accumulates.
-//   - Cache invalidation is exposed over HTTP via `POST /admin/refresh`
-//     (Kozou v0.1 spec §7.5), the HTTP-mode counterpart to the stdio
+//   - Cache invalidation is exposed over HTTP via `POST /admin/refresh`,
+//     the HTTP-mode counterpart to the stdio
 //     server's SIGHUP handler.
-//   - v0.1 MCP HTTP ships with **no authentication** (spec §18.5), so the
+//   - v0.1 MCP HTTP ships with **no authentication**, so the
 //     server binds to localhost by default and prints a loud warning when
 //     bound to a non-loopback host. The tools only expose schema
 //     metadata (no SQL execution, no data access), which bounds the blast
@@ -30,7 +30,7 @@ import { createMcpServer } from './server.js';
 import type { SchemaCache } from './schemaCache.js';
 
 export type StartHttpServerOptions = {
-  /** TCP port to listen on. Default: 3334 (Kozou v0.1 spec §7.1). */
+  /** TCP port to listen on. Default: 3334. */
   port?: number;
   /** Host/interface to bind. Default: 127.0.0.1 (loopback only). */
   host?: string;

@@ -16,7 +16,7 @@ import {
   getConceptContext,
 } from '../src/index.js';
 
-describe('MCP tools (generic English fixture, Kozou v0.1 spec §13.2)', () => {
+describe('MCP tools (generic English fixture)', () => {
   let db: DatabaseHandle;
   let cache: SchemaCache;
 

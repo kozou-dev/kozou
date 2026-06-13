@@ -1,9 +1,8 @@
 // Parse Kozou v0.1 COMMENT tag conventions (`@ai:`, `@widget:`,
-// `@policy:`, `@example:`). See Kozou v0.1 design spec §10.1 for the
-// tag vocabulary and §7.3.6 for the `exampleQueries` MCP surface.
+// `@policy:`, `@example:`).
 //
-// Two single-line tags were added for the RPC surface (issue #103, RPC
-// design §3 / §5.4): `@expose:` marks a function for RPC exposure
+// Two single-line tags were added for the RPC surface (issue #103):
+// `@expose:` marks a function for RPC exposure
 // (`@expose: rpc`, or `@expose: rpc public` to keep PUBLIC callable),
 // and `@arg: <name> relation(<ref>)` / `@arg: <name> widget(<type>)`
 // hints a function argument toward a relation-select / specific widget
@@ -119,13 +118,13 @@ export type ExampleQuery = {
   sql: string;
 };
 
-/** RPC exposure marker from `@expose:` (RPC design §3 / §6.1). `none` = the
+/** RPC exposure marker from `@expose:`. `none` = the
  *  function is not exposed (the default); `rpc` = exposed; `rpc-public` =
- *  exposed and intentionally public-callable (PUBLIC EXECUTE override, §6.1). */
+ *  exposed and intentionally public-callable (PUBLIC EXECUTE override). */
 export type ExposeKind = 'none' | 'rpc' | 'rpc-public';
 
-/** Per-argument hint from `@arg: <name> ...` on a function COMMENT (RPC design
- *  §5.4). `relation` targets a relation-select; `widget` forces a widget. The
+/** Per-argument hint from `@arg: <name> ...` on a function COMMENT.
+ *  `relation` targets a relation-select; `widget` forces a widget. The
  *  relation `schema` is null when the ref was 2-part (`table.col`); the
  *  function-context builder defaults it to the function's schema. */
 export type ArgHint = {
@@ -142,7 +141,7 @@ export type ParsedComment = {
   examples: ExampleQuery[];
   /** RPC exposure marker (`@expose:`); `none` when the tag is absent. */
   expose: ExposeKind;
-  /** `@arg:` hints, in source order (RPC design §5.4). */
+  /** `@arg:` hints, in source order. */
   args: ArgHint[];
 };
 
@@ -309,7 +308,7 @@ export function parseCommentTags(comment: string | null): ParsedComment {
     }
     if (tag === 'expose') {
       // Single-line directive, lifted out of `body` like `@widget`. Accept
-      // `rpc` (exposed) and `rpc public` (exposed + public-callable, §6.1);
+      // `rpc` (exposed) and `rpc public` (exposed + public-callable);
       // a later `@expose:` line wins (last-write). Whitespace-normalized so
       // "rpc  public" still parses.
       const tokens = value.toLowerCase().split(/\s+/).filter((t) => t !== '');

@@ -8,8 +8,6 @@
 //   ?sort=col:asc,col2:desc    -> SortSpec[] (one or many)
 //   ?page=<n>                  -> 1-based page index, default 1
 //   ?pageSize=<m>              -> rows per page, default 50
-//
-// See Kozou v0.1 design spec §8.3.2.
 
 import type { ListParams, SortSpec } from '@kozou/core';
 

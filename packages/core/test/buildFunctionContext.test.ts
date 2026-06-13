@@ -94,7 +94,7 @@ describe('buildFunctionContexts — exposure decision', () => {
     expect(ctx.policy).toEqual(['admins only']);
   });
 
-  describe('PUBLIC EXECUTE (§6.1)', () => {
+  describe('PUBLIC EXECUTE', () => {
     it('hard-skips a tagged function that still grants PUBLIC EXECUTE', () => {
       const { result, issues } = build([makeFn({ publicExecute: true })]);
       expect(result).toEqual([]);
@@ -117,7 +117,7 @@ describe('buildFunctionContexts — exposure decision', () => {
     });
   });
 
-  describe('SECURITY DEFINER double opt-in (§3.2)', () => {
+  describe('SECURITY DEFINER double opt-in', () => {
     it('skips a definer function not listed in allowDefiner', () => {
       const { result, issues } = build([makeFn({ security: 'definer', searchPath: safeSearchPath() })]);
       expect(result).toEqual([]);
@@ -215,7 +215,7 @@ describe('buildFunctionContexts — exposure decision', () => {
     });
   });
 
-  describe('overloads and identity (§2 / §5.0)', () => {
+  describe('overloads and identity', () => {
     it('skips an entire overloaded set sharing schema.name and raises one issue', () => {
       const a = makeFn({ arguments: [arg({ name: 'order_id' })] });
       const b = makeFn({ arguments: [arg({ name: 'order_id' }), arg({ name: 'note', typeName: 'text', udtName: 'text' })] });
@@ -278,7 +278,7 @@ describe('buildFunctionContexts — exposure decision', () => {
     });
   });
 
-  describe('unsupported shapes (§4.4)', () => {
+  describe('unsupported shapes', () => {
     it('skips a function with a VARIADIC argument', () => {
       const fn = makeFn({ arguments: [arg({ name: 'tags', typeName: 'text[]', udtName: '_text', mode: 'variadic' })] });
       const { result, issues } = build([fn]);
@@ -328,7 +328,7 @@ describe('buildFunctionContexts — exposure decision', () => {
   });
 });
 
-// ---- argument widget inference (§5.4) -------------------------------------
+// ---- argument widget inference --------------------------------------------
 
 describe('buildFunctionContexts — argument widgets', () => {
   it('infers a scalar widget from the argument type (uuid -> uuid)', () => {
