@@ -191,12 +191,21 @@ appears only in the server log, never in the response (an error can name
 objects outside the exposed surface — for instance a foreign key from a
 table that is not exposed — so identifiers are withheld across the board).
 Data exceptions (SQLSTATE class 22) are deliberately not mapped: mapping
-the whole class would relabel genuine kozou bugs as client errors. List
-filter and search values are already validated before they reach the
-database (invalid values return 400 up front); inputs not yet pre-flighted
-the same way — an invalid id segment or write-body value — currently
-surface as a 500 with the detail in the server log, and closing those
-gaps with up-front 400s is tracked as follow-up work.
+the whole class would relabel genuine kozou bugs as client errors. Instead,
+the client inputs that would otherwise raise one are validated before they
+reach the database — list filter and search values, item id segments, and
+write-body values all return a 400 up front when malformed. Pre-flight
+covers the scalar families with a reliable lexical form (the integer widths,
+the decimal/float family — including `NaN`, and `±Infinity` for the float
+types — boolean, and uuid);
+a malformed value of another type — for example a bad date — still falls
+through to a 500, by design. Two further notes: in a write body only
+**string-valued** fields are pre-flighted (a non-string JSON value is left to
+PostgreSQL — a JSON number is already a valid numeric, an object targets a
+json column), and the check requires the canonical lexical form, so it will
+reject some redundant spellings PostgreSQL also accepts (a hex/underscored
+integer literal, an abbreviated boolean prefix) — send the plain decimal /
+`true`/`false` form.
 
 With auth enabled, the auth layer adds its own statuses: missing token →
 401 (or the configured `anonRole` takes over), invalid token → 401,

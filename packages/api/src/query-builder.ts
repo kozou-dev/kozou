@@ -147,6 +147,25 @@ const DECIMAL_BASE_TYPES = new Set([
   'float4',
   'float8',
 ]);
+
+/** Non-finite literals PostgreSQL accepts for the decimal/float family.
+ *  `NaN` is valid for every such type (`real`, `double precision`, and — since
+ *  PostgreSQL 14 — `numeric`, including a constrained `numeric(p,s)`).
+ *  `±Infinity` is valid for the float types and for an *unbounded* `numeric`,
+ *  but a constrained `numeric(p,s)` rejects it (22003); `valueFitsType`
+ *  enforces that distinction. Matched case-insensitively. Listed here because
+ *  they carry no digits, so `isLexicalDecimal` would otherwise reject them;
+ *  they are genuine values a column may store, not alternate spellings.
+ *  Verified against PostgreSQL 16 `pg_input_is_valid`. */
+const SPECIAL_FLOAT_LITERALS = new Set([
+  'nan',
+  'inf',
+  '+inf',
+  '-inf',
+  'infinity',
+  '+infinity',
+  '-infinity',
+]);
 const BOOLEAN_LITERALS = new Set([
   'true',
   'false',
@@ -162,9 +181,41 @@ const BOOLEAN_LITERALS = new Set([
   '0',
 ]);
 
+/** Whether a string is syntactically valid input for a PostgreSQL `uuid`.
+ *  PostgreSQL accepts the 32 hex digits in either case, optionally wrapped in a
+ *  single pair of braces, and is lenient about hyphens. This check strips an
+ *  optional surrounding `{...}` and every hyphen, then requires exactly 32 hex
+ *  digits. It is deliberately *more* permissive than PostgreSQL about hyphen
+ *  placement and surrounding whitespace, so that a value PostgreSQL would
+ *  accept is never falsely rejected; an over-permissive accept simply falls
+ *  through to the same execution error as before (no regression). Verified
+ *  against PostgreSQL 16 `pg_input_is_valid(v, 'uuid')`. No regex (linear
+ *  scan), per the CodeQL `js/polynomial-redos` precedent. */
+function isUuidLexical(s: string): boolean {
+  let body = s.trim();
+  if (body.length >= 2 && body[0] === '{' && body[body.length - 1] === '}') {
+    body = body.slice(1, -1);
+  }
+  let hex = 0;
+  for (let i = 0; i < body.length; i++) {
+    const c = body[i];
+    if (c === '-') continue;
+    const isHex =
+      (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
+    if (!isHex) return false;
+    hex++;
+  }
+  return hex === 32;
+}
+
 /** A plain base-10 integer literal (optional sign, then digits). A manual
- *  scan — no regex — so it rejects the `0x`/`0b`/`0o` and exponent forms that
- *  JavaScript's `Number` tolerates but a PostgreSQL integer column does not. */
+ *  scan — no regex. This is a deliberately *canonical* form: it rejects the
+ *  `0x`/`0o`/`0b` and digit-group-underscore spellings that PostgreSQL 16 does
+ *  accept, as well as the exponent forms JavaScript's `Number` tolerates. Those
+ *  alternative spellings denote values the client can equally send in plain
+ *  decimal, so pre-flight requires the canonical form rather than carrying a
+ *  full literal grammar (a value PostgreSQL would accept but this rejects is
+ *  only ever a re-spelling, never a value that cannot otherwise be expressed). */
 function isPlainInteger(s: string): boolean {
   let i = 0;
   if (s[0] === '+' || s[0] === '-') i = 1;
@@ -312,12 +363,20 @@ function decimalFitsRange(base: string, dataType: string, value: string): boolea
   return numericFitsTypmod(value, typmod.precision, typmod.scale);
 }
 
-/** Whether a string filter value parses as the column's type, for the types
+/** Whether a string value parses as the column's type, for the scalar families
  *  where a bad value would otherwise surface only at execution as a 500:
  *  integer family (exact, with width range), decimal/float family (lexical
- *  syntax plus range/precision, Kozou v1.0 issue #81), and boolean. Other
- *  types (uuid / date / json / ...) are not pre-checked and fall through to
- *  PostgreSQL.
+ *  syntax plus range/precision (issue #81), plus the non-finite literals
+ *  `NaN` / `±Infinity`), boolean, and uuid (issue #110). Other types (date /
+ *  json / text / ...) are not pre-checked and fall through to PostgreSQL.
+ *
+ *  The check is a conservative under-approximation of PostgreSQL's accepted
+ *  input: it must never reject a value PostgreSQL would accept *and that
+ *  expresses a distinct value*. It deliberately does reject some valid but
+ *  redundant spellings (PostgreSQL 16 non-decimal / underscored integer
+ *  literals; abbreviated boolean prefixes like `tr` / `fa`) — those re-spell a
+ *  value the client can also send canonically, so requiring the canonical form
+ *  avoids carrying a full literal grammar without ever blocking a value.
  *
  *  Decimal syntax is validated without coercing through JS `Number` (so an
  *  arbitrary-precision `numeric` is not false-rejected); range / precision is
@@ -332,13 +391,45 @@ function valueFitsType(base: string, dataType: string, value: string): boolean {
     return n >= bounds[0] && n <= bounds[1];
   }
   if (DECIMAL_BASE_TYPES.has(base)) {
+    const lc = trimmed.toLowerCase();
+    if (lc === 'nan') return true; // NaN is valid for every decimal/float type, incl. numeric(p,s)
+    if (SPECIAL_FLOAT_LITERALS.has(lc)) {
+      // ±Infinity: the float types accept it; numeric accepts it only when
+      // unbounded — a numeric(p,s) rejects an infinite value (PostgreSQL 22003,
+      // not 22P02), so a typmod'd numeric must still 400 here, not 500.
+      if (base === 'numeric' || base === 'decimal') return numericTypmod(dataType) === null;
+      return true;
+    }
     if (!isLexicalDecimal(trimmed)) return false;
     return decimalFitsRange(base, dataType, trimmed);
   }
   if (base === 'boolean' || base === 'bool') {
     return BOOLEAN_LITERALS.has(trimmed.toLowerCase());
   }
+  if (base === 'uuid') {
+    return isUuidLexical(trimmed);
+  }
   return true;
+}
+
+/** Whether {@link valueFitsType} actually checks `base` (rather than passing it
+ *  through unvalidated). Only these scalar families have a reliable, locale-
+ *  independent lexical form: the integer widths, the decimal/float family,
+ *  boolean, and uuid. Other types (text, date/time, json, ...) are *not*
+ *  pre-checked — their accepted input is too lenient or context-dependent to
+ *  validate without risking a false rejection, so they fall through to
+ *  PostgreSQL. Callers that validate arbitrary values (id segments, write-body
+ *  values) must gate on this so that, e.g., an empty string for a `text`
+ *  column is never rejected (it is valid; `valueFitsType` returns `false` for
+ *  an empty string only because empty is invalid for the families it checks). */
+function isPreflightableScalar(base: string): boolean {
+  return (
+    INTEGER_BOUNDS[base] !== undefined ||
+    DECIMAL_BASE_TYPES.has(base) ||
+    base === 'boolean' ||
+    base === 'bool' ||
+    base === 'uuid'
+  );
 }
 
 /**
@@ -394,6 +485,68 @@ function assertFilterTypeCompatible(
       `Filter "is.${filter.keyword}" requires a boolean column; "${filter.column}" on resource ` +
         `"${resource.name}" is ${column.dataType}.`,
     );
+  }
+}
+
+/**
+ * Reject an item-id segment whose component(s) cannot parse as the primary-key
+ * column type(s), with a 400 before the query runs (issue #110). Mirrors the
+ * list-filter pre-flight (`assertFilterValueParsable`): only the scalar
+ * families with a reliable lexical form (integer / decimal / boolean / uuid)
+ * are checked; other key types (text, ...) fall through to PostgreSQL. The
+ * value is bound straight into the key WHERE clause, so a 400 here is
+ * unambiguously client-caused — no server/view error is masked. `keyColumns`
+ * and `keyValues` are aligned by index (the caller has enforced matching
+ * arity). Without this, an invalid id (`GET /authors/not-a-uuid`) reaches
+ * PostgreSQL and raises a data exception (22P02), which is deliberately left
+ * as a 500 by the error classifier.
+ */
+function assertKeyValuesParsable(
+  resource: Resource,
+  keyColumns: string[],
+  keyValues: string[],
+): void {
+  const columnsByName = new Map(resource.columns.map((c) => [c.name, c]));
+  for (let i = 0; i < keyColumns.length; i++) {
+    const column = columnsByName.get(keyColumns[i]);
+    if (column === undefined) continue; // key column absent from the exposed column set
+    const base = baseScalarType(column.dataType);
+    if (base === null || !isPreflightableScalar(base)) continue;
+    if (!valueFitsType(base, column.dataType, keyValues[i])) {
+      throw badRequest(
+        `Item id component "${keyValues[i]}" is not valid for primary-key column ` +
+          `"${keyColumns[i]}" (${column.dataType}) on resource "${resource.name}".`,
+      );
+    }
+  }
+}
+
+/**
+ * Reject a write-body value whose scalar form cannot parse as the target
+ * column type, with a 400 before the INSERT/UPDATE runs (issue #110). Only
+ * **string-valued** body fields are checked, against the same scalar families
+ * the list filters pre-flight (integer / decimal / boolean / uuid): a JSON
+ * string is the form in which a malformed scalar reaches the API (`{"id":
+ * "zzz"}` for a uuid column). Non-string JSON values are left to PostgreSQL — a
+ * JS number is already a valid numeric literal, `null` is a SQL NULL (a NOT
+ * NULL violation maps to 400 separately), and an object/array targets a
+ * json/array column. Column names have already been validated by
+ * `assertKnownColumns`.
+ */
+function assertWriteValuesParsable(resource: Resource, data: Record<string, unknown>): void {
+  const columnsByName = new Map(resource.columns.map((c) => [c.name, c]));
+  for (const [key, value] of Object.entries(data)) {
+    if (typeof value !== 'string') continue;
+    const column = columnsByName.get(key);
+    if (column === undefined) continue; // unknown columns already rejected upstream
+    const base = baseScalarType(column.dataType);
+    if (base === null || !isPreflightableScalar(base)) continue;
+    if (!valueFitsType(base, column.dataType, value)) {
+      throw badRequest(
+        `Value "${value}" is not valid for column "${key}" (${column.dataType}) ` +
+          `on resource "${resource.name}".`,
+      );
+    }
   }
 }
 
@@ -568,17 +721,26 @@ function primaryKey(resource: Resource): string[] {
  *
  * Limitation: with a composite key, a key *value* cannot contain a comma (the
  * segment is split after URL-decoding). Single-column keys are unaffected.
+ *
+ * Each resolved component is pre-flighted against its key column type
+ * (issue #110), so an invalid id returns 400 up front instead of a 500.
  */
 function resolveKeyValues(resource: Resource, id: string, keyColumns: string[]): string[] {
-  if (keyColumns.length === 1) return [id];
-  const parts = id.split(',');
-  if (parts.length !== keyColumns.length) {
-    throw badRequest(
-      `Resource "${resource.name}" has a composite primary key (${keyColumns.join(', ')}); ` +
-        `expected ${keyColumns.length} comma-separated key components, got ${parts.length}.`,
-    );
+  let keyValues: string[];
+  if (keyColumns.length === 1) {
+    keyValues = [id];
+  } else {
+    const parts = id.split(',');
+    if (parts.length !== keyColumns.length) {
+      throw badRequest(
+        `Resource "${resource.name}" has a composite primary key (${keyColumns.join(', ')}); ` +
+          `expected ${keyColumns.length} comma-separated key components, got ${parts.length}.`,
+      );
+    }
+    keyValues = parts;
   }
-  return parts;
+  assertKeyValuesParsable(resource, keyColumns, keyValues);
+  return keyValues;
 }
 
 /** `pk0 = $start AND pk1 = $start+1 AND ...` for the given key columns. */
@@ -657,6 +819,7 @@ export function buildInsertQuery(
 ): BuiltMutation {
   const keys = Object.keys(data);
   assertKnownColumns(resource, keys);
+  assertWriteValuesParsable(resource, data);
 
   const returning = selectColumns(resource);
   const table = qualified(resource);
@@ -686,6 +849,7 @@ export function buildUpdateQuery(
     throw badRequest(`No fields to update on resource "${resource.name}".`);
   }
   assertKnownColumns(resource, keys);
+  assertWriteValuesParsable(resource, data);
   const keyValues = resolveKeyValues(resource, id, keyColumns);
 
   const sets = keys.map((k, i) => `${quoteIdent(k)} = $${i + 1}`).join(', ');

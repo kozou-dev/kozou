@@ -53,11 +53,16 @@ export function forbidden(message: string): KozouApiError {
 // `severity`). A small, deliberate subset maps to stable HTTP statuses;
 // everything else stays a 500 with a generic body so kozou bugs are never
 // relabelled as client errors. Data exceptions (22xxx) are intentionally
-// NOT mapped: list filter / search input is pre-flighted before it reaches
-// the database (invalid values 400 up front), and blanket-mapping the
-// class would relabel genuine kozou bugs as client errors. Inputs not yet
-// pre-flighted (id segments, write-body values) are tracked as follow-up
-// work — the answer there is up-front validation, not runtime relabelling.
+// NOT mapped: the client inputs that would otherwise raise one are
+// pre-flighted before they reach the database (invalid values 400 up front) —
+// list filter / search values (issues #76 / #86), item id segments, and
+// write-body values (issue #110). Blanket-mapping class 22 would instead
+// relabel genuine kozou bugs as client errors, which is the opposite of what
+// an executed data exception now signals. Pre-flight covers the scalar
+// families with a reliable lexical form (integer / decimal / boolean / uuid);
+// a malformed value of another type (e.g. a date) still falls through to a
+// 500, by design — the answer there is more pre-flight, not runtime
+// relabelling.
 //
 // Mapped messages are fully generic. The violated constraint / column name
 // is NOT echoed: the error object cannot prove the identifier belongs to
