@@ -6,7 +6,7 @@ Kozou reads a PostgreSQL schema once and produces every form a modern team and i
 
 ## Status
 
-v1.4.0 (latest release). The CLI, schema introspection, MCP server (stdio + HTTP), reference Admin UI (now with opt-in RPC actions — a Postgres function tagged `@expose: rpc` is compiled into a callable form across REST, OpenAPI, MCP, and an Admin UI "Actions" page), Markdown schema-document generation (`kozou docs`), and Kozou's in-house REST backend (`@kozou/api`, the default `kozou dev` data layer) are all available on npm; the runtime image lives on GHCR as a multi-arch manifest (linux/amd64 + linux/arm64). Releases land via the workflow in `.github/workflows/release.yml`.
+v1.4.1 (latest release). The CLI, schema introspection, MCP server (stdio + HTTP), reference Admin UI (now with opt-in RPC actions — a Postgres function tagged `@expose: rpc` is compiled into a callable form across REST, OpenAPI, MCP, and an Admin UI "Actions" page), Markdown schema-document generation (`kozou docs`), and Kozou's in-house REST backend (`@kozou/api`, the default `kozou dev` data layer) are all available on npm; the runtime image lives on GHCR as a multi-arch manifest (linux/amd64 + linux/arm64). Releases land via the workflow in `.github/workflows/release.yml`.
 
 ## Quickstart
 
@@ -29,9 +29,9 @@ docker compose up
 Or pull the CLI runtime image directly:
 
 ```bash
-docker pull ghcr.io/kozou-dev/kozou:v1.4.0
-docker run --rm ghcr.io/kozou-dev/kozou:v1.4.0 inspect --help
-docker run --rm ghcr.io/kozou-dev/kozou:v1.4.0 mcp --help
+docker pull ghcr.io/kozou-dev/kozou:v1.4.1
+docker run --rm ghcr.io/kozou-dev/kozou:v1.4.1 inspect --help
+docker run --rm ghcr.io/kozou-dev/kozou:v1.4.1 mcp --help
 ```
 
 For library use (custom hosts, embedded MCP), install the workspace packages from npm:
@@ -56,7 +56,7 @@ On the access-control axis, **Kozou is a resource server and enforcement layer, 
 
 ## Requirements
 
-Runtime requirements for v1.4.0:
+Runtime requirements for v1.4.1:
 
 - **PostgreSQL 16 or later** — the canonical source of truth
 - **Docker 24 or later** (optional) — recommended for the `docker compose up` stack, which brings up PostgreSQL and a `kozou` service running `kozou dev` (the bundled Admin UI + MCP HTTP server, plus Kozou's in-house REST backend served in-process) from `ghcr.io/kozou-dev/kozou` (a multi-arch image, native on linux/amd64 and linux/arm64). The default stack needs **no separate REST container**; to opt out and use an external PostgREST instead, set `adapter.type: postgrest` and add the (commented) service in the scaffold's `docker-compose.yml`.
@@ -76,6 +76,7 @@ Contributors additionally need **pnpm 9 or later**. See [CONTRIBUTING.md](CONTRI
 - v1.2.0 (shipped): the auto-minted Admin UI service token (the HS256 development convenience) can now carry custom JWT claims via `auth.ui.claims` (or the `KOZOU_UI_CLAIMS` environment variable), so RLS policies keyed on claims beyond `role` can be exercised from the bundled UI in local development. The `role` claim stays reserved — a colliding entry is dropped so a custom claim can never smuggle in a role — and `iat` is always set by the mint; a configured `iss` / `aud` wins over a custom one, while a custom temporal claim (`exp` / `nbf`) is passed through but warned about when it would make the token rejected. Schema introspection also warns when a known COMMENT tag (`@ai`, `@policy`, …) appears mid-line instead of at the start of a line — such tags are not parsed and would otherwise leak verbatim into the surrounding description.
 - v1.3.0 (shipped): **opt-in privilege-aware introspection** (`introspection.respectPrivileges`, default off) makes the bundled Admin UI faithful to what the serving role may *do*, not just what the schema declares. A table or view the role cannot `SELECT` (gated by schema `USAGE`) is hidden from the nav; a column it cannot write renders read-only **per form mode** (no `INSERT` → read-only on create, no `UPDATE` → read-only on edit); and Delete is hidden where the role lacks it. The role evaluated is the Admin UI's (`auth.ui.role` / `auth.defaultRole`, or an explicit `introspection.role`). `@kozou/api` and the MCP server stay schema-wide.
 - v1.4.0 (shipped): **opt-in RPC actions** — a Postgres function tagged `@expose: rpc` in its COMMENT is compiled into a callable action across all four surfaces at once: REST (`POST /rpc/<schema>.<fn>` with a named-args body), the COMMENT-native OpenAPI document, an MCP `describe_functions` tool, and an Admin UI "Actions" page. This recovers the verb-level capability the v1.0 default switch dropped, and lets the security model Kozou recommends (state changes funnelled through functions, table writes revoked) stay reachable. Exposure is opt-in and never silent: nothing is exposed by default; a function still granting `EXECUTE` to PUBLIC is hard-skipped unless deliberately opened (`@expose: rpc public` / `api.rpc.allowPublicExecute`); a `SECURITY DEFINER` function needs a config double opt-in (`api.rpc.allowDefiner`) **and** an owner-safe `search_path`; unsupported shapes are loudly skipped. Whether a caller may run an action is enforced by the PostgreSQL `EXECUTE` privilege under the request's role — a denial is 403, so exposure is not permission. The wire shape is experimental until dogfooding settles it. See the RPC actions section of the `@kozou/api` README.
+- v1.4.1 (shipped): a patch release. `@kozou/api` now pre-flights two more client inputs — item id segments (`GET`/`PATCH`/`DELETE` `/<resource>/<id>`) and write-body values — so a malformed scalar (a non-uuid id, or a value of the wrong type for its column) returns a `400` up front instead of surfacing as a `500` (issue #110). The numeric pre-flight also accepts the non-finite literals (`NaN` / `±Infinity`) PostgreSQL allows for float types. Plus documentation and scaffold hygiene — the bundled Docker image tag and the default-stack docs track the release.
 - Beyond v1.4: the MCP `call` (execution) tool — letting an AI agent *run* an exposed action, not just describe it; React UI exploration
 
 ## Name
