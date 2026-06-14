@@ -14,7 +14,7 @@ import type { AddressInfo } from 'node:net';
 import { runInRoleTransaction } from '@kozou/core';
 import type { ConnectionPool, SchemaContext } from '@kozou/core';
 
-import { errorBody, KozouApiError, mapDatabaseError } from './errors.js';
+import { badRequest, errorBody, KozouApiError, mapDatabaseError } from './errors.js';
 import {
   handleApiRequest,
   type ApiHandlerDeps,
@@ -195,11 +195,19 @@ async function readJsonBody(req: IncomingMessage): Promise<unknown> {
   }
   if (chunks.length === 0) return undefined;
   const raw = Buffer.concat(chunks).toString('utf8');
-  if (raw.length === 0) return undefined;
+  // An empty or whitespace-only body is an absent body (a no-argument RPC call
+  // or an all-default write), not a parse error.
+  if (raw.trim().length === 0) return undefined;
   try {
     return JSON.parse(raw);
   } catch {
-    return undefined;
+    // A non-empty body that is not valid JSON is a client error: reject it up
+    // front (#145). Previously it was swallowed into `undefined`, which the RPC
+    // handler treats as an empty argument set — silently running a
+    // no-argument/all-default function. (A table write already rejected an
+    // absent body, so for writes this just turns it into a clearer, earlier
+    // 400.)
+    throw badRequest('Request body is not valid JSON.');
   }
 }
 

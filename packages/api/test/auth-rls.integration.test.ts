@@ -289,6 +289,22 @@ describe('@kozou/api JWT + RLS (generic fixture)', () => {
       // No raw database detail (function name / privilege wording) leaks.
       expect(JSON.stringify(body)).not.toContain('secret_op');
     });
+
+    it('rejects a malformed JSON body with 400 on the authed path too (#145)', async () => {
+      // The authed dispatch builds the request (and reads the body) before the
+      // transaction; the malformed-body 400 must surface via the outer catch,
+      // not a 500.
+      const jwt = await token({ sub: 'ada', role: 'app_reader' });
+      const r = await fetch(`${base}/rpc/${db.schema}.whoami`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${jwt}`, 'content-type': 'application/json' },
+        body: '{ not json',
+      });
+      expect(r.status).toBe(400);
+      const body = (await r.json()) as { error: { code: string; message: string } };
+      expect(body.error.code).toBe('bad_request');
+      expect(body.error.message).toBe('Request body is not valid JSON.');
+    });
   });
 
   describe('anonymous role (anonRole configured)', () => {
