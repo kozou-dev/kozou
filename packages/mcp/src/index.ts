@@ -4,6 +4,9 @@
 
 export { createMcpServer } from './server.js';
 export { SchemaCache, type SchemaCacheOptions } from './schemaCache.js';
+export type { McpExecution } from './execution.js';
+export { successResult, errorResult, type McpToolResult } from './result.js';
+export { callTool } from './tools/call.js';
 export { startStdioServer, type StartStdioServerOptions } from './startStdioServer.js';
 export {
   startHttpServer,
@@ -18,6 +21,7 @@ export { describeView } from './tools/describe_view.js';
 export { listConcepts } from './tools/list_concepts.js';
 export { getConceptContext } from './tools/get_concept_context.js';
 export { describeFunctions } from './tools/describe_functions.js';
+export * from './schemas/call.js';
 export * from './schemas/list_tables.js';
 export * from './schemas/describe_table.js';
 export * from './schemas/list_views.js';

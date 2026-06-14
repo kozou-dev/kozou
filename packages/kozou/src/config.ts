@@ -40,10 +40,34 @@ const mcpHttpServerSchema = z
   })
   .prefault({});
 
+// Opt-in execution for the MCP `call` tool (issue #103, Beyond v1.4). Default
+// OFF (describe-only). When enabled, the bundled `kozou mcp` server exposes a
+// `call` tool that runs the exposed RPC functions (api.rpc) under a single
+// operator-configured execution role. There is no per-caller identity, so it is
+// unsuitable for multi-tenant per-user authorization (use the REST API +
+// per-user JWT for that); a dedicated least-privilege role is strongly advised
+// (not the owner / a superuser). `role` is required when enabled. `claims` are
+// fixed claims published for row-level security; `allow` is an optional
+// allowlist of schema-qualified function names (`schema.fn`); omitted = every
+// exposed function may be called.
+const mcpExecutionSchema = z
+  .object({
+    enabled: z.boolean().default(false),
+    role: z.string().min(1).optional(),
+    claims: z.record(z.string(), z.unknown()).optional(),
+    allow: z.array(z.string().min(1)).optional(),
+  })
+  .prefault({})
+  .refine((e) => !e.enabled || (e.role !== undefined && e.role.length > 0), {
+    message: 'server.mcp.execution.role is required when server.mcp.execution.enabled is true',
+    path: ['role'],
+  });
+
 const mcpServerSchema = z
   .object({
     http: mcpHttpServerSchema,
     stdio: z.boolean().default(false),
+    execution: mcpExecutionSchema,
   })
   .prefault({});
 

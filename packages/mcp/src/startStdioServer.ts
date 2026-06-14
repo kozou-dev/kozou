@@ -7,10 +7,14 @@
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { createMcpServer } from './server.js';
 import type { SchemaCache } from './schemaCache.js';
+import type { McpExecution } from './execution.js';
 
 export type StartStdioServerOptions = {
   /** Prefix used in stderr log lines. Default: '[@kozou/mcp]'. */
   logPrefix?: string;
+  /** Opt-in execution capability for the `call` tool. Omit = describe-only.
+   *  stdio has no network exposure, so enabling it here is safe. */
+  execution?: McpExecution;
 };
 
 /**
@@ -25,7 +29,7 @@ export async function startStdioServer(
   opts: StartStdioServerOptions = {},
 ): Promise<void> {
   const prefix = opts.logPrefix ?? '[@kozou/mcp]';
-  const server = createMcpServer(cache);
+  const server = createMcpServer(cache, opts.execution);
   process.on('SIGHUP', () => {
     cache.invalidate();
     process.stderr.write(`${prefix} SIGHUP received, cache invalidated\n`);
