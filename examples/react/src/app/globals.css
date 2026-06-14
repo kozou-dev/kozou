@@ -1,0 +1,150 @@
+:root {
+  --border: #e2e2e2;
+  --muted: #f6f6f6;
+  --muted-fg: #6b7280;
+  --fg: #111827;
+  --primary: #2563eb;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  color: var(--fg);
+  font-family:
+    ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.container {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 2rem 1.5rem 4rem;
+}
+
+a {
+  color: var(--primary);
+}
+
+h1 {
+  font-size: 1.5rem;
+  font-weight: 600;
+  margin: 0 0 0.25rem;
+}
+
+.subtitle {
+  color: var(--muted-fg);
+  margin: 0 0 1.5rem;
+  font-size: 0.85rem;
+}
+
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+}
+
+.toolbar input[type='text'] {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font: inherit;
+}
+
+button,
+.btn {
+  padding: 0.5rem 1rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--muted);
+  font: inherit;
+  cursor: pointer;
+  text-decoration: none;
+  color: var(--fg);
+}
+
+.table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+th,
+td {
+  padding: 0.5rem 0.75rem;
+  text-align: left;
+  border-top: 1px solid var(--border);
+}
+
+thead th {
+  background: var(--muted);
+  border-top: none;
+  font-weight: 600;
+}
+
+thead a {
+  text-decoration: none;
+  color: inherit;
+}
+
+.empty {
+  text-align: center;
+  color: var(--muted-fg);
+  padding: 1.5rem;
+}
+
+.pager {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 1rem;
+  font-size: 0.85rem;
+}
+
+.pager .links {
+  display: flex;
+  gap: 0.5rem;
+}
+
+dl {
+  display: grid;
+  gap: 1rem;
+}
+
+dt {
+  font-weight: 600;
+  color: var(--muted-fg);
+  font-size: 0.8rem;
+}
+
+dd {
+  margin: 0.15rem 0 0;
+}
+
+dd pre {
+  background: var(--muted);
+  padding: 0.5rem;
+  border-radius: 6px;
+  overflow-x: auto;
+  font-size: 0.8rem;
+}
+
+ul.entity-list {
+  list-style: none;
+  padding: 0;
+  display: grid;
+  gap: 0.4rem;
+}

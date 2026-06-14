@@ -1,0 +1,28 @@
+{
+  "name": "@kozou/example-react",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Phase 1 read spike: a minimal React (Next.js App Router) Admin UI that renders list + detail by consuming @kozou/ui-core unchanged. Proves the read-path logic is framework-agnostic. Not published.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "scripts": {
+    "dev": "next dev",
+    "start": "next start",
+    "typecheck": "tsc --noEmit",
+    "next:build": "next build"
+  },
+  "dependencies": {
+    "@kozou/core": "workspace:*",
+    "@kozou/introspect": "workspace:*",
+    "@kozou/ui-core": "workspace:*",
+    "next": "^16.2.9",
+    "pg": "^8.13.0",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0"
+  },
+  "devDependencies": {
+    "@types/pg": "^8.11.0",
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0"
+  }
+}

@@ -29,6 +29,11 @@ module.exports = {
     '*.tgz',
     '.pnpm-store/',
     '.svelte-kit/',
+    '.next/',
+    // Internal example apps (e.g. the Next.js read spike) bring their own
+    // framework lint (next lint) and JSX/React conventions; keep them out of
+    // the root TypeScript-only eslint config.
+    'examples/',
   ],
   overrides: [
     // Svelte single-file components: parse with svelte-eslint-parser
