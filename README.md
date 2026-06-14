@@ -6,7 +6,7 @@ Kozou reads a PostgreSQL schema once and produces every form a modern team and i
 
 ## Status
 
-v1.5.1 (latest release). The CLI, schema introspection, MCP server (stdio + HTTP — with an opt-in `call` tool that *executes* RPC actions, not just describes them), reference Admin UI (with opt-in RPC actions — a Postgres function tagged `@expose: rpc` is compiled into a callable form across REST, OpenAPI, MCP, and an Admin UI "Actions" page), Markdown schema-document generation (`kozou docs`), and Kozou's in-house REST backend (`@kozou/api`, the default `kozou dev` data layer) are all available on npm; the runtime image lives on GHCR as a multi-arch manifest (linux/amd64 + linux/arm64). Releases land via the workflow in `.github/workflows/release.yml`.
+v1.6.0 (latest release). The CLI, schema introspection, MCP server (stdio + HTTP — with an opt-in `call` tool that *executes* RPC actions, not just describes them), reference Admin UI (with opt-in RPC actions — a Postgres function tagged `@expose: rpc` is compiled into a callable form across REST, OpenAPI, MCP, and an Admin UI "Actions" page; the RPC actions wire is a stable contract as of v1.6), Markdown schema-document generation (`kozou docs`), and Kozou's in-house REST backend (`@kozou/api`, the default `kozou dev` data layer) are all available on npm; the runtime image lives on GHCR as a multi-arch manifest (linux/amd64 + linux/arm64). Releases land via the workflow in `.github/workflows/release.yml`.
 
 ## Quickstart
 
@@ -29,9 +29,9 @@ docker compose up
 Or pull the CLI runtime image directly:
 
 ```bash
-docker pull ghcr.io/kozou-dev/kozou:v1.5.1
-docker run --rm ghcr.io/kozou-dev/kozou:v1.5.1 inspect --help
-docker run --rm ghcr.io/kozou-dev/kozou:v1.5.1 mcp --help
+docker pull ghcr.io/kozou-dev/kozou:v1.6.0
+docker run --rm ghcr.io/kozou-dev/kozou:v1.6.0 inspect --help
+docker run --rm ghcr.io/kozou-dev/kozou:v1.6.0 mcp --help
 ```
 
 For library use (custom hosts, embedded MCP), install the workspace packages from npm:
@@ -56,7 +56,7 @@ On the access-control axis, **Kozou is a resource server and enforcement layer, 
 
 ## Requirements
 
-Runtime requirements for v1.5.1:
+Runtime requirements for v1.6.0:
 
 - **PostgreSQL 16 or later** — the canonical source of truth
 - **Docker 24 or later** (optional) — recommended for the `docker compose up` stack, which brings up PostgreSQL and a `kozou` service running `kozou dev` (the bundled Admin UI + MCP HTTP server, plus Kozou's in-house REST backend served in-process) from `ghcr.io/kozou-dev/kozou` (a multi-arch image, native on linux/amd64 and linux/arm64). The default stack needs **no separate REST container**; to opt out and use an external PostgREST instead, set `adapter.type: postgrest` and add the (commented) service in the scaffold's `docker-compose.yml`.
@@ -80,7 +80,8 @@ Contributors additionally need **pnpm 9 or later**. See [CONTRIBUTING.md](CONTRI
 - v1.4.2 (shipped): a patch release of fixes. `@kozou/api` now resolves a DOMAIN column to its base type during introspection, so an invalid value for a domain-typed column returns a `400` up front instead of a `500` on list filters, item ids, and write bodies — and a domain-over-text column is now searchable (`?search=`) and relation-select-eligible (issue #85). An `in.(...)` filter value may contain a comma when double-quoted (`in.("a,b",c)`, with `\"` / `\\` escapes inside the quotes); unquoted lists are unchanged (issue #77). `parseCommentTags` no longer absorbs an indented `@ai` / `@policy` / … tag that follows the SQL of an `@example:` block — the tag is parsed normally instead of leaking into the example text and the surrounding description (issue #71). CI hardening: the npm artifact-integrity matrix now covers all seven published packages (issue #74), and the scaffolding CLI's npm publish is gated on the GHCR image it pins, so a freshly scaffolded stack never references an image tag that was not pushed (issue #105).
 - v1.5.0 (shipped): **the MCP `call` execution tool** — the MCP server can now *run* an exposed RPC action, not just describe it (issue #103), completing describe → act. It is **opt-in and off by default**: enable `server.mcp.execution` (with a role) and the bundled `kozou mcp` lists a `call` tool that executes a function under a single operator-configured role through the same `SET LOCAL ROLE` + RLS envelope as the REST surface — so the `EXECUTE` privilege and the function's row-level security apply, the agent cannot choose the role (no self-elevation), raw database errors are never returned to the caller, and a `SECURITY DEFINER` action still needs the `allowDefiner` double opt-in. It runs as one service role (no per-caller identity), so it is unsuitable for multi-tenant per-user authorization — use the REST API for that. The wire shape is experimental. Internally, the role-transaction envelope and the RPC call core moved into `@kozou/core` so the REST and MCP surfaces share one enforcement path. See the RPC actions guide.
 - v1.5.1 (shipped): a patch release. `@kozou/api`'s list-filter pre-flight now validates a `real` (float4) value by exact comparison against the float32 rounding thresholds instead of `Math.fround`, which double-rounded (decimal → binary64 → binary32) and falsely rejected (400) a decimal just inside the underflow (`2^-150`) or overflow (`2^128 − 2^103`) boundary that PostgreSQL accepts (issue #85). No value PostgreSQL rejects is now accepted, so this only turns prior false-400s into the correct 200 — never a 500. Verified against PostgreSQL 16 via `pg_input_is_valid`.
-- Beyond v1.5: React UI exploration
+- v1.6.0 (shipped): the **opt-in RPC actions wire is now a stable contract**. The REST `POST /rpc/<schema>.<fn>` endpoint (named-arguments body + the return-shape mapping), the COMMENT-native OpenAPI function metadata, and the MCP `call` execution tool — all compiled from `@expose: rpc` — shipped experimental-first in v1.4.0 (describe) and v1.5.0 (execute, issue #103). After end-to-end validation against a realistic schema (a least-privilege execution role, RLS read/write enforcement, `SECURITY DEFINER`, no-leak errors, the allowlist, and the full return-shape matrix), the wire joins the table/view CRUD surface under the stability guarantee: it will not change incompatibly without a major release. Documentation/contract-declaration only — no behavior change. See the `@kozou/api` README Stability section and the RPC actions guide.
+- Beyond v1.6: React UI exploration
 
 ## Name
 
