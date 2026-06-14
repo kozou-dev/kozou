@@ -294,14 +294,10 @@ function bigIntDigits(n: bigint): number {
   return n === 0n ? 1 : n.toString().length;
 }
 
-/** Whether a lexically-valid decimal fits `numeric(precision, scale)`.
- *  PostgreSQL rounds the value to `scale` fractional digits, then requires the
- *  result to fit in `precision` total significant digits — i.e. the value
- *  scaled to an integer in units of `10^-scale` must have at most `precision`
- *  digits. Done with BigInt so rounding carry (`9999999999.995` ->
- *  `10000000000.00` on `numeric(12,2)`) is exact and arbitrary-precision values
- *  are never lost. A huge exponent is handled without materialising `10^exp`. */
-function numericFitsTypmod(value: string, precision: number, scale: number): boolean {
+/** Parse a lexically-valid decimal into a non-negative mantissa and a power of
+ *  ten such that `|value| === mantissa × 10^pointExp`. The sign is dropped; an
+ *  all-zero mantissa is returned as `0n`. */
+function parseDecimalMagnitude(value: string): { mantissa: bigint; pointExp: number } {
   let s = value.trim();
   if (s[0] === '+' || s[0] === '-') s = s.slice(1);
   let eIdx = s.indexOf('e');
@@ -314,12 +310,24 @@ function numericFitsTypmod(value: string, precision: number, scale: number): boo
   const dot = s.indexOf('.');
   const intPart = dot === -1 ? s : s.slice(0, dot);
   const fracPart = dot === -1 ? '' : s.slice(dot + 1);
-  const d = intPart + fracPart === '' ? 0n : BigInt(intPart + fracPart);
+  const digits = intPart + fracPart;
+  return { mantissa: digits === '' ? 0n : BigInt(digits), pointExp: exp - fracPart.length };
+}
+
+/** Whether a lexically-valid decimal fits `numeric(precision, scale)`.
+ *  PostgreSQL rounds the value to `scale` fractional digits, then requires the
+ *  result to fit in `precision` total significant digits — i.e. the value
+ *  scaled to an integer in units of `10^-scale` must have at most `precision`
+ *  digits. Done with BigInt so rounding carry (`9999999999.995` ->
+ *  `10000000000.00` on `numeric(12,2)`) is exact and arbitrary-precision values
+ *  are never lost. A huge exponent is handled without materialising `10^exp`. */
+function numericFitsTypmod(value: string, precision: number, scale: number): boolean {
+  const { mantissa: d, pointExp } = parseDecimalMagnitude(value);
   if (d === 0n) return true; // zero fits any numeric(p, s)
-  // value = d * 10^(exp - fracPart.length); the rounded scaled integer is
+  // value = d * 10^pointExp; the rounded scaled integer is
   // R = round(value * 10^scale) = round(d * 10^j), and we need it to have at
   // most `precision` digits.
-  const j = exp - fracPart.length + scale;
+  const j = pointExp + scale;
   if (j >= 0) {
     // d * 10^j has exactly bigIntDigits(d) + j digits — no exponentiation.
     return bigIntDigits(d) + j <= precision;
@@ -347,14 +355,62 @@ function isLexicalZero(value: string): boolean {
   return true;
 }
 
+/** `|value| > 2^-150`, the float32 round-to-zero threshold. PostgreSQL rounds a
+ *  decimal straight to binary32: a magnitude at or below `2^-150` rounds to 0
+ *  (the tie at exactly `2^-150` goes to the even value, 0) and is rejected as
+ *  underflow; just above it rounds up to the smallest subnormal (`2^-149`) and
+ *  is accepted. Compared exactly here so we match that single rounding rather
+ *  than `Math.fround`'s decimal->binary64->binary32 double rounding (issue #85). */
+function aboveFloat32Underflow(value: string): boolean {
+  const { mantissa, pointExp } = parseDecimalMagnitude(value);
+  if (mantissa === 0n) return false;
+  if (pointExp >= 0) return true; // a nonzero magnitude >= 1 is far above 2^-150
+  const negExp = -pointExp;
+  // |v| > 2^-150  <=>  mantissa * 2^150 > 10^negExp. 2^150 < 10^46, so the left
+  // side has at most digits(mantissa)+46 digits; if 10^negExp has strictly more,
+  // it is the larger and |v| < 2^-150 (also bounds the power for huge exponents).
+  if (negExp >= bigIntDigits(mantissa) + 46) return false;
+  return mantissa << 150n > 10n ** BigInt(negExp);
+}
+
+/** `|value| < 2^128 - 2^103`, the float32 round-to-Infinity threshold. A
+ *  magnitude at or above it rounds to Infinity (the tie at exactly the threshold
+ *  goes to the even value, Infinity) and PostgreSQL rejects it as overflow; just
+ *  below it rounds to the largest finite real and is accepted. Compared exactly
+ *  for the same single-rounding reason as the underflow bound. */
+function belowFloat32Overflow(value: string): boolean {
+  const { mantissa, pointExp } = parseDecimalMagnitude(value);
+  if (mantissa === 0n) return true;
+  const threshold = (1n << 128n) - (1n << 103n); // 39-digit integer
+  if (pointExp >= 0) {
+    const digits = bigIntDigits(mantissa) + pointExp;
+    if (digits > 39) return false; // >= 10^39 > threshold
+    if (digits < 39) return true; // < 10^38 < threshold
+    return mantissa * 10n ** BigInt(pointExp) < threshold;
+  }
+  const negExp = -pointExp;
+  // |v| = mantissa / 10^negExp. Its integer part has ~digits(mantissa)-negExp
+  // digits; the threshold has 39. Bound the power before computing it.
+  const magnitudeDigits = bigIntDigits(mantissa) - negExp;
+  if (magnitudeDigits < 39) return true; // < 10^38 < threshold
+  if (magnitudeDigits > 39) return false; // >= 10^39 > threshold
+  return mantissa < threshold * 10n ** BigInt(negExp);
+}
+
 /** Whether a lexically-valid decimal is representable by a PostgreSQL float
- *  type. PostgreSQL rejects both overflow (magnitude above the type maximum)
- *  and underflow (a nonzero magnitude that rounds to zero in the type). `real`
- *  is IEEE single precision, so round through `Math.fround` — it maps an
- *  overflow to `Infinity` and an underflow to `0`; `double precision` is IEEE
- *  double, which JS `Number` models exactly. */
+ *  type. PostgreSQL rejects both overflow (magnitude at/above the type maximum)
+ *  and underflow (a nonzero magnitude that rounds to zero in the type).
+ *  `double precision` is IEEE binary64, which JS `Number` models with a single
+ *  decimal->binary64 rounding, so it is checked directly. `real` is IEEE
+ *  binary32; it is decided by exact comparison against the binary32 rounding
+ *  thresholds rather than `Math.fround`, which double-rounds (decimal->binary64
+ *  ->binary32) and would spuriously reject a value just inside either bound
+ *  (issue #85). */
 function floatFits(value: string, single: boolean): boolean {
-  const n = single ? Math.fround(Number(value)) : Number(value);
+  if (single) {
+    return isLexicalZero(value) || (aboveFloat32Underflow(value) && belowFloat32Overflow(value));
+  }
+  const n = Number(value);
   if (!Number.isFinite(n)) return false; // overflow -> Infinity
   return n !== 0 || isLexicalZero(value); // nonzero input rounding to 0 = underflow
 }
