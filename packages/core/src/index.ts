@@ -70,3 +70,11 @@ export {
   type BuildIssue,
 } from './buildSchemaContext.js';
 export { loadUIHints, KozouUIHintsError } from './loadUIHints.js';
+export { quoteIdent } from './ident.js';
+export {
+  runInRoleTransaction,
+  type Queryable,
+  type PoolClient,
+  type ConnectionPool,
+  type RoleTransaction,
+} from './roleTransaction.js';
