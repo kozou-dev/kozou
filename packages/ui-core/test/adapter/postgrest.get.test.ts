@@ -3,8 +3,8 @@ import { describe, expect, it } from 'vitest';
 import {
   PostgrestAdapterError,
   PostgrestDataAdapter,
-} from '../../src/lib/adapter/index.js';
-import type { FetchLike } from '../../src/lib/adapter/index.js';
+} from '../../src/adapter/index.js';
+import type { FetchLike } from '../../src/adapter/index.js';
 
 interface FetchCall {
   url: string;

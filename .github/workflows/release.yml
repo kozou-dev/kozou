@@ -124,6 +124,13 @@ jobs:
           # image it pins (#105).
           - pkg: '@kozou/svelte-ui'
             dir: svelte-ui
+          # @kozou/ui-core holds the framework-agnostic read-path logic
+          # extracted from svelte-ui; svelte-ui depends on it at runtime,
+          # so it must publish alongside the rest. NOTE: its npmjs.com
+          # trusted-publisher (OIDC) registration is a one-time manual
+          # setup, same as the other packages, before its first publish.
+          - pkg: '@kozou/ui-core'
+            dir: ui-core
           - pkg: '@kozou/api'
             dir: api
           - pkg: '@kozou/codegen'
@@ -292,7 +299,7 @@ jobs:
     # The `kozou` scaffolding CLI generates a docker-compose.yml pinned to
     # this release's GHCR image tag, so it must not publish until that image
     # exists (#105). It is split out of the publish-npm matrix and gated on
-    # publish-docker; the other six packages stay in publish-npm and run in
+    # publish-docker; the other seven packages stay in publish-npm and run in
     # parallel with the image build, so the image hang/failure only blocks the
     # one package that pins it. Because publish-cli `needs: publish-docker`, a
     # failed or cancelled image leg leaves this job un-run (not run-and-failed),
@@ -390,7 +397,7 @@ jobs:
         # downstream consumer.
         run: |
           mkdir -p artifacts
-          for d in core introspect mcp kozou svelte-ui api codegen; do
+          for d in core introspect mcp kozou svelte-ui ui-core api codegen; do
             (cd "packages/$d" && pnpm pack --pack-destination ../../artifacts)
           done
           ls -la artifacts/

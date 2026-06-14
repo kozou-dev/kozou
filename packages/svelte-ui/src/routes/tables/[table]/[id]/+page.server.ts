@@ -14,8 +14,11 @@ import { error, redirect } from '@sveltejs/kit';
 
 import type { TableContext } from '@kozou/core';
 
-import { resolveFkLabels } from '$lib/detail/resolve-fk-labels.js';
-import { encodeResourceId, parseResourceId } from '$lib/resource-id.js';
+import {
+  encodeResourceId,
+  parseResourceId,
+  resolveFkLabels,
+} from '@kozou/ui-core';
 import { getAdapter } from '$lib/server/adapter.js';
 
 import type { Actions, PageServerLoad } from './$types';

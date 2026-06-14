@@ -1,7 +1,7 @@
 // SvelteKit server hooks. Builds a SchemaContext once per TTL and
 // hangs it off event.locals so every route module can access it
 // synchronously via PageServerLoad / Actions. The TTL + in-flight
-// dedupe live in $lib/server/schema-cache; this file is a thin
+// dedupe live in @kozou/ui-core's SchemaCache; this file is a thin
 // adapter that wires DATABASE_URL into the introspect + buildSchema
 // Context pipeline.
 //
@@ -15,8 +15,7 @@ import type { Handle } from '@sveltejs/kit';
 import { buildSchemaContext } from '@kozou/core';
 import { introspect } from '@kozou/introspect';
 
-import { FkRowCache } from '$lib/server/fk-row-cache.js';
-import { SchemaCache } from '$lib/server/schema-cache.js';
+import { FkRowCache, SchemaCache } from '@kozou/ui-core';
 
 const cache = new SchemaCache({
   loader: async () => {

@@ -45,6 +45,7 @@
     "@internationalized/date": "^3.12.1",
     "@kozou/core": "workspace:*",
     "@kozou/introspect": "workspace:*",
+    "@kozou/ui-core": "workspace:*",
     "@lucide/svelte": "^1.16.0",
     "@tanstack/table-core": "^8.21.3",
     "bits-ui": "^2.18.1",

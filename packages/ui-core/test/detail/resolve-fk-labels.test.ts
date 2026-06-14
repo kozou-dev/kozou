@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import type { ColumnContext, SchemaContext, TableContext } from '@kozou/core';
 
-import { resolveFkLabels } from '../../src/lib/detail/resolve-fk-labels.js';
+import { resolveFkLabels } from '../../src/detail/resolve-fk-labels.js';
 
 function makeColumn(name: string, overrides: Partial<ColumnContext> = {}): ColumnContext {
   return {

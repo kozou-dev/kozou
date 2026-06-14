@@ -27,7 +27,7 @@ import type {
 } from '@kozou/core';
 
 import type { RelationFieldConfig } from '$lib/form/relation-field-config.js';
-import { encodeResourceId } from '$lib/resource-id.js';
+import { encodeResourceId } from '@kozou/ui-core';
 
 /** First-page size for the pre-rendered picker; the live search re-queries
  *  with its own limit through the endpoint. */

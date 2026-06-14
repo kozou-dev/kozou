@@ -5,7 +5,7 @@ import {
   buildSortHref,
   formatCell,
   type ListViewParams,
-} from '../../src/lib/list/list-href.js';
+} from '../../src/list/list-href.js';
 
 const base: ListViewParams = { search: '', sort: [], page: 1, pageSize: 50 };
 

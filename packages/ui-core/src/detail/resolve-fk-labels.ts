@@ -26,8 +26,8 @@
 
 import type { RelationContext, SchemaContext, TableContext } from '@kozou/core';
 
-import { encodeResourceId } from '$lib/resource-id.js';
-import type { FkRowLoader } from '$lib/server/fk-row-cache.js';
+import { encodeResourceId } from '../resource-id.js';
+import type { FkRowLoader } from '../server/fk-row-cache.js';
 
 export interface ResolvedFkLabel {
   /** Raw FK value as stored on the source row (typically a UUID

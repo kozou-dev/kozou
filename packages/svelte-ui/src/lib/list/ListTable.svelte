@@ -1,7 +1,11 @@
 <script lang="ts">
-  import { rowIdSegment } from '$lib/resource-id.js';
-
-  import { buildHref, buildSortHref, formatCell, type ListViewParams } from './list-href.js';
+  import {
+    buildHref,
+    buildSortHref,
+    formatCell,
+    rowIdSegment,
+    type ListViewParams,
+  } from '@kozou/ui-core';
 
   interface ListColumn {
     name: string;

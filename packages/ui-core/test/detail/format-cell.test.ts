@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { formatCellValue } from '../../src/lib/detail/format-cell.js';
+import { formatCellValue } from '../../src/detail/format-cell.js';
 
 describe('formatCellValue', () => {
   it('renders boolean widget values as Yes / No', () => {

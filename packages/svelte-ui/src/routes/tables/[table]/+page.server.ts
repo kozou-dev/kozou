@@ -8,7 +8,7 @@ import { error } from '@sveltejs/kit';
 import type { ColumnContext, TableContext } from '@kozou/core';
 
 import { getAdapter } from '$lib/server/adapter.js';
-import { parseListParamsFromUrl } from '$lib/query/list-params.js';
+import { parseListParamsFromUrl } from '@kozou/ui-core';
 
 import type { PageServerLoad } from './$types';
 

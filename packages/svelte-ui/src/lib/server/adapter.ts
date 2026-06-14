@@ -17,7 +17,7 @@
 import type { SchemaContext } from '@kozou/core';
 import type { DataAdapter } from '@kozou/core';
 
-import { KozouApiDataAdapter, PostgrestDataAdapter } from '$lib/adapter/index.js';
+import { KozouApiDataAdapter, PostgrestDataAdapter } from '@kozou/ui-core';
 
 const DEFAULT_POSTGREST_URL = 'http://localhost:3000';
 const DEFAULT_API_URL = 'http://localhost:3335';

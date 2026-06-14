@@ -8,7 +8,7 @@
 
 import type { SortSpec } from '@kozou/core';
 
-import { DEFAULT_PAGE_SIZE } from '$lib/query/list-params.js';
+import { DEFAULT_PAGE_SIZE } from '../query/list-params.js';
 
 /** The client-visible slice of `ParsedListParams` the routes hand to
  *  the template — the `filters` field stays server-side. */

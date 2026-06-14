@@ -1,7 +1,7 @@
 <script lang="ts">
   import { enhance } from '$app/forms';
 
-  import { formatCellValue } from '$lib/detail/format-cell.js';
+  import { formatCellValue } from '@kozou/ui-core';
 
   let { data } = $props();
 </script>

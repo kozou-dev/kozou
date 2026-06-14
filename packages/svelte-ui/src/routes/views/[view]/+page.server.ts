@@ -1,14 +1,14 @@
 // Read-only VIEW listing. Same URL contract as the table list
-// (see src/lib/query/list-params.ts), but no Edit / New / Delete
+// (see @kozou/ui-core's list-params), but no Edit / New / Delete
 // buttons render in the template; views are derived data.
 
 import { error } from '@sveltejs/kit';
 
 import {
+  parseListParamsFromUrl,
   pickViewDisplayColumns,
   pickViewSearchFields,
-} from '$lib/view/columns.js';
-import { parseListParamsFromUrl } from '$lib/query/list-params.js';
+} from '@kozou/ui-core';
 import { getAdapter } from '$lib/server/adapter.js';
 
 import type { PageServerLoad } from './$types';

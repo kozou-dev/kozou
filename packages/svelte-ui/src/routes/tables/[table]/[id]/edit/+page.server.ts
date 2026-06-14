@@ -16,7 +16,7 @@ import {
 } from '$lib/form/relation-field-config.js';
 import { applyPrivilegeReadonly } from '$lib/form/privilege-readonly.js';
 import { zodFromTable } from '$lib/form/zod-from-table.js';
-import { encodeResourceId, parseResourceId } from '$lib/resource-id.js';
+import { encodeResourceId, parseResourceId } from '@kozou/ui-core';
 import { getAdapter } from '$lib/server/adapter.js';
 import { readFormWithCompositePicks } from '$lib/server/composite-form.js';
 import {

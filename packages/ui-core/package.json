@@ -1,0 +1,42 @@
+{
+  "name": "@kozou/ui-core",
+  "version": "1.6.0",
+  "description": "Kozou framework-agnostic UI core: the read-path logic (DataAdapter implementations, list params, view columns, cell formatting, FK label resolution, resource ids, schema/FK caches) that turns a SchemaContext + DataAdapter into the data a reference Admin UI renders.",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kozou-dev/kozou.git",
+    "directory": "packages/ui-core"
+  },
+  "homepage": "https://kozou.org",
+  "bugs": {
+    "url": "https://github.com/kozou-dev/kozou/issues"
+  },
+  "type": "module",
+  "sideEffects": false,
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.test.json",
+    "build": "tsc",
+    "prepublishOnly": "pnpm run build",
+    "test": "vitest run --coverage"
+  },
+  "dependencies": {
+    "@kozou/core": "workspace:*"
+  }
+}
