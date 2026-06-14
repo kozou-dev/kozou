@@ -1,13 +1,12 @@
-// Identifier quoting + qualified table names. Shared by the query builder
-// and the embed fragment renderer so both quote identifiers identically.
+// Qualified table names for the query builder and the embed fragment renderer.
+// The identifier-quoting primitive itself lives in @kozou/core (shared with the
+// role-transaction envelope and the MCP execution surface); it is re-exported
+// here so existing call sites keep importing it from this module.
 
 import type { Resource } from './schema-lookup.js';
+import { quoteIdent } from '@kozou/core';
 
-/** Quote an identifier for safe inlining (defense in depth on top of the
- *  allowlist). */
-export function quoteIdent(id: string): string {
-  return '"' + id.replace(/"/g, '""') + '"';
-}
+export { quoteIdent };
 
 /** `"schema"."name"` for a resolved resource. */
 export function qualified(resource: Resource): string {

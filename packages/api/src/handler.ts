@@ -26,13 +26,11 @@ import {
 import { parseEmbedParam, resolveEmbedSpec } from './embed.js';
 import { buildRpcCall, shapeRpcResult, type FunctionLookup } from './rpc.js';
 
-/** Minimal query interface satisfied by both `pg.Pool` and `pg.Client`. */
-export type Queryable = {
-  query<R extends Record<string, unknown>>(
-    text: string,
-    values?: unknown[],
-  ): Promise<{ rows: R[]; rowCount: number | null }>;
-};
+// The minimal query interface (satisfied by both `pg.Pool` and `pg.Client`)
+// lives in @kozou/core so the role-transaction envelope and the MCP execution
+// surface share one definition; re-exported here for the package's consumers.
+import type { Queryable } from '@kozou/core';
+export type { Queryable };
 
 export type ApiHandlerDeps = {
   db: Queryable;

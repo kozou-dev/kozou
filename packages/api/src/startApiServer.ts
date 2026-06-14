@@ -11,7 +11,8 @@ import {
 } from 'node:http';
 import type { AddressInfo } from 'node:net';
 
-import type { SchemaContext } from '@kozou/core';
+import { runInRoleTransaction } from '@kozou/core';
+import type { ConnectionPool, SchemaContext } from '@kozou/core';
 
 import { errorBody, KozouApiError, mapDatabaseError } from './errors.js';
 import {
@@ -23,15 +24,12 @@ import {
 import { buildResourceLookup } from './schema-lookup.js';
 import { buildFunctionLookup } from './rpc.js';
 import { buildOpenApiDocument } from './openapi.js';
-import { quoteIdent } from './ident.js';
 import { createAuthenticator, type AuthConfig, type Authenticator } from './auth.js';
 
-/** A pooled client: a Queryable that can be returned to its pool. A
- *  node-postgres `PoolClient` satisfies this. */
-export type PoolClient = Queryable & { release(err?: boolean | Error): void };
-
-/** A connection pool able to hand out dedicated clients. A `pg.Pool` fits. */
-export type ConnectionPool = { connect(): Promise<PoolClient> };
+// The pooled-client / connection-pool abstraction now lives in @kozou/core
+// alongside the shared role-transaction envelope; re-export it so this
+// package's consumers keep importing it from here.
+export type { PoolClient, ConnectionPool } from '@kozou/core';
 
 export type StartApiServerOptions = {
   /** Introspected schema that drives routing + the identifier allowlist. */
@@ -149,36 +147,19 @@ async function dispatchAuthed(
   }
 
   const httpReq = await buildHttpRequest(req);
-  const client = await pool.connect();
   try {
-    await client.query('BEGIN');
-    try {
-      // Role is an identifier (no bound-parameter form); quote it. The role is
-      // additionally constrained by the auth allowlist.
-      await client.query(`SET LOCAL ROLE ${quoteIdent(auth.role)}`);
-    } catch {
-      throw new Error('Could not assume the requested role.');
-    }
-    // Claims are a value: bound parameter, never interpolated into SQL.
-    await client.query('SELECT set_config($1, $2, true)', [
-      authenticator.claimsGuc,
-      JSON.stringify(auth.claims),
-    ]);
-    // The client is a Queryable; routing runs every query on it, inside this
-    // transaction, so the role + claims apply.
-    const deps: ApiHandlerDeps = { ...base, db: client };
-    const result = await handleApiRequest(deps, httpReq);
-    await client.query('COMMIT');
+    // Run the request inside the shared role-transaction envelope: the role is
+    // assumed and the claims are published, then routing runs every query on
+    // the dedicated client so the role + the database's row-level-security
+    // policies apply.
+    const result = await runInRoleTransaction(
+      pool,
+      { role: auth.role, claimsGuc: authenticator.claimsGuc, claims: auth.claims },
+      (client) => handleApiRequest({ ...base, db: client }, httpReq),
+    );
     respondJson(res, result.status, result.body);
   } catch (err) {
-    try {
-      await client.query('ROLLBACK');
-    } catch {
-      // The connection may already be in a failed state; nothing to do.
-    }
     respondError(res, err);
-  } finally {
-    client.release();
   }
 }
 
