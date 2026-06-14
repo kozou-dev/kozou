@@ -78,3 +78,13 @@ export {
   type ConnectionPool,
   type RoleTransaction,
 } from './roleTransaction.js';
+export {
+  buildFunctionLookup,
+  buildRpcCall,
+  shapeRpcResult,
+  RpcInputError,
+  type FunctionLookup,
+  type BuiltRpcCall,
+  type RpcResult,
+} from './rpc.js';
+export { classifyDatabaseError, type DatabaseErrorClass } from './dbError.js';
