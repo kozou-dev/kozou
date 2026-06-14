@@ -28,6 +28,8 @@ describe('loadConfig', () => {
     expect(config.server.ui.host).toBe('0.0.0.0');
     expect(config.server.mcp.http.port).toBe(3334);
     expect(config.server.mcp.stdio).toBe(false);
+    // The MCP `call` execution tool is opt-in; default off (describe-only).
+    expect(config.server.mcp.execution.enabled).toBe(false);
     expect(config.adapter.type).toBe('api');
     expect(config.adapter.url).toBe('http://postgrest:3000');
     expect(config.uiHints.path).toBeNull();
@@ -55,6 +57,44 @@ api:
     const config = await loadConfig({ path: file, env: {} });
     expect(config.api.rpc.allowDefiner).toEqual(['public.approve_order', 'billing.settle_invoice']);
     expect(config.api.rpc.allowPublicExecute).toEqual(['public.search']);
+  });
+
+  it('parses server.mcp.execution (opt-in call tool)', async () => {
+    const dir = await makeTempDir();
+    const file = await writeYaml(
+      dir,
+      `database:
+  url: postgres://u:p@host:5432/db
+server:
+  mcp:
+    execution:
+      enabled: true
+      role: kozou_mcp_agent
+      claims: { tenant_id: acme }
+      allow:
+        - public.approve_order
+`,
+    );
+    const config = await loadConfig({ path: file, env: {} });
+    expect(config.server.mcp.execution.enabled).toBe(true);
+    expect(config.server.mcp.execution.role).toBe('kozou_mcp_agent');
+    expect(config.server.mcp.execution.claims).toEqual({ tenant_id: 'acme' });
+    expect(config.server.mcp.execution.allow).toEqual(['public.approve_order']);
+  });
+
+  it('rejects server.mcp.execution.enabled without a role', async () => {
+    const dir = await makeTempDir();
+    const file = await writeYaml(
+      dir,
+      `database:
+  url: postgres://u:p@host:5432/db
+server:
+  mcp:
+    execution:
+      enabled: true
+`,
+    );
+    await expect(loadConfig({ path: file, env: {} })).rejects.toBeInstanceOf(KozouConfigError);
   });
 
   it('accepts the postgrest adapter type as an opt-out', async () => {

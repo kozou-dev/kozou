@@ -12,12 +12,14 @@
 //   - Cache invalidation is exposed over HTTP via `POST /admin/refresh`,
 //     the HTTP-mode counterpart to the stdio
 //     server's SIGHUP handler.
-//   - v0.1 MCP HTTP ships with **no authentication**, so the
+//   - MCP HTTP ships with **no authentication**, so the
 //     server binds to localhost by default and prints a loud warning when
-//     bound to a non-loopback host. The tools only expose schema
+//     bound to a non-loopback host. By default the tools only expose schema
 //     metadata (no SQL execution, no data access), which bounds the blast
-//     radius, but operators must still avoid exposing it on a public
-//     interface.
+//     radius. When the operator enables the `call` execution tool the blast
+//     radius is no longer bounded to metadata — the warning escalates
+//     accordingly — so execution + a non-loopback bind must be avoided unless
+//     an external auth/proxy layer is in front.
 
 import { randomUUID } from 'node:crypto';
 import { createServer, type IncomingMessage, type Server as HttpServer, type ServerResponse } from 'node:http';
@@ -28,6 +30,7 @@ import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
 
 import { createMcpServer } from './server.js';
 import type { SchemaCache } from './schemaCache.js';
+import type { McpExecution } from './execution.js';
 
 export type StartHttpServerOptions = {
   /** TCP port to listen on. Default: 3334. */
@@ -38,6 +41,11 @@ export type StartHttpServerOptions = {
   mcpPath?: string;
   /** Prefix used in stderr log lines. Default: '[@kozou/mcp]'. */
   logPrefix?: string;
+  /** Opt-in execution capability for the `call` tool. Omit = describe-only.
+   *  The HTTP transport has NO authentication, so when this is set on a
+   *  non-loopback bind the startup warning is escalated: anyone who can reach
+   *  the host could execute exposed functions as the execution role. */
+  execution?: McpExecution;
 };
 
 export type HttpServerHandle = {
@@ -60,14 +68,26 @@ export function isLoopbackHost(host: string): boolean {
   return LOOPBACK_HOSTS.has(host);
 }
 
-function nonLoopbackWarning(host: string, prefix: string): string {
-  return (
+function nonLoopbackWarning(host: string, prefix: string, executionRole?: string): string {
+  const head =
     `${prefix} WARNING: MCP HTTP server bound to non-loopback host "${host}".\n` +
-    `${prefix} The MCP HTTP server has NO authentication. Anyone who can\n` +
-    `${prefix} reach ${host} can read this database's schema metadata. Bind to\n` +
-    `${prefix} 127.0.0.1 (the default) unless you have a trusted network and an\n` +
-    `${prefix} external auth/proxy layer in front.\n`
-  );
+    `${prefix} The MCP HTTP server has NO authentication.\n`;
+  const tail =
+    `${prefix} Bind to 127.0.0.1 (the default) unless you have a trusted network\n` +
+    `${prefix} and an external auth/proxy layer in front.\n`;
+  // With execution enabled the blast radius is no longer schema metadata: any
+  // client that can reach the host can run exposed functions as the execution
+  // role. Make that explicit and louder.
+  if (executionRole !== undefined) {
+    return (
+      head +
+      `${prefix} The \`call\` execution tool is ENABLED: anyone who can reach\n` +
+      `${prefix} ${host} can execute exposed database functions as the\n` +
+      `${prefix} "${executionRole}" role. This is dangerous on a public interface.\n` +
+      tail
+    );
+  }
+  return head + `${prefix} Anyone who can reach ${host} can read this database's schema metadata.\n` + tail;
 }
 
 /**
@@ -88,14 +108,14 @@ export async function startHttpServer(
   const mcpPath = opts.mcpPath ?? DEFAULT_MCP_PATH;
 
   if (!isLoopbackHost(host)) {
-    process.stderr.write(nonLoopbackWarning(host, prefix));
+    process.stderr.write(nonLoopbackWarning(host, prefix, opts.execution?.role));
   }
 
   // Active MCP sessions, keyed by the transport-issued session id.
   const transports = new Map<string, StreamableHTTPServerTransport>();
 
   const httpServer = createServer((req, res) => {
-    handleRequest(req, res, cache, mcpPath, transports).catch((err) => {
+    handleRequest(req, res, cache, mcpPath, transports, opts.execution).catch((err) => {
       respondError(res, 500, err instanceof Error ? err.message : String(err));
     });
   });
@@ -134,6 +154,7 @@ async function handleRequest(
   cache: SchemaCache,
   mcpPath: string,
   transports: Map<string, StreamableHTTPServerTransport>,
+  execution: McpExecution | undefined,
 ): Promise<void> {
   const url = new URL(req.url ?? '/', 'http://localhost');
 
@@ -149,7 +170,7 @@ async function handleRequest(
   }
 
   if (url.pathname === mcpPath) {
-    await handleMcp(req, res, cache, transports);
+    await handleMcp(req, res, cache, transports, execution);
     return;
   }
 
@@ -161,6 +182,7 @@ async function handleMcp(
   res: ServerResponse,
   cache: SchemaCache,
   transports: Map<string, StreamableHTTPServerTransport>,
+  execution: McpExecution | undefined,
 ): Promise<void> {
   const sessionId = headerValue(req.headers['mcp-session-id']);
 
@@ -201,7 +223,7 @@ async function handleMcp(
     }
   };
 
-  const server = createMcpServer(cache);
+  const server = createMcpServer(cache, execution);
   await server.connect(transport);
   await transport.handleRequest(req, res, body);
 }

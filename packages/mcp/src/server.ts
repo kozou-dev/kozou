@@ -13,7 +13,11 @@ import { describeView } from './tools/describe_view.js';
 import { listConcepts } from './tools/list_concepts.js';
 import { getConceptContext } from './tools/get_concept_context.js';
 import { describeFunctions } from './tools/describe_functions.js';
+import { callTool } from './tools/call.js';
 import type { SchemaCache } from './schemaCache.js';
+import type { McpExecution } from './execution.js';
+import { successResult, errorResult } from './result.js';
+import type { SchemaContext } from '@kozou/core';
 
 // Read the advertised server version from this package's package.json so
 // it tracks a release bump automatically instead of being hardcoded.
@@ -82,39 +86,83 @@ const TOOL_DEFINITIONS = [
     description:
       'List the functions exposed as RPC actions (issue #103): each with its ' +
       'arguments, return shape, volatility/security, and the schema author’s ' +
-      '@ai / @policy advisory. Call one with POST /rpc/<schema>.<fn>.',
+      '@ai / @policy advisory. Run one with the `call` tool (when enabled on ' +
+      'this server) or POST /rpc/<schema>.<fn>.',
     inputSchema: { type: 'object', properties: {} },
   },
 ] as const;
 
-type ToolName = (typeof TOOL_DEFINITIONS)[number]['name'];
+// The execution tool, listed only when the operator enabled execution (an
+// McpExecution is supplied to createMcpServer). describe-only is the default.
+const CALL_TOOL_DEFINITION = {
+  name: 'call',
+  description:
+    'Execute an exposed RPC action (issue #103). First use describe_functions to ' +
+    'learn the available functions, their arguments, return shape, and the ' +
+    'schema author’s @ai / @policy advisory; then call one here. It runs as the ' +
+    'operator-configured execution role — PostgreSQL’s EXECUTE privilege and the ' +
+    'function’s row-level-security policies are enforced. The input/output shape ' +
+    'is experimental and may change.',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      function: {
+        type: 'string',
+        description: 'Schema-qualified function name, e.g. public.approve_order',
+      },
+      args: {
+        type: 'object',
+        description: 'Named arguments for the function (omit for a no-argument call)',
+      },
+    },
+    required: ['function'],
+  },
+} as const;
 
-function successResult(payload: unknown) {
-  return { content: [{ type: 'text' as const, text: JSON.stringify(payload, null, 2) }] };
-}
+type ToolName = (typeof TOOL_DEFINITIONS)[number]['name'] | (typeof CALL_TOOL_DEFINITION)['name'];
 
-function errorResult(message: string) {
-  return {
-    isError: true,
-    content: [{ type: 'text' as const, text: message }],
-  };
-}
-
-export function createMcpServer(cache: SchemaCache): Server {
+/**
+ * Build the MCP server bound to a read-only schema cache, and — when an
+ * `execution` capability is supplied — the `call` tool that runs exposed
+ * functions under the operator's single execution role. Without `execution`
+ * the server is describe-only (the default): `call` is neither listed nor
+ * runnable.
+ */
+export function createMcpServer(cache: SchemaCache, execution?: McpExecution): Server {
   const server = new Server(
     { name: 'kozou', version: SERVER_VERSION },
     { capabilities: { tools: {} } },
   );
 
+  const tools = execution
+    ? [...TOOL_DEFINITIONS, CALL_TOOL_DEFINITION]
+    : [...TOOL_DEFINITIONS];
+
   server.setRequestHandler(ListToolsRequestSchema, () =>
-    Promise.resolve({ tools: TOOL_DEFINITIONS.map((t) => ({ ...t })) }),
+    Promise.resolve({ tools: tools.map((t) => ({ ...t })) }),
   );
 
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
     const name = request.params.name as ToolName;
     const args = (request.params.arguments ?? {}) as Record<string, unknown>;
+
+    // Schema introspection runs first and is shared by every tool. If it fails
+    // (connection / auth / catalog error) the raw message can carry connection
+    // detail, so it is logged server-side and reported generically — never
+    // echoed. This keeps the `call` tool's no-leak contract intact end to end:
+    // its own database errors are classified in callTool, and this covers the
+    // one shared step that runs before it.
+    let ctx: SchemaContext;
     try {
-      const ctx = await cache.get();
+      ctx = await cache.get();
+    } catch (err) {
+      process.stderr.write(
+        `[kozou mcp] schema unavailable: ${err instanceof Error ? err.message : String(err)}\n`,
+      );
+      return errorResult('Schema is currently unavailable.');
+    }
+
+    try {
       switch (name) {
         case 'list_tables':
           return successResult(listTables(args, ctx));
@@ -130,6 +178,14 @@ export function createMcpServer(cache: SchemaCache): Server {
           return successResult(getConceptContext(args as { name: string }, ctx));
         case 'describe_functions':
           return successResult(describeFunctions(args, ctx));
+        case 'call':
+          // Defense in depth: the tool is not listed without execution, but a
+          // client could still send the name. callTool owns its own success /
+          // error shaping (and never leaks raw database text).
+          if (execution === undefined) {
+            return errorResult('The "call" tool is not enabled on this server.');
+          }
+          return await callTool(args, ctx, execution);
         default:
           return errorResult(`Unknown tool: ${name as string}`);
       }

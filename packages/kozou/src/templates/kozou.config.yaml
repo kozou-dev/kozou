@@ -17,6 +17,22 @@ server:
       port: 3334
       host: 0.0.0.0
     stdio: false
+    # Optional: let the MCP `call` tool EXECUTE exposed RPC functions (the ones
+    # advertised by describe_functions). Default off = describe-only. When on,
+    # calls run as a single operator-configured role — there is no per-caller
+    # identity, so this is not for multi-tenant per-user authorization (use the
+    # REST API + per-user JWT for that). Use a dedicated least-privilege role
+    # (not the owner / a superuser); the role's EXECUTE privileges and each
+    # function's row-level security are what bound it. Keep the HTTP transport
+    # on loopback when enabled (it has no auth).
+    # execution:
+    #   enabled: true
+    #   role: kozou_mcp_agent
+    #   # Fixed claims published for row-level security (optional):
+    #   # claims: { tenant_id: acme }
+    #   # Restrict to a subset of exposed functions (optional; omit = all):
+    #   # allow:
+    #   #   - public.approve_order
 
 adapter:
   # Backend the Admin UI runs against. Defaults to "api": Kozou's in-house
