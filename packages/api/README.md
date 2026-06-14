@@ -1,9 +1,9 @@
 # @kozou/api
 
-> **Stable (Kozou v1.0; composite foreign keys as of v1.1).** The REST wire
-> format, query grammar, and OpenAPI extensions documented below are a stable
-> contract: they will not change incompatibly without a major release — see
-> [Stability](#stability).
+> **Stable (Kozou v1.0; composite foreign keys as of v1.1; RPC actions as of
+> v1.6).** The REST wire format, query grammar, and OpenAPI extensions documented
+> below are a stable contract: they will not change incompatibly without a major
+> release — see [Stability](#stability).
 
 Kozou's own REST layer. Given a `SchemaContext` (from `@kozou/introspect`
 + `@kozou/core`) and a PostgreSQL connection, it serves the tables and
@@ -235,15 +235,27 @@ change without a major release):
   components follow primary-key declaration order;
 - the auth boundary — JWT claims mapped to `SET LOCAL ROLE` (see below);
 - the error envelope `{ error: { code, message } }` and the database-mapped
-  status table (as of Kozou v1.1.1 — see Errors above).
+  status table (as of Kozou v1.1.1 — see Errors above);
+- the **RPC actions wire** (as of Kozou v1.6) — the REST `POST /rpc/<schema>.<fn>`
+  endpoint (a named-arguments JSON body; the return-shape mapping scalar → the
+  value, single composite → an object, a set (`SETOF` / `RETURNS TABLE`) → an
+  array (objects for a row set, bare values for a scalar set), `void` → `204`),
+  the function metadata in the OpenAPI document (`x-kozou-volatility` /
+  `x-kozou-security`, the `@ai` / `@policy` advisory as `x-kozou-ai` /
+  `x-kozou-policy`, and per-argument `x-kozou-widget` / `x-kozou-type` /
+  `x-kozou-relation`), and the MCP `call` execution tool, which shares the same
+  argument and return-value shaping (representing a `void` return as an explicit
+  "executed, no value" object instead of `204`). The exposure rules
+  (`@expose: rpc`, the PUBLIC-EXECUTE hard skip, the `SECURITY DEFINER` double
+  opt-in) were already settled; this adds the wire to the guarantee.
+
+Scalar leaf values are serialized by the PostgreSQL driver's default JSON
+output — notably `numeric` and `bigint` are rendered as JSON strings (to
+preserve precision). This applies to both the table/view and RPC surfaces.
 
 Still evolving (not yet covered by the stability guarantee):
 
-- the **`@kozou/codegen`** output (a separate package, still experimental);
-- the **RPC actions** surface (`@expose: rpc`, `POST /rpc/<schema>.<fn>`, the
-  `x-kozou-*` function metadata) — the exposure rules are settled, but the wire
-  shape may change without a major release until it is stabilized after
-  dogfooding.
+- the **`@kozou/codegen`** output (a separate package, still experimental).
 
 ## Scope: default coverage vs PostgREST opt-out
 
@@ -265,7 +277,7 @@ deliberate opt-out.
 | Sort / pagination | ✅ | `sort`, `page` / `pageSize` |
 | COMMENT-native OpenAPI 3.1 (`x-kozou-*`) | ✅ | **Kozou's differentiator** — PostgREST treats COMMENTs as opaque text |
 | JWT + RLS (`SET LOCAL ROLE`) | ✅ | |
-| RPC (Postgres functions) | ✅ opt-in (`@expose: rpc`) | see [RPC actions](#rpc-actions); compiled to REST + OpenAPI + MCP + Admin UI. Wire is experimental |
+| RPC (Postgres functions) | ✅ opt-in (`@expose: rpc`) | see [RPC actions](#rpc-actions); compiled to REST + OpenAPI + MCP + Admin UI. Wire is stable as of v1.6 |
 | Full-text search (fts) | ❌ opt-out | approximate with `ilike` |
 | Vertical select (column projection) | ❌ opt-out | always returns all columns |
 | Writable views (`INSTEAD OF`) | ❌ opt-out | views are read-only |

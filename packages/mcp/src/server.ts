@@ -102,7 +102,7 @@ const CALL_TOOL_DEFINITION = {
     'schema author’s @ai / @policy advisory; then call one here. It runs as the ' +
     'operator-configured execution role — PostgreSQL’s EXECUTE privilege and the ' +
     'function’s row-level-security policies are enforced. The input/output shape ' +
-    'is experimental and may change.',
+    'is a stable contract as of Kozou v1.6.',
   inputSchema: {
     type: 'object',
     properties: {
