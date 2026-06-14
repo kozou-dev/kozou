@@ -16,6 +16,9 @@ import { SchemaCache, callTool, startHttpServer, type McpExecution } from '../sr
 // message is never returned to the caller. All fixture functions are
 // table-free (current_user / current_setting / arithmetic / VALUES) so they
 // need no search_path beyond the call itself.
+//
+// PostgreSQL roles are cluster-global, and CI shares one cluster across the
+// whole test run, so the agent role is created once here under a single setup.
 const FIXTURE_SQL = `
   -- A dedicated least-privilege execution role the connection can SET ROLE to.
   CREATE ROLE mcp_agent NOLOGIN;
@@ -90,10 +93,11 @@ function textOf(result: { content: { type: string; text: string }[] }): string {
   return result.content.map((c) => c.text).join('');
 }
 
-describe('callTool (MCP execution, issue #103)', () => {
+describe('MCP `call` execution tool (issue #103)', () => {
   let db: DatabaseHandle;
   let pool: pkg.Pool;
   let ctx: SchemaContext;
+  let cache: SchemaCache;
   let ownerRole: string;
   const qn = (name: string): string => `${db.schema}.${name}`;
   let execution: McpExecution;
@@ -113,12 +117,11 @@ describe('callTool (MCP execution, issue #103)', () => {
       await admin.end();
     }
 
-    const raw = await introspect({ connection: db.connectionString, schemas: [db.schema] });
     // allowDefiner opts the SECURITY DEFINER function into the exposed set.
-    ctx = await buildSchemaContext({
-      raw,
-      rpc: { allowDefiner: [qn('definer_who')], allowPublicExecute: [] },
-    });
+    const rpc = { allowDefiner: [qn('definer_who')], allowPublicExecute: [] };
+    const raw = await introspect({ connection: db.connectionString, schemas: [db.schema] });
+    ctx = await buildSchemaContext({ raw, rpc });
+    cache = new SchemaCache({ connection: db.connectionString, schemas: [db.schema], ttlMs: 60_000, rpc });
 
     pool = new pkg.Pool({ connectionString: db.connectionString, max: 4 });
     execution = {
@@ -134,241 +137,190 @@ describe('callTool (MCP execution, issue #103)', () => {
     if (db) await db.cleanup();
   });
 
-  it('runs a granted function under SET LOCAL ROLE (current_user is the exec role)', async () => {
-    const r = await callTool({ function: qn('whoami') }, ctx, execution);
-    expect(r.isError).toBeUndefined();
-    expect(JSON.parse(textOf(r))).toBe('mcp_agent');
-  });
-
-  it('publishes the configured claims for RLS under request.jwt.claims', async () => {
-    const r = await callTool({ function: qn('my_claims') }, ctx, execution);
-    expect(r.isError).toBeUndefined();
-    // my_claims returns the GUC's TEXT value (the claims JSON), so the scalar
-    // result is the JSON string — parse once for the scalar, again for its JSON.
-    const claimsText = JSON.parse(textOf(r)) as string;
-    expect(JSON.parse(claimsText)).toEqual({ sub: 'agent-x' });
-  });
-
-  it('returns a scalar result and binds named arguments', async () => {
-    const r = await callTool({ function: qn('add_two'), args: { a: 2, b: 5 } }, ctx, execution);
-    expect(JSON.parse(textOf(r))).toBe(7);
-  });
-
-  it('reports a void function as executed with no value', async () => {
-    const r = await callTool({ function: qn('do_nothing') }, ctx, execution);
-    expect(r.isError).toBeUndefined();
-    expect(JSON.parse(textOf(r))).toEqual({ ok: true, note: expect.stringContaining('no value') });
-  });
-
-  it('returns a SETOF scalar as an array', async () => {
-    const r = await callTool({ function: qn('two_rows') }, ctx, execution);
-    expect(JSON.parse(textOf(r))).toEqual([10, 20]);
-  });
-
-  it('pre-flights an unknown argument as an error (no query runs)', async () => {
-    const r = await callTool({ function: qn('add_two'), args: { a: 1, b: 2, c: 3 } }, ctx, execution);
-    expect(r.isError).toBe(true);
-    expect(textOf(r)).toMatch(/Unknown argument "c"/);
-  });
-
-  it('pre-flights a missing required argument as an error', async () => {
-    const r = await callTool({ function: qn('add_two'), args: { a: 1 } }, ctx, execution);
-    expect(r.isError).toBe(true);
-    expect(textOf(r)).toMatch(/Missing required argument "b"/);
-  });
-
-  it('maps a missing EXECUTE privilege (42501) to a safe error with no leak', async () => {
-    const r = await callTool({ function: qn('forbidden_op') }, ctx, execution);
-    expect(r.isError).toBe(true);
-    expect(textOf(r)).toBe('Permission denied.');
-    // No raw database detail (function name / privilege wording) leaks.
-    expect(textOf(r)).not.toContain('forbidden_op');
-    expect(textOf(r)).not.toMatch(/permission denied for/i);
-  });
-
-  it('maps a RAISE to a generic error without leaking the raw message', async () => {
-    const r = await callTool({ function: qn('boom') }, ctx, execution);
-    expect(r.isError).toBe(true);
-    expect(textOf(r)).toBe('The function call failed.');
-    expect(textOf(r)).not.toContain('kaboom');
-  });
-
-  it('runs a SECURITY DEFINER function as its owner, not the exec role', async () => {
-    const r = await callTool({ function: qn('definer_who') }, ctx, execution);
-    expect(r.isError).toBeUndefined();
-    const who = JSON.parse(textOf(r)) as string;
-    expect(who).toBe(ownerRole);
-    expect(who).not.toBe('mcp_agent');
-  });
-
-  it('treats an unknown / unexposed function as non-existent (no enumeration)', async () => {
-    const unexposed = await callTool({ function: qn('internal_helper') }, ctx, execution);
-    expect(unexposed.isError).toBe(true);
-    expect(textOf(unexposed)).toMatch(/Unknown function/);
-
-    const missing = await callTool({ function: qn('does_not_exist') }, ctx, execution);
-    expect(missing.isError).toBe(true);
-    expect(textOf(missing)).toMatch(/Unknown function/);
-  });
-
-  it('enforces the allowlist: a not-allowed exposed function is indistinguishable from absent', async () => {
-    const allowlisted: McpExecution = { ...execution, allow: [qn('whoami')] };
-    // Allowed → runs.
-    expect((await callTool({ function: qn('whoami') }, ctx, allowlisted)).isError).toBeUndefined();
-    // Exposed + granted, but not on the allowlist → same "Unknown function".
-    const blocked = await callTool({ function: qn('add_two'), args: { a: 1, b: 1 } }, ctx, allowlisted);
-    expect(blocked.isError).toBe(true);
-    expect(textOf(blocked)).toMatch(/Unknown function/);
-  });
-
-  it('rejects a malformed input shape', async () => {
-    expect((await callTool({}, ctx, execution)).isError).toBe(true);
-    expect((await callTool({ function: '' }, ctx, execution)).isError).toBe(true);
-    const badArgs = await callTool({ function: qn('add_two'), args: [1, 2] }, ctx, execution);
-    expect(badArgs.isError).toBe(true);
-    expect(textOf(badArgs)).toMatch(/Invalid call input/);
-  });
-});
-
-describe('MCP server call-tool wiring (over HTTP transport)', () => {
-  let db: DatabaseHandle;
-  let pool: pkg.Pool;
-  let cache: SchemaCache;
-
-  beforeAll(async () => {
-    db = await setupDatabase();
-    const admin = new pkg.Client({ connectionString: db.connectionString });
-    await admin.connect();
-    try {
-      await admin.query(`CREATE SCHEMA "${db.schema}"`);
-      await admin.query(`SET search_path TO "${db.schema}"`);
-      await admin.query(`
-        CREATE ROLE mcp_agent NOLOGIN;
-        GRANT mcp_agent TO CURRENT_USER;
-        CREATE FUNCTION whoami() RETURNS text LANGUAGE sql AS $$ SELECT current_user::text $$;
-        COMMENT ON FUNCTION whoami() IS 'Executing role.
-@expose: rpc';
-        REVOKE EXECUTE ON FUNCTION whoami() FROM PUBLIC;
-        GRANT EXECUTE ON FUNCTION whoami() TO mcp_agent;
-      `);
-      await admin.query(`GRANT USAGE ON SCHEMA "${db.schema}" TO mcp_agent`);
-    } finally {
-      await admin.end();
-    }
-    cache = new SchemaCache({ connection: db.connectionString, schemas: [db.schema], ttlMs: 60_000 });
-    pool = new pkg.Pool({ connectionString: db.connectionString, max: 2 });
-  }, 120_000);
-
-  afterAll(async () => {
-    if (pool) await pool.end();
-    if (db) await db.cleanup();
-  });
-
-  const execution = (): McpExecution => ({
-    pool,
-    role: 'mcp_agent',
-    claimsGuc: 'request.jwt.claims',
-    claims: {},
-  });
-
-  it('lists + runs the call tool when execution is enabled', async () => {
-    const handle = await startHttpServer(cache, { port: 0, host: '127.0.0.1', execution: execution() });
-    const transport = new StreamableHTTPClientTransport(
-      new URL(`http://127.0.0.1:${handle.port}/mcp`),
-    );
-    const client = new Client({ name: 'kozou-test', version: '0.0.0' });
-    try {
-      await client.connect(transport);
-      const names = (await client.listTools()).tools.map((t) => t.name);
-      expect(names).toContain('call');
-
-      const result = await client.callTool({
-        name: 'call',
-        arguments: { function: `${db.schema}.whoami` },
-      });
-      const content = result.content as Array<{ type: string; text: string }>;
-      expect(JSON.parse(content[0].text)).toBe('mcp_agent');
-    } finally {
-      await client.close();
-      await handle.close();
-    }
-  });
-
-  it('omits the call tool (and refuses it) when execution is disabled', async () => {
-    const handle = await startHttpServer(cache, { port: 0, host: '127.0.0.1' });
-    const transport = new StreamableHTTPClientTransport(
-      new URL(`http://127.0.0.1:${handle.port}/mcp`),
-    );
-    const client = new Client({ name: 'kozou-test', version: '0.0.0' });
-    try {
-      await client.connect(transport);
-      const names = (await client.listTools()).tools.map((t) => t.name);
-      expect(names).not.toContain('call');
-
-      // A client could still send the name; it must be refused, not run.
-      const result = await client.callTool({
-        name: 'call',
-        arguments: { function: `${db.schema}.whoami` },
-      });
-      expect(result.isError).toBe(true);
-      const content = result.content as Array<{ type: string; text: string }>;
-      expect(content[0].text).toMatch(/not enabled/);
-    } finally {
-      await client.close();
-      await handle.close();
-    }
-  });
-
-  it('reports schema-unavailable generically when introspection fails (no leak)', async () => {
-    // A call reaches the shared cache.get() before callTool; an introspection
-    // failure must not echo the raw connection error to the client.
-    const badCache = new SchemaCache({
-      connection: 'postgres://invalid-host-xyz:5432/none',
-      schemas: ['public'],
-      ttlMs: 60_000,
+  describe('callTool (direct)', () => {
+    it('runs a granted function under SET LOCAL ROLE (current_user is the exec role)', async () => {
+      const r = await callTool({ function: qn('whoami') }, ctx, execution);
+      expect(r.isError).toBeUndefined();
+      expect(JSON.parse(textOf(r))).toBe('mcp_agent');
     });
-    const handle = await startHttpServer(badCache, {
-      port: 0,
-      host: '127.0.0.1',
-      execution: execution(),
+
+    it('publishes the configured claims for RLS under request.jwt.claims', async () => {
+      const r = await callTool({ function: qn('my_claims') }, ctx, execution);
+      expect(r.isError).toBeUndefined();
+      // my_claims returns the GUC's TEXT value (the claims JSON), so the scalar
+      // result is the JSON string — parse once for the scalar, again for its JSON.
+      const claimsText = JSON.parse(textOf(r)) as string;
+      expect(JSON.parse(claimsText)).toEqual({ sub: 'agent-x' });
     });
-    const transport = new StreamableHTTPClientTransport(
-      new URL(`http://127.0.0.1:${handle.port}/mcp`),
-    );
-    const client = new Client({ name: 'kozou-test', version: '0.0.0' });
-    try {
-      await client.connect(transport);
-      const result = await client.callTool({
-        name: 'call',
-        arguments: { function: 'public.whoami' },
-      });
-      expect(result.isError).toBe(true);
-      const content = result.content as Array<{ type: string; text: string }>;
-      expect(content[0].text).toBe('Schema is currently unavailable.');
-      // The raw connection error (host, driver code) must not leak.
-      expect(content[0].text).not.toMatch(/invalid-host-xyz|ENOTFOUND|ECONNREFUSED|getaddrinfo/i);
-    } finally {
-      await client.close();
-      await handle.close();
-    }
+
+    it('returns a scalar result and binds named arguments', async () => {
+      const r = await callTool({ function: qn('add_two'), args: { a: 2, b: 5 } }, ctx, execution);
+      expect(JSON.parse(textOf(r))).toBe(7);
+    });
+
+    it('reports a void function as executed with no value', async () => {
+      const r = await callTool({ function: qn('do_nothing') }, ctx, execution);
+      expect(r.isError).toBeUndefined();
+      expect(JSON.parse(textOf(r))).toEqual({ ok: true, note: expect.stringContaining('no value') });
+    });
+
+    it('returns a SETOF scalar as an array', async () => {
+      const r = await callTool({ function: qn('two_rows') }, ctx, execution);
+      expect(JSON.parse(textOf(r))).toEqual([10, 20]);
+    });
+
+    it('pre-flights an unknown argument as an error (no query runs)', async () => {
+      const r = await callTool({ function: qn('add_two'), args: { a: 1, b: 2, c: 3 } }, ctx, execution);
+      expect(r.isError).toBe(true);
+      expect(textOf(r)).toMatch(/Unknown argument "c"/);
+    });
+
+    it('pre-flights a missing required argument as an error', async () => {
+      const r = await callTool({ function: qn('add_two'), args: { a: 1 } }, ctx, execution);
+      expect(r.isError).toBe(true);
+      expect(textOf(r)).toMatch(/Missing required argument "b"/);
+    });
+
+    it('maps a missing EXECUTE privilege (42501) to a safe error with no leak', async () => {
+      const r = await callTool({ function: qn('forbidden_op') }, ctx, execution);
+      expect(r.isError).toBe(true);
+      expect(textOf(r)).toBe('Permission denied.');
+      // No raw database detail (function name / privilege wording) leaks.
+      expect(textOf(r)).not.toContain('forbidden_op');
+      expect(textOf(r)).not.toMatch(/permission denied for/i);
+    });
+
+    it('maps a RAISE to a generic error without leaking the raw message', async () => {
+      const r = await callTool({ function: qn('boom') }, ctx, execution);
+      expect(r.isError).toBe(true);
+      expect(textOf(r)).toBe('The function call failed.');
+      expect(textOf(r)).not.toContain('kaboom');
+    });
+
+    it('runs a SECURITY DEFINER function as its owner, not the exec role', async () => {
+      const r = await callTool({ function: qn('definer_who') }, ctx, execution);
+      expect(r.isError).toBeUndefined();
+      const who = JSON.parse(textOf(r)) as string;
+      expect(who).toBe(ownerRole);
+      expect(who).not.toBe('mcp_agent');
+    });
+
+    it('treats an unknown / unexposed function as non-existent (no enumeration)', async () => {
+      const unexposed = await callTool({ function: qn('internal_helper') }, ctx, execution);
+      expect(unexposed.isError).toBe(true);
+      expect(textOf(unexposed)).toMatch(/Unknown function/);
+
+      const missing = await callTool({ function: qn('does_not_exist') }, ctx, execution);
+      expect(missing.isError).toBe(true);
+      expect(textOf(missing)).toMatch(/Unknown function/);
+    });
+
+    it('enforces the allowlist: a not-allowed exposed function is indistinguishable from absent', async () => {
+      const allowlisted: McpExecution = { ...execution, allow: [qn('whoami')] };
+      // Allowed → runs.
+      expect((await callTool({ function: qn('whoami') }, ctx, allowlisted)).isError).toBeUndefined();
+      // Exposed + granted, but not on the allowlist → same "Unknown function".
+      const blocked = await callTool({ function: qn('add_two'), args: { a: 1, b: 1 } }, ctx, allowlisted);
+      expect(blocked.isError).toBe(true);
+      expect(textOf(blocked)).toMatch(/Unknown function/);
+    });
+
+    it('rejects a malformed input shape', async () => {
+      expect((await callTool({}, ctx, execution)).isError).toBe(true);
+      expect((await callTool({ function: '' }, ctx, execution)).isError).toBe(true);
+      const badArgs = await callTool({ function: qn('add_two'), args: [1, 2] }, ctx, execution);
+      expect(badArgs.isError).toBe(true);
+      expect(textOf(badArgs)).toMatch(/Invalid call input/);
+    });
   });
 
-  it('escalates the non-loopback warning when execution is enabled', async () => {
-    const writes: string[] = [];
-    const spy = vi.spyOn(process.stderr, 'write').mockImplementation((chunk: unknown) => {
-      writes.push(String(chunk));
-      return true;
+  describe('over the MCP HTTP transport', () => {
+    it('lists + runs the call tool when execution is enabled', async () => {
+      const handle = await startHttpServer(cache, { port: 0, host: '127.0.0.1', execution });
+      const transport = new StreamableHTTPClientTransport(
+        new URL(`http://127.0.0.1:${handle.port}/mcp`),
+      );
+      const client = new Client({ name: 'kozou-test', version: '0.0.0' });
+      try {
+        await client.connect(transport);
+        const names = (await client.listTools()).tools.map((t) => t.name);
+        expect(names).toContain('call');
+
+        const result = await client.callTool({ name: 'call', arguments: { function: qn('whoami') } });
+        const content = result.content as Array<{ type: string; text: string }>;
+        expect(JSON.parse(content[0].text)).toBe('mcp_agent');
+      } finally {
+        await client.close();
+        await handle.close();
+      }
     });
-    let handle;
-    try {
-      handle = await startHttpServer(cache, { port: 0, host: '0.0.0.0', execution: execution() });
-    } finally {
-      spy.mockRestore();
-    }
-    await handle.close();
-    const warning = writes.join('');
-    expect(warning).toMatch(/NO authentication/);
-    expect(warning).toMatch(/`call` execution tool is ENABLED/);
-    expect(warning).toContain('mcp_agent');
+
+    it('omits the call tool (and refuses it) when execution is disabled', async () => {
+      const handle = await startHttpServer(cache, { port: 0, host: '127.0.0.1' });
+      const transport = new StreamableHTTPClientTransport(
+        new URL(`http://127.0.0.1:${handle.port}/mcp`),
+      );
+      const client = new Client({ name: 'kozou-test', version: '0.0.0' });
+      try {
+        await client.connect(transport);
+        const names = (await client.listTools()).tools.map((t) => t.name);
+        expect(names).not.toContain('call');
+
+        // A client could still send the name; it must be refused, not run.
+        const result = await client.callTool({ name: 'call', arguments: { function: qn('whoami') } });
+        expect(result.isError).toBe(true);
+        const content = result.content as Array<{ type: string; text: string }>;
+        expect(content[0].text).toMatch(/not enabled/);
+      } finally {
+        await client.close();
+        await handle.close();
+      }
+    });
+
+    it('reports schema-unavailable generically when introspection fails (no leak)', async () => {
+      // A call reaches the shared cache.get() before callTool; an introspection
+      // failure must not echo the raw connection error to the client.
+      const badCache = new SchemaCache({
+        connection: 'postgres://invalid-host-xyz:5432/none',
+        schemas: ['public'],
+        ttlMs: 60_000,
+      });
+      const handle = await startHttpServer(badCache, { port: 0, host: '127.0.0.1', execution });
+      const transport = new StreamableHTTPClientTransport(
+        new URL(`http://127.0.0.1:${handle.port}/mcp`),
+      );
+      const client = new Client({ name: 'kozou-test', version: '0.0.0' });
+      try {
+        await client.connect(transport);
+        const result = await client.callTool({ name: 'call', arguments: { function: 'public.whoami' } });
+        expect(result.isError).toBe(true);
+        const content = result.content as Array<{ type: string; text: string }>;
+        expect(content[0].text).toBe('Schema is currently unavailable.');
+        // The raw connection error (host, driver code) must not leak.
+        expect(content[0].text).not.toMatch(/invalid-host-xyz|ENOTFOUND|ECONNREFUSED|getaddrinfo/i);
+      } finally {
+        await client.close();
+        await handle.close();
+      }
+    });
+
+    it('escalates the non-loopback warning when execution is enabled', async () => {
+      const writes: string[] = [];
+      const spy = vi.spyOn(process.stderr, 'write').mockImplementation((chunk: unknown) => {
+        writes.push(String(chunk));
+        return true;
+      });
+      let handle;
+      try {
+        handle = await startHttpServer(cache, { port: 0, host: '0.0.0.0', execution });
+      } finally {
+        spy.mockRestore();
+      }
+      await handle.close();
+      const warning = writes.join('');
+      expect(warning).toMatch(/NO authentication/);
+      expect(warning).toMatch(/`call` execution tool is ENABLED/);
+      expect(warning).toContain('mcp_agent');
+    });
   });
 });
