@@ -336,6 +336,55 @@ describe('buildListQuery', () => {
     }
   });
 
+  it('matches PostgreSQL at the real (float32) rounding boundaries — single, not double, rounding (#85)', () => {
+    const t = tableResource('t', [
+      col('id', 'uuid', { isPrimaryKey: true, nullable: false }),
+      col('ratio', 'number', { dataType: 'real' }),
+    ]);
+    // Exact decimals around the float32 round-to-zero threshold 2^-150 and the
+    // round-to-Infinity threshold 2^128-2^103. Each accept/reject below was
+    // verified against PostgreSQL 16 via pg_input_is_valid(v,'real'). The
+    // previous Math.fround check double-rounded (decimal->binary64->binary32)
+    // and falsely rejected the two "just inside the bound" cases.
+    const TWO_POW_NEG_150 =
+      '0.000000000000000000000000000000000000000000000700649232162408535461864791644958065640130970938257885878534141944895541342930300743319094181060791015625';
+    // 2^-150 + 2^-205: just ABOVE the threshold but binary64 rounds it to exactly
+    // 2^-150, so Math.fround flushed it to 0. PostgreSQL rounds it up to 2^-149.
+    const JUST_ABOVE_UNDERFLOW =
+      '0.0000000000000000000000000000000000000000000007006492321624085549087875349610259004653311390011461377230721691985428322839197219611279505416340447154525722678550529905205923597577566397376358509063720703125';
+    const JUST_BELOW_UNDERFLOW =
+      '0.0000000000000000000000000000000000000000000007006492321624085160149420483288902308149308028753696340339961146912482504019408795255102378204875373157974277321449470094794076402422433602623641490936279296875';
+    const SMALLEST_SUBNORMAL = // 2^-149
+      '0.00000000000000000000000000000000000000000000140129846432481707092372958328991613128026194187651577175706828388979108268586060148663818836212158203125';
+    const OVERFLOW = '340282356779733661637539395458142568448'; // 2^128 - 2^103
+    const JUST_BELOW_OVERFLOW = '340282356779733642748073463979561713664'; // OVERFLOW - 2^74
+    const JUST_ABOVE_OVERFLOW = '340282356779733680527005326936723423232'; // OVERFLOW + 2^74
+    const MAX_FINITE = '340282346638528859811704183484516925440'; // 2^128 - 2^104
+
+    const accepts = (value: string): void =>
+      expect(() => buildListQuery(t, { filters: [{ column: 'ratio', op: 'eq', value }] })).not.toThrow();
+    const rejects = (value: string): void =>
+      expect(() =>
+        buildListQuery(t, { filters: [{ column: 'ratio', op: 'eq', value }] }),
+      ).toThrow(/is not valid for column "ratio"/);
+
+    // Underflow boundary 2^-150 (tie rounds to 0).
+    rejects(TWO_POW_NEG_150); // exactly the tie -> 0 (underflow)
+    accepts(JUST_ABOVE_UNDERFLOW); // > 2^-150 -> 2^-149 (was a false reject)
+    rejects(JUST_BELOW_UNDERFLOW); // < 2^-150 -> 0 (underflow)
+    accepts(SMALLEST_SUBNORMAL); // 2^-149, the smallest positive real
+    // Overflow boundary 2^128-2^103 (tie rounds to Infinity).
+    rejects(OVERFLOW); // exactly the tie -> Infinity (overflow)
+    accepts(JUST_BELOW_OVERFLOW); // < threshold -> max finite (was a false reject)
+    rejects(JUST_ABOVE_OVERFLOW); // > threshold -> Infinity (overflow)
+    accepts(MAX_FINITE); // 2^128-2^104, the largest finite real
+    // Sign and exponent-form variants resolve to the same magnitudes.
+    accepts('-' + JUST_ABOVE_UNDERFLOW);
+    rejects('-' + OVERFLOW);
+    accepts('3.40282e38'); // < threshold
+    rejects('3.5e38'); // > threshold
+  });
+
   it('accepts in-range numeric(p,s) / float values and unbounded numeric (#81)', () => {
     const t = tableResource('t', [
       col('id', 'uuid', { isPrimaryKey: true, nullable: false }),

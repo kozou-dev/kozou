@@ -431,6 +431,36 @@ describe('@kozou/api integration (generic fixture)', () => {
     expect(floatUnderflow.status).toBe(400);
   });
 
+  it('matches pg_input_is_valid at the real rounding boundaries (#85)', async () => {
+    // Exact decimals around the float32 round-to-zero (2^-150) and
+    // round-to-Infinity (2^128-2^103) thresholds. The pre-flight must agree with
+    // PostgreSQL: an accepted value runs (200), a rejected one is a 400 (never a
+    // 500). The previous Math.fround double-rounding falsely rejected the two
+    // "just inside the bound" cases (`just_above_underflow`, `just_below_overflow`).
+    const witnesses: Record<string, string> = {
+      two_pow_neg_150:
+        '0.000000000000000000000000000000000000000000000700649232162408535461864791644958065640130970938257885878534141944895541342930300743319094181060791015625',
+      just_above_underflow:
+        '0.0000000000000000000000000000000000000000000007006492321624085549087875349610259004653311390011461377230721691985428322839197219611279505416340447154525722678550529905205923597577566397376358509063720703125',
+      smallest_subnormal:
+        '0.00000000000000000000000000000000000000000000140129846432481707092372958328991613128026194187651577175706828388979108268586060148663818836212158203125',
+      overflow_threshold: '340282356779733661637539395458142568448',
+      just_below_overflow: '340282356779733642748073463979561713664',
+      max_finite: '340282346638528859811704183484516925440',
+    };
+    for (const [name, value] of Object.entries(witnesses)) {
+      const pgValid = (
+        await pool.query<{ ok: boolean }>(`SELECT pg_input_is_valid($1, 'real') AS ok`, [value])
+      ).rows[0].ok;
+      const res = await getJson<{ error?: { code: string } }>(
+        `/float_samples?approx=eq.${encodeURIComponent(value)}`,
+      );
+      // 200 iff PostgreSQL would accept the literal; otherwise a pre-flight 400.
+      expect(res.status, `${name} (pg_input_is_valid=${pgValid})`).toBe(pgValid ? 200 : 400);
+      if (!pgValid) expect(res.body.error?.code).toBe('bad_request');
+    }
+  });
+
   it('rejects a non-text relation-options search field with 400 (#76)', async () => {
     // `fields` is request-controlled; ILIKE'ing a numeric column would 500.
     const { status, body } = await getJson<{ error?: { code: string } }>(
