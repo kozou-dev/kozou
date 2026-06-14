@@ -3,7 +3,7 @@
 
   import { fetchRelationOptions } from '$lib/form/relation-options-client.js';
   import { createRelationSearch } from '$lib/form/relation-search.js';
-  import { encodeResourceId } from '$lib/resource-id.js';
+  import { encodeResourceId } from '@kozou/ui-core';
 
   import RelationSelect from './relation-select.svelte';
 

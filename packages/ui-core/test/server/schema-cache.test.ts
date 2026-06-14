@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import type { SchemaContext } from '@kozou/core';
 
-import { SchemaCache } from '../../src/lib/server/schema-cache.js';
+import { SchemaCache } from '../../src/server/schema-cache.js';
 
 function makeContext(label: string): SchemaContext {
   return {

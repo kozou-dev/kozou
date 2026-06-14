@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { parseListParamsFromUrl } from '../../src/lib/query/list-params.js';
+import { parseListParamsFromUrl } from '../../src/query/list-params.js';
 
 describe('parseListParamsFromUrl', () => {
   it('falls back to page=1 / pageSize=50 and empty sort/search when no query params are set', () => {

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { FkRowCache } from '../../src/lib/server/fk-row-cache.js';
+import { FkRowCache } from '../../src/server/fk-row-cache.js';
 
 describe('FkRowCache', () => {
   it('returns the loaded row and caches it within the TTL window', async () => {

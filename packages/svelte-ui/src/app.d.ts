@@ -2,7 +2,7 @@
 
 import type { SchemaContext } from '@kozou/core';
 
-import type { FkRowCache } from '$lib/server/fk-row-cache.js';
+import type { FkRowCache } from '@kozou/ui-core';
 
 declare global {
   namespace App {

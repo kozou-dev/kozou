@@ -8,7 +8,7 @@
   } from '$lib/form/relation-field-config.js';
   import { fetchRelationOptions } from '$lib/form/relation-options-client.js';
   import { createRelationSearch } from '$lib/form/relation-search.js';
-  import { encodeResourceId } from '$lib/resource-id.js';
+  import { encodeResourceId } from '@kozou/ui-core';
 
   // One picker for a composite (multi-column) foreign key: a single select
   // whose options are target rows, writing every key component at once.

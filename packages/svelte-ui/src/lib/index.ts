@@ -17,9 +17,9 @@ export type {
   FetchLike,
   PostgrestAdapterOptions,
   PostgrestPrimaryKeyResolver,
-} from './adapter/index.js';
+} from '@kozou/ui-core';
 export {
   AdapterError,
   PostgrestAdapterError,
   PostgrestDataAdapter,
-} from './adapter/index.js';
+} from '@kozou/ui-core';

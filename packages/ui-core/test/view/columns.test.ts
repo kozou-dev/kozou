@@ -9,7 +9,7 @@ import type {
 import {
   pickViewDisplayColumns,
   pickViewSearchFields,
-} from '../../src/lib/view/columns.js';
+} from '../../src/view/columns.js';
 
 function makeColumn(
   name: string,

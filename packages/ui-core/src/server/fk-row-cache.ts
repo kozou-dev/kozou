@@ -15,7 +15,7 @@
 
 import type { ResourceId } from '@kozou/core';
 
-import { encodeResourceId } from '$lib/resource-id.js';
+import { encodeResourceId } from '../resource-id.js';
 
 export interface FkRowCacheOptions {
   /** Cache lifetime per entry, in milliseconds. Defaults to 60_000

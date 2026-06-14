@@ -206,6 +206,9 @@ importers:
       '@kozou/introspect':
         specifier: workspace:*
         version: link:../introspect
+      '@kozou/ui-core':
+        specifier: workspace:*
+        version: link:../ui-core
       '@lucide/svelte':
         specifier: ^1.16.0
         version: 1.16.0(svelte@5.55.9(@typescript-eslint/types@8.60.0))
@@ -301,6 +304,12 @@ importers:
       '@types/pg':
         specifier: ^8.11.10
         version: 8.20.0
+
+  packages/ui-core:
+    dependencies:
+      '@kozou/core':
+        specifier: workspace:*
+        version: link:../core
 
 packages:
 

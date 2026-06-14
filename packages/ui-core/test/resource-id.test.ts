@@ -4,7 +4,7 @@ import {
   encodeResourceId,
   parseResourceId,
   rowIdSegment,
-} from '../src/lib/resource-id.js';
+} from '../src/resource-id.js';
 
 describe('rowIdSegment', () => {
   it('returns the encoded value for a single-column key', () => {
