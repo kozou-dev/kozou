@@ -228,6 +228,46 @@ describe('@kozou/api integration (generic fixture)', () => {
       ]);
     });
 
+    it('rejects a malformed (non-empty) JSON body with 400, not a silent empty-args call (#145)', async () => {
+      // A no-argument function would otherwise run on a garbage body coerced to
+      // {}; it must 400 up front instead of silently executing.
+      const r = await fetch(`${base}/rpc/${db.schema}.noop`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: '{ not json',
+      });
+      expect(r.status).toBe(400);
+      const body = (await r.json()) as { error: { code: string; message: string } };
+      expect(body.error.code).toBe('bad_request');
+      // The message proves readJsonBody rejected it (not a downstream validator).
+      expect(body.error.message).toBe('Request body is not valid JSON.');
+    });
+
+    it('treats an empty or whitespace-only body as a no-argument call (#145)', async () => {
+      // No body at all: the existing no-argument path.
+      expect((await postRpc('noop')).status).toBe(204);
+      // A whitespace-only body is still "absent", not malformed.
+      const r = await fetch(`${base}/rpc/${db.schema}.noop`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: '   \n',
+      });
+      expect(r.status).toBe(204);
+    });
+
+    it('rejects a malformed JSON write body with 400 (shared body reader, #145)', async () => {
+      const r = await fetch(`${base}/authors`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: '{ "name": ', // truncated JSON
+      });
+      expect(r.status).toBe(400);
+      const body = (await r.json()) as { error: { code: string; message: string } };
+      expect(body.error.code).toBe('bad_request');
+      // Proves readJsonBody rejected it up front, not the object-body validator.
+      expect(body.error.message).toBe('Request body is not valid JSON.');
+    });
+
     it('maps a RAISE with a constraint SQLSTATE to its HTTP status (#98 reuse)', async () => {
       const { status } = await postRpc('boom', {});
       expect(status).toBe(400); // check_violation -> 400 (not a 500)
