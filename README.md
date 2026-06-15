@@ -88,8 +88,8 @@ Advisory only: enforcement stays in PostgreSQL (GRANTs + your RLS). See
 Use the runtime image directly:
 
 ```bash
-docker pull ghcr.io/kozou-dev/kozou:v1.7.0
-docker run --rm ghcr.io/kozou-dev/kozou:v1.7.0 mcp --help
+docker pull ghcr.io/kozou-dev/kozou:v1.8.0
+docker run --rm ghcr.io/kozou-dev/kozou:v1.8.0 mcp --help
 ```
 
 Or install the packages for library / embedded use:
@@ -124,7 +124,7 @@ via JWKS, or a minimal self-hosted issuer. See
 
 ## Requirements
 
-Runtime requirements for v1.7.0:
+Runtime requirements for v1.8.0:
 
 - **PostgreSQL 16 or later** — the canonical source of truth
 - **Docker 24 or later** (optional) — recommended for the `docker compose up` stack, which brings up PostgreSQL and a `kozou` service running `kozou dev` (the bundled Admin UI + MCP HTTP server, plus Kozou's in-house REST backend served in-process) from `ghcr.io/kozou-dev/kozou` (a multi-arch image, native on linux/amd64 and linux/arm64). The default stack needs **no separate REST container**; to opt out and use an external PostgREST instead, set `adapter.type: postgrest` and add the (commented) service in the scaffold's `docker-compose.yml`.
@@ -150,7 +150,8 @@ Contributors additionally need **pnpm 9 or later**. See [CONTRIBUTING.md](CONTRI
 - v1.5.1 (shipped): a patch release. `@kozou/api`'s list-filter pre-flight now validates a `real` (float4) value by exact comparison against the float32 rounding thresholds instead of `Math.fround`, which double-rounded (decimal → binary64 → binary32) and falsely rejected (400) a decimal just inside the underflow (`2^-150`) or overflow (`2^128 − 2^103`) boundary that PostgreSQL accepts (issue #85). No value PostgreSQL rejects is now accepted, so this only turns prior false-400s into the correct 200 — never a 500. Verified against PostgreSQL 16 via `pg_input_is_valid`.
 - v1.6.0 (shipped): the **opt-in RPC actions wire is now a stable contract**. The REST `POST /rpc/<schema>.<fn>` endpoint (named-arguments body + the return-shape mapping), the COMMENT-native OpenAPI function metadata, and the MCP `call` execution tool — all compiled from `@expose: rpc` — shipped experimental-first in v1.4.0 (describe) and v1.5.0 (execute, issue #103). After end-to-end validation against a realistic schema (a least-privilege execution role, RLS read/write enforcement, `SECURITY DEFINER`, no-leak errors, the allowlist, and the full return-shape matrix), the wire joins the table/view CRUD surface under the stability guarantee: it will not change incompatibly without a major release. Documentation/contract-declaration only — no behavior change. See the `@kozou/api` README Stability section and the RPC actions guide.
 - v1.7.0 (shipped): the framework-agnostic read-path of the reference Admin UI is extracted into a new published package, **`@kozou/ui-core`**, which `@kozou/svelte-ui` now depends on. The two `DataAdapter` implementations, list-parameter parsing, view-column heuristics, cell formatting, foreign-key label resolution, resource-id handling, and the schema / FK-row caches move out of the SvelteKit app unchanged, so the same logic can drive more than one UI framework. This is the structural step of the React UI exploration: a minimal React (Next.js) read spike renders list + detail by consuming `@kozou/ui-core` verbatim, with no change to the shared core — evidence that the read-path abstraction is framework-agnostic. (The spike is an internal example, not a published second UI; `@kozou/svelte-ui` stays the reference Admin UI.) Also: `@kozou/api` now rejects a malformed, non-empty JSON request body with a `400` instead of treating it as an empty body (issue #145). The `@kozou/svelte-ui` public API is unchanged.
-- Beyond v1.7: React UI exploration — optional write-path parity (a second UI driving create / edit / delete across both adapters)
+- v1.8.0 (shipped): **opt-in privilege-aware AI context** — point Kozou at a role (`introspection.respectPrivileges`) and the MCP `describe_table` / `describe_view` tools and `kozou docs` now also tell the agent what that role may *touch*: each relation is annotated with the role's effective GRANTs (relation-level `SELECT`/`INSERT`/`UPDATE`/`DELETE`, plus per-column `insertable` / `updatable` on tables), and `kozou docs` grows a per-table "Security" section. Unlike the Admin UI's privilege mode, the AI surfaces **annotate rather than hide** — a table the role cannot `SELECT` still appears, marked `select: false`, so the agent is told its limits rather than left guessing. It reuses the existing privilege introspection (no new queries) and is advisory only: enforcement stays in PostgreSQL (GRANTs + your RLS). When the MCP `call` execution tool is enabled, the annotated role is tied to the execution role so describe and act never disagree. Default off ⇒ every surface stays schema-wide. `kozou docs` also now renders per-column `@ai` / `@policy` notes. See [`examples/quickstart`](examples/quickstart).
+- Beyond v1.8: React UI exploration — optional write-path parity (a second UI driving create / edit / delete across both adapters)
 
 ## Name
 

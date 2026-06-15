@@ -34,7 +34,7 @@ services:
       retries: 10
 
   kozou:
-    image: ghcr.io/kozou-dev/kozou:v1.7.0
+    image: ghcr.io/kozou-dev/kozou:v1.8.0
     command: ["dev"]
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER:-kozou}:${POSTGRES_PASSWORD:-kozou}@postgres:5432/${POSTGRES_DB:-kozou}
