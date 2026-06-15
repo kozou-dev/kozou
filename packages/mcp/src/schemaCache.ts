@@ -11,9 +11,17 @@ export type SchemaCacheOptions = {
    *  `describe_functions` advertises the same exposed set as the REST `/rpc/`
    *  surface — including the SECURITY DEFINER / public functions the operator
    *  opted in. Omitted on the env-only standalone CLI (only invoker functions
-   *  with PUBLIC EXECUTE revoked are then exposed). MCP stays privilege-wide:
-   *  it never sets `privilegeRole`, so EXECUTE-based hiding does not apply. */
+   *  with PUBLIC EXECUTE revoked are then exposed). */
   rpc?: RpcBuildConfig;
+  /** Privilege-aware introspection (issue #99). When set, the MCP server
+   *  evaluates this role's effective table/column GRANTs and *annotates* the
+   *  describe tools with them (`describe_table.privileges` + per-column
+   *  `insertable` / `updatable`), so an agent is told what the role may touch.
+   *  Unlike the Admin UI it does not hide unreadable relations — it keeps them
+   *  and labels them (annotate mode). Omitted (the default) keeps the server
+   *  schema-wide: no privileges are read or surfaced. Enforcement always stays
+   *  in PostgreSQL; this is advisory context only. */
+  privilegeRole?: string;
 };
 
 export class SchemaCache {
@@ -55,7 +63,14 @@ export class SchemaCache {
     const raw = await introspect({
       connection: this.opts.connection,
       schemas: this.opts.schemas,
+      privilegeRole: this.opts.privilegeRole,
     });
-    return buildSchemaContext({ raw, rpc: this.opts.rpc });
+    // Annotate (don't hide) when a privilege role is set, so the agent sees
+    // every relation and is told what it may touch. No role -> schema-wide.
+    return buildSchemaContext({
+      raw,
+      rpc: this.opts.rpc,
+      ...(this.opts.privilegeRole === undefined ? {} : { privilegeDisplay: 'annotate' as const }),
+    });
   }
 }

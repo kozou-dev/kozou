@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { relationPrivilegesSchema } from './privileges.js';
 
 export const describeViewInputSchema = z.object({
   qualifiedName: z.string().min(1),
@@ -30,6 +31,10 @@ export const describeViewOutputSchema = z.object({
   aiDescription: z.string().nullable(),
   /** `@policy:` lines on the view COMMENT — advisory, surfaced to the AI agent. */
   policy: z.array(z.string()),
+  /** Effective privileges of the evaluated role on this view (privilege-aware
+   *  mode). Omitted in the default schema-wide mode. Advisory: enforcement
+   *  stays in PostgreSQL. */
+  privileges: relationPrivilegesSchema.optional(),
   columns: z.array(viewColumnSchema),
   underlyingTables: z.array(z.string()),
   definition: z.string(),

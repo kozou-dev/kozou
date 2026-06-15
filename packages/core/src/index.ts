@@ -23,6 +23,7 @@ export type {
   ColumnContext,
   WidgetType,
   RelationContext,
+  RelationPrivileges,
   ViewContext,
   EnumContext,
   ConceptContext,

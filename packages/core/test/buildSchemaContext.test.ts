@@ -687,4 +687,85 @@ describe('buildSchemaContext privilege-aware (#99)', () => {
     expect(col.insertable).toBeUndefined();
     expect(col.updatable).toBeUndefined();
   });
+
+  it('filter mode (default) carries the survivors’ privileges onto the context', async () => {
+    const raw = makeRaw({
+      tables: [
+        makeTable('orders', {
+          privileges: { role, select: true, insert: false, update: false, delete: false },
+          columns: [makeCol('id', 'uuid', { privileges: { insert: false, update: false } })],
+        }),
+      ],
+    });
+    const ctx = await buildSchemaContext({ raw });
+    expect(ctx.tables[0]!.privileges).toEqual({
+      role,
+      select: true,
+      insert: false,
+      update: false,
+      delete: false,
+    });
+  });
+
+  it('annotate mode keeps a table the role cannot SELECT and surfaces its privileges', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const raw = makeRaw({
+      tables: [
+        makeTable('secrets', {
+          privileges: { role, select: false, insert: false, update: false, delete: false },
+          columns: [makeCol('id', 'uuid', { privileges: { insert: false, update: false } })],
+        }),
+        makeTable('orders', {
+          privileges: { role, select: true, insert: false, update: false, delete: false },
+          columns: [makeCol('id', 'uuid', { privileges: { insert: false, update: false } })],
+        }),
+      ],
+    });
+    const ctx = await buildSchemaContext({ raw, privilegeDisplay: 'annotate' });
+    // Nothing hidden: the agent still sees the unreadable relation, labelled.
+    expect(ctx.tables.map((t) => t.name).sort()).toEqual(['orders', 'secrets']);
+    expect(ctx.tables.find((t) => t.name === 'secrets')!.privileges).toEqual({
+      role,
+      select: false,
+      insert: false,
+      update: false,
+      delete: false,
+    });
+    expect(ctx.tables.find((t) => t.name === 'orders')!.columns[0]!.insertable).toBe(false);
+    // No "hid N relation(s)" warning in annotate mode.
+    expect(warn).not.toHaveBeenCalledWith(expect.stringContaining('hid '));
+  });
+
+  it('annotate mode keeps a view the role cannot SELECT and surfaces its privileges', async () => {
+    const mkView = (name: string, select: boolean) => ({
+      schema: 'public',
+      name,
+      comment: 'a concept',
+      columns: [],
+      underlyingTables: [],
+      definition: 'SELECT 1',
+      privileges: { role, select, insert: false, update: false, delete: false },
+    });
+    const raw = makeRaw({ views: [mkView('vw_secret', false), mkView('vw_public', true)] });
+    const ctx = await buildSchemaContext({ raw, privilegeDisplay: 'annotate' });
+    expect(ctx.views.map((v) => v.name).sort()).toEqual(['vw_public', 'vw_secret']);
+    expect(ctx.views.find((v) => v.name === 'vw_secret')!.privileges).toEqual({
+      role,
+      select: false,
+      insert: false,
+      update: false,
+      delete: false,
+    });
+    // Concepts mirror views in annotate mode too (nothing hidden).
+    expect(ctx.concepts.map((c) => c.name).sort()).toEqual(['vw_public', 'vw_secret']);
+  });
+
+  it('annotate mode is a no-op when privileges were not evaluated (privileges omitted)', async () => {
+    const raw = makeRaw({
+      tables: [makeTable('orders', { columns: [makeCol('status', 'text')] })],
+    });
+    const ctx = await buildSchemaContext({ raw, privilegeDisplay: 'annotate' });
+    expect(ctx.tables[0]!.privileges).toBeUndefined();
+    expect(ctx.tables[0]!.columns[0]!.insertable).toBeUndefined();
+  });
 });

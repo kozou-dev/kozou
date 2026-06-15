@@ -3,7 +3,12 @@ import { writeFile, mkdtemp } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomBytes } from 'node:crypto';
-import { loadConfig, resolvePrivilegeRole, KozouConfigError } from '../src/config.js';
+import {
+  loadConfig,
+  resolvePrivilegeRole,
+  hasReadyMadeToken,
+  KozouConfigError,
+} from '../src/config.js';
 import type { KozouConfig } from '../src/config.js';
 
 async function makeTempDir(): Promise<string> {
@@ -729,5 +734,35 @@ describe('resolvePrivilegeRole (#99)', () => {
     // a real ready-made token; the HS256 mint path passes false.
     expect(resolvePrivilegeRole(config, { suppliedToken: false })).toBe('app_user');
     expect(resolvePrivilegeRole(config)).toBe('app_user');
+  });
+});
+
+describe('hasReadyMadeToken (#99)', () => {
+  async function base(): Promise<KozouConfig> {
+    return loadConfig({ skipFile: true, env: { DATABASE_URL: 'postgres://u:p@h:5432/db' } });
+  }
+
+  it('is false with no token configured or inherited', async () => {
+    expect(hasReadyMadeToken(await base(), {})).toBe(false);
+  });
+
+  it('is true when auth.ui.token is configured', async () => {
+    const config: KozouConfig = {
+      ...(await base()),
+      auth: { jwt: { publicKey: 'pem' }, ui: { token: 'ready.made.jwt' } },
+    };
+    expect(hasReadyMadeToken(config, {})).toBe(true);
+  });
+
+  it('is true when KOZOU_ADAPTER_TOKEN is inherited from the environment', async () => {
+    expect(hasReadyMadeToken(await base(), { KOZOU_ADAPTER_TOKEN: 'env.jwt' })).toBe(true);
+  });
+
+  it('treats an empty token as absent', async () => {
+    const config: KozouConfig = {
+      ...(await base()),
+      auth: { jwt: { publicKey: 'pem' }, ui: { token: '' } },
+    };
+    expect(hasReadyMadeToken(config, { KOZOU_ADAPTER_TOKEN: '' })).toBe(false);
   });
 });

@@ -27,6 +27,27 @@ export type SchemaContext = {
   functions?: FunctionContext[];
 };
 
+/** Effective privileges of the evaluated serving role on a table or view
+ *  (privilege-aware introspection, issue #99). Present only when a privilege
+ *  role was evaluated (`undefined` in the default, schema-wide mode). Surfaced
+ *  read-only to AI agents (MCP `describe_table` / `describe_view`) and
+ *  `kozou docs` so a caller knows what the role may *touch*, not just what the
+ *  schema declares. Advisory only: enforcement stays in PostgreSQL (GRANTs and
+ *  the schema author's row-level security). Column-level write privileges live
+ *  on `ColumnContext.insertable` / `updatable`. */
+export type RelationPrivileges = {
+  /** The role these privileges were evaluated for. */
+  role: string;
+  /** May the role SELECT the relation (gated by schema USAGE). */
+  select: boolean;
+  /** May the role INSERT into the relation. */
+  insert: boolean;
+  /** May the role UPDATE the relation. */
+  update: boolean;
+  /** May the role DELETE from the relation. */
+  delete: boolean;
+};
+
 export type TableContext = {
   schema: string;
   name: string;
@@ -44,6 +65,11 @@ export type TableContext = {
    *  enforce these; hard access control is the schema author's Postgres
    *  row-level security. Also retained inline in `description`. */
   policy?: string[];
+  /** Effective privileges of the evaluated serving role (privilege-aware mode,
+   *  issue #99). `undefined` when privileges were not evaluated (schema-wide).
+   *  Surfaced read-only to AI agents / `kozou docs`; enforcement stays in
+   *  PostgreSQL. */
+  privileges?: RelationPrivileges;
   primaryKey: string[];
   /** From UI Hints; otherwise a heuristic */
   displayField: string | null;
@@ -144,6 +170,10 @@ export type ViewContext = {
   /** `@policy:` lines from the view COMMENT — advisory, surfaced to AI agents
    *  and never enforced by kozou (see TableContext.policy). */
   policy?: string[];
+  /** Effective privileges of the evaluated serving role on the view
+   *  (privilege-aware mode, issue #99). `undefined` when not evaluated.
+   *  Surfaced read-only; enforcement stays in PostgreSQL. */
+  privileges?: RelationPrivileges;
   /** First paragraph of the COMMENT */
   purpose: string | null;
   columns: ColumnContext[];

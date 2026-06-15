@@ -113,6 +113,46 @@ With that context the agent stops re-deriving business rules and uses the view
 that encapsulates them. Same model, same question — a correct answer instead of
 a plausible wrong one.
 
+## Bonus: what the agent may *touch*
+
+Kozou can also tell the agent not just what the data *means* but what a given
+role is *allowed* to do — the thin edge a query layer that enforces but doesn't
+explain (PostgREST, Hasura) doesn't give an agent. It's **opt-in**: point Kozou
+at a role and the describe tools annotate each relation with that role's
+effective GRANTs. With the read-only `analyst` role this schema defines,
+`describe_table("public.orders")` adds:
+
+```jsonc
+{
+  "qualifiedName": "public.orders",
+  "privileges": { "role": "analyst", "select": true, "insert": false, "update": false, "delete": false },
+  "columns": [
+    { "name": "status", "insertable": false, "updatable": false /* ... */ }
+    /* ... every column read-only for this role ... */
+  ]
+}
+```
+
+So an agent knows, before it tries, that it may read orders but not write them.
+Nothing is hidden — a table the role cannot even `SELECT` still appears, marked
+`"select": false`, so the agent is *told* rather than left guessing.
+
+Enable it by adding to `kozou.config.yaml`:
+
+```yaml
+introspection:
+  respectPrivileges: true
+  role: analyst
+```
+
+This makes the surfaces role-faithful: the MCP describe tools and `kozou docs`
+annotate the role's grants (docs grows a per-table **Security** section), and the
+bundled Admin UI hides what the role cannot read and locks what it cannot write.
+(The REST API and its OpenAPI stay schema-wide — they enforce per request via the
+caller's JWT role and RLS, so they need no advisory annotation.) Enforcement
+always stays in PostgreSQL (GRANTs and your RLS policies) — Kozou only *surfaces*
+the model.
+
 ## Reproduce the numbers
 
 ```bash

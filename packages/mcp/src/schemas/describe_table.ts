@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { relationPrivilegesSchema } from './privileges.js';
 
 export const describeTableInputSchema = z.object({
   qualifiedName: z.string().min(1),
@@ -21,6 +22,12 @@ const columnSchema = z.object({
       column: z.string(),
     })
     .nullable(),
+  /** Privilege-aware mode only: whether the evaluated role may INSERT this
+   *  column. Omitted in the default schema-wide mode. */
+  insertable: z.boolean().optional(),
+  /** Privilege-aware mode only: whether the evaluated role may UPDATE this
+   *  column. Omitted in the default schema-wide mode. */
+  updatable: z.boolean().optional(),
 });
 
 const relationSchema = z.object({
@@ -48,6 +55,10 @@ export const describeTableOutputSchema = z.object({
   /** `@policy:` lines on the table COMMENT — advisory, surfaced to the AI agent. */
   policy: z.array(z.string()),
   primaryKey: z.array(z.string()),
+  /** Effective privileges of the evaluated role on this table (privilege-aware
+   *  mode). Omitted in the default schema-wide mode. Advisory: enforcement
+   *  stays in PostgreSQL. */
+  privileges: relationPrivilegesSchema.optional(),
   columns: z.array(columnSchema),
   relations: z.array(relationSchema),
   checkConstraints: z.array(checkConstraintSchema),
