@@ -11,7 +11,7 @@ import { writeFile } from 'node:fs/promises';
 import { buildSchemaContext, loadUIHints } from '@kozou/core';
 import type { UIHints } from '@kozou/core';
 import { introspect } from '@kozou/introspect';
-import { loadConfig } from '../config.js';
+import { hasReadyMadeToken, loadConfig, resolvePrivilegeRole } from '../config.js';
 import { emitMarkdown } from '../docs.js';
 
 const PREFIX = '[kozou docs]';
@@ -28,9 +28,20 @@ export async function docsCommand(opts: DocsOptions = {}): Promise<void> {
 
   const config = await loadConfig({ path: opts.config });
 
+  // Privilege-aware mode (issue #99): when introspection.respectPrivileges is on,
+  // evaluate the resolved role's GRANTs and emit a per-relation "Security"
+  // section. The doc annotates (never hides) so the document stays a complete
+  // schema reference. Off => schema-wide (no Security section). With a ready-made
+  // token configured, require an explicit introspection.role rather than
+  // documenting a guessed role (suppliedToken guard).
+  const privilegeRole = resolvePrivilegeRole(config, {
+    suppliedToken: hasReadyMadeToken(config, process.env),
+  });
+
   const raw = await introspect({
     connection: config.database.url,
     schemas: config.database.schemas,
+    privilegeRole,
   });
 
   let uiHints: UIHints | undefined;
@@ -44,7 +55,11 @@ export async function docsCommand(opts: DocsOptions = {}): Promise<void> {
     }
   }
 
-  const ctx = await buildSchemaContext({ raw, uiHints });
+  const ctx = await buildSchemaContext({
+    raw,
+    uiHints,
+    ...(privilegeRole === undefined ? {} : { privilegeDisplay: 'annotate' as const }),
+  });
   const serialized = emitMarkdown(ctx);
   const payload = serialized.endsWith('\n') ? serialized : serialized + '\n';
 

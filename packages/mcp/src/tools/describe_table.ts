@@ -36,6 +36,9 @@ export function describeTable(input: DescribeTableInput, ctx: SchemaContext): De
     enumValues: c.enumValues,
     isForeignKey: c.isForeignKey,
     references: referencesByField.get(c.name) ?? null,
+    // Privilege-aware mode only; `undefined` (omitted) when not evaluated.
+    ...(c.insertable === undefined ? {} : { insertable: c.insertable }),
+    ...(c.updatable === undefined ? {} : { updatable: c.updatable }),
   }));
 
   return {
@@ -45,6 +48,8 @@ export function describeTable(input: DescribeTableInput, ctx: SchemaContext): De
     aiDescription: table.aiDescription,
     policy: table.policy ?? [],
     primaryKey: table.primaryKey,
+    // Privilege-aware mode only; omitted when privileges were not evaluated.
+    ...(table.privileges ? { privileges: table.privileges } : {}),
     columns,
     relations: table.relations.map((r) => ({
       field: r.field,

@@ -25,6 +25,17 @@ export type BuildOptions = {
    *  PUBLIC-EXECUTE function can be exposed; invoker functions tagged
    *  `@expose: rpc` (with PUBLIC EXECUTE revoked) still are. */
   rpc?: RpcBuildConfig;
+  /** How to treat a relation the privilege role cannot SELECT, when privilege-
+   *  aware introspection ran (issue #99):
+   *  - `'filter'` (default): hide it from the generated surfaces. This is the
+   *    Admin UI's behaviour — its forms/nav should be faithful to what the role
+   *    may *do*, so an unreadable table is simply absent.
+   *  - `'annotate'`: keep every relation and surface its privileges instead.
+   *    This is the MCP / `kozou docs` behaviour — an AI agent should still see
+   *    the table exists and be *told* it cannot read it ("knows what it may
+   *    touch"), rather than have it vanish.
+   *  Has no effect when privileges were not evaluated. */
+  privilegeDisplay?: 'filter' | 'annotate';
 };
 
 export type BuildIssue = {
@@ -259,6 +270,7 @@ function buildTableContext(input: {
     description: parsed.body !== '' ? parsed.body : null,
     aiDescription: joinAi(parsed.ai),
     policy: parsed.policy,
+    ...(table.privileges ? { privileges: table.privileges } : {}),
     primaryKey: table.primaryKey,
     displayField,
     columns,
@@ -327,6 +339,7 @@ function buildViewContext(input: {
     description: parsed.body !== '' ? parsed.body : null,
     aiDescription: joinAi(parsed.ai),
     policy: parsed.policy,
+    ...(view.privileges ? { privileges: view.privileges } : {}),
     purpose: firstParagraph(parsed.body),
     columns,
     underlyingTables: view.underlyingTables,
@@ -355,7 +368,8 @@ function buildConcept(view: RawView): ConceptContext {
 }
 
 export async function buildSchemaContext(opts: BuildOptions): Promise<SchemaContext> {
-  const { raw, uiHints, strict = false, rpc } = opts;
+  const { raw, uiHints, strict = false, rpc, privilegeDisplay = 'filter' } = opts;
+  const annotatePrivileges = privilegeDisplay === 'annotate';
   const issues: BuildIssue[] = [];
 
   const knownTables = new Set(raw.tables.map((t) => `${t.schema}.${t.name}`));
@@ -391,21 +405,29 @@ export async function buildSchemaContext(opts: BuildOptions): Promise<SchemaCont
   // targets are still resolved against the full `knownTables`, so a relation
   // pointing at a hidden table is not flagged as missing; such an embed would be
   // denied at query time (mapped to 403) — see issue #99 known limitations.
+  //
+  // In `annotate` mode (MCP / `kozou docs`) nothing is hidden: every relation is
+  // kept and its privileges are surfaced (see `RelationPrivileges`), so an agent
+  // is told what it may touch rather than having unreadable tables disappear.
   const hiddenNames: string[] = [];
-  const visibleRawTables = raw.tables.filter((t) => {
-    if (t.privileges?.select === false) {
-      hiddenNames.push(t.name);
-      return false;
-    }
-    return true;
-  });
-  const visibleRawViews = raw.views.filter((v) => {
-    if (v.privileges?.select === false) {
-      hiddenNames.push(v.name);
-      return false;
-    }
-    return true;
-  });
+  const visibleRawTables = annotatePrivileges
+    ? raw.tables
+    : raw.tables.filter((t) => {
+        if (t.privileges?.select === false) {
+          hiddenNames.push(t.name);
+          return false;
+        }
+        return true;
+      });
+  const visibleRawViews = annotatePrivileges
+    ? raw.views
+    : raw.views.filter((v) => {
+        if (v.privileges?.select === false) {
+          hiddenNames.push(v.name);
+          return false;
+        }
+        return true;
+      });
   if (hiddenNames.length > 0) {
     const role =
       raw.tables.find((t) => t.privileges !== undefined)?.privileges?.role ??

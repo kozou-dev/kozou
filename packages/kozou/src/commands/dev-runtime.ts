@@ -29,6 +29,25 @@ export function resolveOrigin(config: KozouConfig, env: NodeJS.ProcessEnv): stri
   return env.ORIGIN ?? env.KOZOU_ORIGIN ?? `http://localhost:${config.server.ui.port}`;
 }
 
+// Resolve the privilege role for privilege-aware introspection in `kozou dev`,
+// honouring the ready-made-token guard: a supplied token (config auth.ui.token
+// or an inherited KOZOU_ADAPTER_TOKEN) only gates role resolution on the
+// in-house API path, since the external-REST opt-out clears the token and the
+// UI never forwards it. Used for BOTH the Admin UI child's KOZOU_INTROSPECTION_
+// ROLE and the in-process MCP server's privilege annotation, so the two reflect
+// the same role. Returns undefined when the feature is off; can throw (via
+// resolvePrivilegeRole) when on but no role is resolvable.
+export function resolveDevPrivilegeRole(
+  config: KozouConfig,
+  opts: { apiActive: boolean; env: NodeJS.ProcessEnv },
+): string | undefined {
+  const suppliedToken =
+    opts.apiActive &&
+    ((config.auth?.ui?.token !== undefined && config.auth.ui.token.length > 0) ||
+      (opts.env.KOZOU_ADAPTER_TOKEN !== undefined && opts.env.KOZOU_ADAPTER_TOKEN.length > 0));
+  return resolvePrivilegeRole(config, { suppliedToken });
+}
+
 // Build the child-process environment for the Admin UI server. Keeping
 // it pure makes the wiring unit-testable without spawning anything.
 //
@@ -70,16 +89,13 @@ export function buildAdminUiEnv(
   // unreadable tables, lock non-updatable columns). Set it authoritatively from
   // config — delete any inherited value when the feature is off, so a stray
   // parent KOZOU_INTROSPECTION_ROLE cannot silently turn it on.
-  // A ready-made token only actually gates role resolution on the in-house API
-  // path: the external REST opt-out below clears KOZOU_ADAPTER_TOKEN and the UI
-  // never forwards it, so an inherited token there must not force
-  // introspection.role. Detect a real ready-made token (config or inherited
-  // env) only when the API path is active.
-  const suppliedToken =
-    apiAdapterUrl !== undefined &&
-    ((config.auth?.ui?.token !== undefined && config.auth.ui.token.length > 0) ||
-      (baseEnv.KOZOU_ADAPTER_TOKEN !== undefined && baseEnv.KOZOU_ADAPTER_TOKEN.length > 0));
-  const privilegeRole = resolvePrivilegeRole(config, { suppliedToken });
+  // The ready-made-token guard only applies on the in-house API path (see
+  // resolveDevPrivilegeRole). Resolve via the shared helper so the in-process
+  // MCP server (commands/dev.ts) annotates the same role.
+  const privilegeRole = resolveDevPrivilegeRole(config, {
+    apiActive: apiAdapterUrl !== undefined,
+    env: baseEnv,
+  });
   if (privilegeRole !== undefined) {
     env.KOZOU_INTROSPECTION_ROLE = privilegeRole;
   } else {

@@ -56,9 +56,18 @@ async function main(): Promise<void> {
     console.error('[@kozou/mcp] KOZOU_DATABASE_URL environment variable is required');
     process.exit(1);
   }
+  // Privilege-aware annotation (issue #99): opt-in via KOZOU_INTROSPECTION_ROLE.
+  // When set to a non-empty role, the describe tools annotate each relation with
+  // that role's effective GRANTs (it never hides). Empty / unset = schema-wide
+  // (the default). An empty value means absent, never "evaluate the empty role".
+  const privilegeRoleEnv = process.env.KOZOU_INTROSPECTION_ROLE;
+  const privilegeRole =
+    privilegeRoleEnv !== undefined && privilegeRoleEnv.length > 0 ? privilegeRoleEnv : undefined;
+
   const cache = new SchemaCache({
     connection: connectionString,
     ttlMs: parseEnvNumber(process.env.KOZOU_CACHE_TTL_MS, 60_000),
+    privilegeRole,
   });
 
   const args = parseArgs(process.argv.slice(2));

@@ -13,7 +13,12 @@
 // CLI stays describe-only.
 
 import { SchemaCache, startHttpServer, startStdioServer, type McpExecution } from '@kozou/mcp';
-import { loadConfig, type KozouConfig } from '../config.js';
+import {
+  hasReadyMadeToken,
+  loadConfig,
+  resolvePrivilegeRole,
+  type KozouConfig,
+} from '../config.js';
 
 export type McpOptions = {
   stdio?: boolean;
@@ -51,8 +56,40 @@ async function buildExecution(config: KozouConfig): Promise<McpExecution | undef
   };
 }
 
+/** Resolve the role the `kozou mcp` describe tools annotate (privilege-aware
+ *  mode, issue #99), given whether the `call` execution tool is enabled and the
+ *  role it runs as. The annotated role MUST be the role the agent actually acts
+ *  as, or the annotation misleads: when execution is enabled the agent's writes
+ *  run as the execution role, so annotate exactly that — and reject a
+ *  conflicting explicit `introspection.role` (a silent "says A, does B" split is
+ *  the hazard). Describe-only (no execution) resolves from config, refusing to
+ *  guess a ready-made token's role. Returns undefined when the feature is off.
+ *  Pure + exported for testing. */
+export function resolveMcpAnnotationRole(
+  config: KozouConfig,
+  executionRole: string | undefined,
+  env: NodeJS.ProcessEnv,
+): string | undefined {
+  if (!config.introspection.respectPrivileges) return undefined;
+  if (executionRole !== undefined) {
+    const explicit = config.introspection.role;
+    if (explicit !== undefined && explicit !== executionRole) {
+      throw new Error(
+        `introspection.role ("${explicit}") differs from server.mcp.execution.role ` +
+          `("${executionRole}"): the describe tools would tell the agent role "${explicit}"'s ` +
+          `privileges while its \`call\` writes run as "${executionRole}". Set them to the same role.`,
+      );
+    }
+    return executionRole;
+  }
+  return resolvePrivilegeRole(config, { suppliedToken: hasReadyMadeToken(config, env) });
+}
+
 export async function mcpCommand(opts: McpOptions = {}): Promise<void> {
   const config = await loadConfig({ path: opts.config });
+
+  const execution = await buildExecution(config);
+  const privilegeRole = resolveMcpAnnotationRole(config, execution?.role, process.env);
 
   const cache = new SchemaCache({
     connection: config.database.url,
@@ -60,9 +97,16 @@ export async function mcpCommand(opts: McpOptions = {}): Promise<void> {
     ttlMs: config.cache.ttlMs,
     // describe_functions advertises the operator's exposed RPC set (issue #103).
     rpc: config.api.rpc,
+    ...(privilegeRole === undefined ? {} : { privilegeRole }),
   });
 
-  const execution = await buildExecution(config);
+  if (privilegeRole !== undefined) {
+    process.stderr.write(
+      `[kozou mcp] privilege-aware context ON: describe tools annotate what role ` +
+        `"${privilegeRole}" may touch (advisory; enforcement stays in PostgreSQL)\n`,
+    );
+  }
+
   if (execution !== undefined) {
     const scope = execution.allow ? `${execution.allow.length} allowlisted` : 'all exposed';
     process.stderr.write(

@@ -106,13 +106,20 @@ const cacheSchema = z
   })
   .prefault({});
 
-// Opt-in privilege-aware introspection (issue #99). When on, the Admin UI's
-// generated surfaces reflect what the serving role may actually do: columns it
-// cannot UPDATE render read-only, columns it cannot INSERT drop from create
-// forms, and tables it cannot SELECT are hidden. Default off = current
-// (schema-faithful) behaviour. The role evaluated defaults to the Admin UI's
-// role (auth.ui.role, else auth.defaultRole); `role` overrides it explicitly.
-// The MCP server stays schema-wide regardless (it never sets this).
+// Opt-in privilege-aware introspection (issue #99). When on, the generated
+// surfaces reflect what the serving role may actually do, each in the way that
+// fits it:
+//   - Admin UI: hides tables the role cannot SELECT, drops columns it cannot
+//     INSERT from create forms, renders ones it cannot UPDATE read-only.
+//   - MCP describe_table / describe_view and `kozou docs`: do NOT hide — they
+//     keep every relation and *annotate* it with the role's effective GRANTs
+//     (relation-level SELECT/INSERT/UPDATE/DELETE, plus per-column
+//     insertable/updatable on tables; a "Security" section in docs), so an AI
+//     agent is told what it may touch. (Views expose relation-level privileges
+//     only; PostgreSQL does not track per-column write grants on a view.)
+// Default off = current (schema-faithful) behaviour. The role evaluated
+// defaults to the Admin UI's role (auth.ui.role, else auth.defaultRole);
+// `role` overrides it explicitly. Enforcement always stays in PostgreSQL.
 const introspectionSchema = z
   .object({
     respectPrivileges: z.boolean().default(false),
@@ -251,6 +258,23 @@ export function resolvePrivilegeRole(
     );
   }
   return role;
+}
+
+/** Whether a ready-made UI token is configured (`auth.ui.token`) or inherited
+ *  from the environment (`KOZOU_ADAPTER_TOKEN`). Such a token carries its own
+ *  role claim that the CLI does not mint and cannot reliably read, so a
+ *  privilege-aware surface must not guess the role from `auth.ui.role` /
+ *  `auth.defaultRole`. Callers that resolve a role purely to *describe* it
+ *  (e.g. `kozou docs`, `kozou mcp` describe-only) pass this as
+ *  `resolvePrivilegeRole`'s `suppliedToken` so they require an explicit
+ *  `introspection.role` rather than documenting a role that may not be in use.
+ *  (`kozou dev` uses the more nuanced api-path-gated check in
+ *  `resolveDevPrivilegeRole`.) */
+export function hasReadyMadeToken(config: KozouConfig, env: NodeJS.ProcessEnv): boolean {
+  return (
+    (config.auth?.ui?.token !== undefined && config.auth.ui.token.length > 0) ||
+    (env.KOZOU_ADAPTER_TOKEN !== undefined && env.KOZOU_ADAPTER_TOKEN.length > 0)
+  );
 }
 
 // ---- Loader --------------------------------------------------------------

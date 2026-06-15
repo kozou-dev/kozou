@@ -17,6 +17,8 @@ export function describeView(input: DescribeViewInput, ctx: SchemaContext): Desc
     description: view.description,
     aiDescription: view.aiDescription,
     policy: view.policy ?? [],
+    // Privilege-aware mode only; omitted when privileges were not evaluated.
+    ...(view.privileges ? { privileges: view.privileges } : {}),
     columns: view.columns.map((c) => ({
       name: c.name,
       dataType: c.dataType,

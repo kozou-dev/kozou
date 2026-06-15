@@ -327,4 +327,56 @@ describe('MCP tools: @policy is surfaced to the AI agent (no DB)', () => {
     expect(describeView({ qualifiedName: 'public.vw_orders' }, ctx).policy).toEqual([]);
     expect(getConceptContext({ name: 'vw_orders' }, ctx).policies).toEqual([]);
   });
+
+  it('describe_table / describe_view annotate privileges in privilege-aware mode', async () => {
+    const role = 'analyst';
+    const privRaw = {
+      ...raw,
+      tables: [
+        {
+          ...raw.tables[0]!,
+          privileges: { role, select: true, insert: false, update: false, delete: false },
+          columns: raw.tables[0]!.columns.map((c) => ({
+            ...c,
+            privileges: { insert: false, update: false },
+          })),
+        },
+      ],
+      views: [
+        {
+          ...raw.views[0]!,
+          privileges: { role, select: true, insert: false, update: false, delete: false },
+        },
+      ],
+    };
+    const ctx = await buildSchemaContext({ raw: privRaw, privilegeDisplay: 'annotate' });
+
+    const t = describeTable({ qualifiedName: 'public.orders' }, ctx);
+    expect(t.privileges).toEqual({
+      role,
+      select: true,
+      insert: false,
+      update: false,
+      delete: false,
+    });
+    const status = t.columns.find((c) => c.name === 'status')!;
+    expect(status.insertable).toBe(false);
+    expect(status.updatable).toBe(false);
+
+    const v = describeView({ qualifiedName: 'public.vw_orders' }, ctx);
+    expect(v.privileges).toEqual({
+      role,
+      select: true,
+      insert: false,
+      update: false,
+      delete: false,
+    });
+  });
+
+  it('describe_table omits privileges in schema-wide mode (default)', async () => {
+    const ctx = await buildSchemaContext({ raw });
+    const t = describeTable({ qualifiedName: 'public.orders' }, ctx);
+    expect(t.privileges).toBeUndefined();
+    expect(t.columns.find((c) => c.name === 'status')!.insertable).toBeUndefined();
+  });
 });

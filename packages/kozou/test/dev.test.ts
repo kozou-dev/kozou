@@ -6,6 +6,7 @@ import {
   buildAdminUiEnv,
   classifyAdminUiExposure,
   describeApiAuth,
+  resolveDevPrivilegeRole,
   resolveOrigin,
   resolveAdminUiEntry,
   resolveAdminUiToken,
@@ -642,5 +643,39 @@ describe('buildAdminUiEnv privilege-aware introspection (#99)', () => {
     const env = buildAdminUiEnv(config, 'http://localhost:3333', { KOZOU_ADAPTER_TOKEN: 'env.jwt' });
     expect(env.KOZOU_ADAPTER_TOKEN).toBeUndefined();
     expect(env.KOZOU_INTROSPECTION_ROLE).toBe('app_user');
+  });
+});
+
+describe('resolveDevPrivilegeRole (#99) — shared by the Admin UI child and in-process MCP', () => {
+  it('returns undefined when the feature is off', async () => {
+    const config = await makeConfig();
+    expect(resolveDevPrivilegeRole(config, { apiActive: true, env: {} })).toBeUndefined();
+  });
+
+  it('resolves the role when on, so MCP annotates the same role the UI runs as', async () => {
+    const base = await makeConfig();
+    const config: KozouConfig = {
+      ...base,
+      introspection: { respectPrivileges: true },
+      auth: { jwt: { secret: 's' }, ui: { role: 'app_user' } },
+    };
+    expect(resolveDevPrivilegeRole(config, { apiActive: true, env: {} })).toBe('app_user');
+  });
+
+  it('only gates on an inherited token when the API path is active', async () => {
+    const base = await makeConfig();
+    const config: KozouConfig = {
+      ...base,
+      introspection: { respectPrivileges: true },
+      auth: { jwt: { secret: 's' }, ui: { role: 'app_user' } },
+    };
+    // API path + inherited token, no introspection.role -> must refuse to guess.
+    expect(() =>
+      resolveDevPrivilegeRole(config, { apiActive: true, env: { KOZOU_ADAPTER_TOKEN: 'jwt' } }),
+    ).toThrow();
+    // REST opt-out: the token is never used, so it must not gate.
+    expect(
+      resolveDevPrivilegeRole(config, { apiActive: false, env: { KOZOU_ADAPTER_TOKEN: 'jwt' } }),
+    ).toBe('app_user');
   });
 });

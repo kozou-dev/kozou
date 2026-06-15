@@ -30,6 +30,7 @@ import {
   describeApiAuth,
   resolveAdminUiEntry,
   resolveAdminUiToken,
+  resolveDevPrivilegeRole,
   resolveOrigin,
   type AdminUiExposure,
   type AdminUiTokenResult,
@@ -190,6 +191,14 @@ export async function devCommand(opts: DevOptions = {}): Promise<void> {
   }
   const apiToken = tokenResult?.token;
 
+  // Privilege-aware annotation (issue #99) for the in-process MCP server, using
+  // the same resolved role the Admin UI child runs as, so describe_table /
+  // describe_view tell an agent what that role may touch. Off => schema-wide.
+  const mcpPrivilegeRole = resolveDevPrivilegeRole(config, {
+    apiActive: api?.url !== undefined,
+    env: process.env,
+  });
+
   const cache = new SchemaCache({
     connection: config.database.url,
     schemas: config.database.schemas,
@@ -197,7 +206,14 @@ export async function devCommand(opts: DevOptions = {}): Promise<void> {
     // Same RPC exposure config as the API, so describe_functions advertises
     // the same exposed set the /rpc/ surface serves (issue #103).
     rpc: config.api.rpc,
+    ...(mcpPrivilegeRole === undefined ? {} : { privilegeRole: mcpPrivilegeRole }),
   });
+  if (mcpPrivilegeRole !== undefined) {
+    process.stderr.write(
+      `${PREFIX} mcp privilege-aware context ON: describe tools annotate what role ` +
+        `"${mcpPrivilegeRole}" may touch (advisory; enforcement stays in PostgreSQL)\n`,
+    );
+  }
 
   // 1. MCP HTTP, in-process. startHttpServer already warns on a
   //    non-loopback bind, so we do not double-warn for it.

@@ -77,6 +77,14 @@ HTTP, with an opt-in `call` tool that *executes* `@expose: rpc` actions, not jus
 describes them), and `@kozou/api` are published on npm; the runtime ships as a
 multi-arch image on GHCR (`ghcr.io/kozou-dev/kozou`, linux/amd64 + arm64).
 
+**Opt-in: what a role may touch.** Point Kozou at a role
+(`introspection.respectPrivileges`) and the MCP describe tools and `kozou docs`
+also tell the agent the role's effective GRANTs — that it may read a table but
+not write it — so it knows its limits before it acts. A query layer that
+enforces but doesn't explain (PostgREST, Hasura) can't give an agent that.
+Advisory only: enforcement stays in PostgreSQL (GRANTs + your RLS). See
+[`examples/quickstart`](examples/quickstart#bonus-what-the-agent-may-touch).
+
 Use the runtime image directly:
 
 ```bash

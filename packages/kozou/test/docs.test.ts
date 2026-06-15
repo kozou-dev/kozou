@@ -227,6 +227,37 @@ describe('emitMarkdown', () => {
     const md = emitMarkdown(await buildSchemaContext({ raw: empty }));
     expect(md).toContain('No tables, views, or enums');
   });
+
+  it('emits a Security section + column notes in privilege-aware (annotate) mode', async () => {
+    const role = 'analyst';
+    const raw = makeRaw();
+    raw.tables[0]!.privileges = { role, select: true, insert: false, update: false, delete: false };
+    raw.tables[0]!.columns[1]!.comment = 'Public name.\n@ai: never expose in aggregate reports.';
+    raw.tables[0]!.columns[1]!.privileges = { insert: false, update: false };
+    raw.views[0]!.privileges = { role, select: true, insert: false, update: false, delete: false };
+    const md = emitMarkdown(await buildSchemaContext({ raw, privilegeDisplay: 'annotate' }));
+    // Per-table Security table, role-labelled.
+    expect(md).toContain('**Security**');
+    expect(md).toContain('effective privileges for role `analyst`');
+    expect(md).toContain('| SELECT | INSERT | UPDATE | DELETE |');
+    // Column-level @ai is now surfaced (the docs gap the privilege work closed).
+    expect(md).toContain('**Column notes:**');
+    expect(md).toContain('never expose in aggregate reports');
+  });
+
+  it('omits the Security section in schema-wide mode (default)', async () => {
+    const md = emitMarkdown(await buildSchemaContext({ raw: makeRaw() }));
+    expect(md).not.toContain('**Security**');
+  });
+
+  it('still surfaces column @ai notes even without privileges (schema-wide)', async () => {
+    const raw = makeRaw();
+    raw.tables[0]!.columns[1]!.comment = 'Public name.\n@ai: never expose in aggregate reports.';
+    const md = emitMarkdown(await buildSchemaContext({ raw }));
+    expect(md).toContain('**Column notes:**');
+    expect(md).toContain('never expose in aggregate reports');
+    expect(md).not.toContain('**Security**');
+  });
 });
 
 describe('docsCommand', () => {
