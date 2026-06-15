@@ -189,7 +189,12 @@ const authSchema = z.object({
   ui: authUiSchema.optional(),
 });
 
-const configSchema = z.object({
+/** The full kozou.config.yaml schema. Exported so docs tooling can enumerate
+ *  the config surface from the source of truth — e.g. kozou-site's `gen:docs`
+ *  asserts every top-level block here is documented in the config reference, so
+ *  a newly added block (like `introspection` was) cannot ship undocumented.
+ *  `Object.keys(configSchema.shape)` yields the top-level block names. */
+export const configSchema = z.object({
   database: databaseSchema,
   server: serverSchema,
   adapter: adapterSchema,

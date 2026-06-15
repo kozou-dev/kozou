@@ -9,7 +9,7 @@
 // would create an import cycle).
 export { PACKAGE_VERSION } from './version.js';
 
-export { loadConfig, KozouConfigError } from './config.js';
+export { loadConfig, KozouConfigError, configSchema } from './config.js';
 export type { KozouConfig, KozouConfigIssue, LoadConfigOptions } from './config.js';
 
 export { inspectCommand } from './commands/inspect.js';

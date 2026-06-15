@@ -7,6 +7,7 @@ import {
   loadConfig,
   resolvePrivilegeRole,
   hasReadyMadeToken,
+  configSchema,
   KozouConfigError,
 } from '../src/config.js';
 import type { KozouConfig } from '../src/config.js';
@@ -764,5 +765,21 @@ describe('hasReadyMadeToken (#99)', () => {
       auth: { jwt: { publicKey: 'pem' }, ui: { token: '' } },
     };
     expect(hasReadyMadeToken(config, { KOZOU_ADAPTER_TOKEN: '' })).toBe(false);
+  });
+});
+
+describe('configSchema (exported for docs coverage tooling)', () => {
+  // Exported so kozou-site's `gen:docs` can enumerate the config surface from
+  // the source of truth and fail when a top-level block is undocumented (the
+  // `introspection` block shipped undocumented from v1.3.0 to v1.8.0).
+  it('exposes the top-level config blocks via .shape', () => {
+    const blocks = Object.keys(configSchema.shape).sort();
+    expect(blocks).toEqual(
+      ['adapter', 'api', 'auth', 'cache', 'database', 'introspection', 'server', 'uiHints'].sort(),
+    );
+  });
+
+  it('includes `introspection` so the coverage check can require it to be documented', () => {
+    expect(Object.keys(configSchema.shape)).toContain('introspection');
   });
 });
