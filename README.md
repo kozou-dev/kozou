@@ -1,58 +1,118 @@
 # kozou
 
-PostgreSQL compiler. One source, many faithful forms.
+**Give your AI agent the *meaning* of your PostgreSQL database, not just its columns.**
 
-Kozou reads a PostgreSQL schema once and produces every form a modern team and its AI need from it — admin UI, MCP context, TypeScript types, REST endpoints, and documentation. No duplicate definitions. No drift.
+Point an MCP-capable agent (Claude Code, Claude Desktop, Cursor) at a real
+business database and ask it a simple question — *"what was our revenue last
+quarter?"* — and it will confidently write a **plausible, wrong query**. Not
+because the model is weak, but because the answer isn't in the column types.
+It's in the business rules around them: which column is authoritative, what a
+status really means, which rows don't count, which view is the source of truth.
 
-## Status
+Kozou reads that knowledge straight from your schema — `COMMENT ON` text, view
+definitions, and type information — and hands it to the agent over
+[MCP](https://modelcontextprotocol.io). Same model, same question, correct
+answer.
 
-v1.7.0 (latest release). The CLI, schema introspection, MCP server (stdio + HTTP — with an opt-in `call` tool that *executes* RPC actions, not just describes them), reference Admin UI (with opt-in RPC actions — a Postgres function tagged `@expose: rpc` is compiled into a callable form across REST, OpenAPI, MCP, and an Admin UI "Actions" page; the RPC actions wire is a stable contract as of v1.6), Markdown schema-document generation (`kozou docs`), and Kozou's in-house REST backend (`@kozou/api`, the default `kozou dev` data layer) are all available on npm; the runtime image lives on GHCR as a multi-arch manifest (linux/amd64 + linux/arm64). Releases land via the workflow in `.github/workflows/release.yml`.
+## See it: the demo
+
+A small online-store schema where the obvious revenue query is off by **4.8×**:
+
+| Query an agent writes from… | Result |
+| --- | --- |
+| the raw DDL (`sum(amount_total)` over paid orders) | **575.00** ❌ — a deprecated cache that includes a test order and soft-deleted rows |
+| the raw DDL, "carefully" (recompute from current `list_price`) | **580.00** ❌ — values old orders at today's price |
+| **Kozou's context** (`sum(net_revenue)` from `vw_recognized_revenue`) | **120.00** ✅ — the view encapsulates every recognition rule |
+
+The numbers are real and reproducible. Walk through the full before/after — and
+*why* each wrong answer is the natural one — in
+**[`examples/quickstart`](examples/quickstart)**.
 
 ## Quickstart
 
-```bash
-# Scaffold a project (docker-compose + kozou.config.yaml + ui-hints.yaml).
-# `create-kozou` ships as a secondary bin of the `kozou` package, so npx
-# needs `-p kozou` to find it on a clean machine.
-npx -p kozou create-kozou my-project
-cd my-project
+**Try the demo** (requires Docker):
 
-# Bring up PostgreSQL and the Admin UI. The scaffold's docker-compose
-# runs a `kozou` service (`kozou dev`: the bundled SvelteKit Admin UI,
-# MCP HTTP server, and Kozou's in-house REST backend, all in-process),
-# so `docker compose up` brings the full stack online — no separate REST
-# container by default.
+```bash
+git clone https://github.com/kozou-dev/kozou
+cd kozou/examples/quickstart
 cp .env.example .env
 docker compose up
 ```
 
-Or pull the CLI runtime image directly:
+This brings up PostgreSQL (seeded with the demo schema) plus `kozou dev` — the
+Admin UI on <http://localhost:3333> and an MCP server on
+<http://localhost:3334/mcp>. Point your agent at the MCP endpoint and ask it
+about revenue. See [`examples/quickstart/README.md`](examples/quickstart/README.md)
+for the walkthrough.
+
+**Start your own project:**
+
+```bash
+# Scaffold a project (docker-compose + kozou.config.yaml + ui-hints.yaml).
+# create-kozou ships as a secondary bin of the kozou package, so npx needs
+# -p kozou to find it on a clean machine.
+npx -p kozou create-kozou my-project
+cd my-project
+cp .env.example .env
+docker compose up
+```
+
+Add your tables and `COMMENT ON ...` text to `migrations/`, and the same context
+flows to your agent.
+
+## How it works
+
+Kozou reads a PostgreSQL schema **once** and produces every form a modern team
+and its AI need from it. The `COMMENT ON` conventions (`@ai`, `@policy`,
+`@example`, `@widget`) are the single place you write down what the schema
+*means*; Kozou compiles them into:
+
+- **MCP context** for AI agents (`@kozou/mcp`) — the differentiator above.
+- A reference **Admin UI** (`@kozou/svelte-ui`).
+- **REST + OpenAPI** (`@kozou/api`, the default `kozou dev` backend).
+- **Markdown docs** (`kozou docs`) and **TypeScript types** (`@kozou/codegen`).
+
+One source, no duplicate definitions, no drift. The CLI, the MCP server (stdio +
+HTTP, with an opt-in `call` tool that *executes* `@expose: rpc` actions, not just
+describes them), and `@kozou/api` are published on npm; the runtime ships as a
+multi-arch image on GHCR (`ghcr.io/kozou-dev/kozou`, linux/amd64 + arm64).
+
+Use the runtime image directly:
 
 ```bash
 docker pull ghcr.io/kozou-dev/kozou:v1.7.0
-docker run --rm ghcr.io/kozou-dev/kozou:v1.7.0 inspect --help
 docker run --rm ghcr.io/kozou-dev/kozou:v1.7.0 mcp --help
 ```
 
-For library use (custom hosts, embedded MCP), install the workspace packages from npm:
+Or install the packages for library / embedded use:
 
 ```bash
 npm install kozou @kozou/core @kozou/introspect @kozou/mcp @kozou/svelte-ui
 ```
 
-`@kozou/api` (Kozou's in-house REST layer — its wire format and OpenAPI are a stable contract as of v1.0, with the opt-in RPC actions wire stable as of v1.6) is the default `kozou dev` backend and is bundled with `kozou`, so no separate install is needed. The experimental `@kozou/codegen` TypeScript codegen ships as an optional companion — install it alongside `kozou` when you want `kozou codegen`:
-
-```bash
-npm install kozou @kozou/codegen
-```
+`@kozou/api` is bundled with `kozou` (no separate install). The experimental
+`@kozou/codegen` ships as an optional companion (`npm install kozou @kozou/codegen`).
 
 ## Security
 
-Kozou introspects `COMMENT ON` text, view definitions, and type information from PostgreSQL, then hands them **verbatim** to AI agents through `@kozou/mcp`. This relies on an important assumption: **schema authors (the principals with permission to edit DB schema) are trusted**. We call this the trust boundary.
+Kozou introspects `COMMENT ON` text, view definitions, and type information from
+PostgreSQL, then hands them **verbatim** to AI agents through `@kozou/mcp`. This
+relies on an important assumption: **schema authors (the principals with
+permission to edit DB schema) are trusted**. We call this the trust boundary.
 
-Designs where tenants in a multi-tenant SaaS can edit DB COMMENT text are **discouraged** (prompt-injection risk). See [docs/security.md](docs/security.md) for the threat model and mitigation plans, and [SECURITY.md](SECURITY.md) if you need to report a vulnerability privately.
+Designs where tenants in a multi-tenant SaaS can edit DB COMMENT text are
+**discouraged** (prompt-injection risk). See [docs/security.md](docs/security.md)
+for the threat model and mitigation plans, and [SECURITY.md](SECURITY.md) if you
+need to report a vulnerability privately.
 
-On the access-control axis, **Kozou is a resource server and enforcement layer, not an identity provider**: with auth enabled it verifies the JWT on each request that carries one — with an optional anonymous-role path for tokenless requests — and runs each under a PostgreSQL role so your own RLS policies decide access. Identity provision (registration, login, passwords and OAuth, token issuance) is delegated to an external provider — Supabase Auth (recommended), Auth0 / Clerk via JWKS, or a minimal self-hosted issuer. See [docs/security.md](docs/security.md#authentication-and-authorization).
+On the access-control axis, **Kozou is a resource server and enforcement layer,
+not an identity provider**: with auth enabled it verifies the JWT on each request
+that carries one — with an optional anonymous-role path for tokenless requests —
+and runs each under a PostgreSQL role so your own RLS policies decide access.
+Identity provision (registration, login, passwords and OAuth, token issuance) is
+delegated to an external provider — Supabase Auth (recommended), Auth0 / Clerk
+via JWKS, or a minimal self-hosted issuer. See
+[docs/security.md](docs/security.md#authentication-and-authorization).
 
 ## Requirements
 
