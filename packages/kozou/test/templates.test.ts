@@ -11,6 +11,14 @@ import { fileURLToPath } from 'node:url';
 const composeUrl = new URL('../src/templates/docker-compose.yml', import.meta.url);
 const envExampleUrl = new URL('../src/templates/env.example', import.meta.url);
 
+// Every shipped compose file that brings up `kozou dev` — the Admin UI and the
+// MCP HTTP server are unauthenticated by default, so they must be published on
+// host loopback, never on all interfaces.
+const NO_AUTH_HTTP_COMPOSE_FILES = [
+  composeUrl,
+  new URL('../../../examples/quickstart/docker-compose.yml', import.meta.url),
+];
+
 // Every auth-related env var accepted by loadConfig (injectAuthFromEnv in
 // src/config.ts). Extending the config surface without forwarding the new
 // variable here re-creates the silent-auth-off footgun.
@@ -54,6 +62,28 @@ describe('scaffold templates', () => {
       expect(compose, `${name} is documented in env.example but not forwarded`).toContain(
         `${name}: \${${name}:-}`,
       );
+    }
+  });
+
+  it('publishes every port on host loopback only (no all-interface binds)', async () => {
+    for (const url of NO_AUTH_HTTP_COMPOSE_FILES) {
+      const compose = await readFile(fileURLToPath(url), 'utf8');
+      const label = url.pathname;
+      // Uncommented compose short-syntax port entries (`- "<mapping>"`),
+      // allowing a trailing inline comment (`# Admin UI`); a mapping ends in
+      // `:<container-port>`. Commented lines start with `#` and are skipped by
+      // the leading `-` anchor.
+      const ports = [...compose.matchAll(/^\s*-\s*"([^"]+)"\s*(?:#.*)?$/gm)]
+        .map((m) => m[1]!)
+        .filter((s) => /:\d+$/.test(s));
+      expect(ports.length, `${label}: expected at least one published port`).toBeGreaterThan(0);
+      for (const mapping of ports) {
+        // The bundled stack runs no-auth surfaces (Admin UI, MCP) and a
+        // default-credential database; every host publish must be loopback-only.
+        expect(mapping, `${label}: "${mapping}" must publish on 127.0.0.1`).toMatch(
+          /^127\.0\.0\.1:/,
+        );
+      }
     }
   });
 });

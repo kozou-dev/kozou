@@ -31,8 +31,10 @@ describe('loadConfig', () => {
     expect(config.database.url).toBe('postgres://u:p@localhost:5432/x');
     expect(config.database.schemas).toEqual(['public']);
     expect(config.server.ui.port).toBe(3333);
-    expect(config.server.ui.host).toBe('0.0.0.0');
+    // No-auth surfaces bind loopback by default (a container opts into 0.0.0.0).
+    expect(config.server.ui.host).toBe('127.0.0.1');
     expect(config.server.mcp.http.port).toBe(3334);
+    expect(config.server.mcp.http.host).toBe('127.0.0.1');
     expect(config.server.mcp.stdio).toBe(false);
     // The MCP `call` execution tool is opt-in; default off (describe-only).
     expect(config.server.mcp.execution.enabled).toBe(false);
@@ -160,10 +162,24 @@ cache:
     expect(config.database.url).toBe('postgres://u:p@host:5432/db');
     expect(config.database.schemas).toEqual(['public', 'audit']);
     expect(config.server.ui.port).toBe(4000);
-    expect(config.server.ui.host).toBe('0.0.0.0');
+    // host not set in the file -> the loopback default.
+    expect(config.server.ui.host).toBe('127.0.0.1');
     expect(config.server.mcp.stdio).toBe(true);
     expect(config.adapter.url).toBe('http://api:3000');
     expect(config.cache.ttlMs).toBe(1000);
+  });
+
+  it('KOZOU_UI_HOST / KOZOU_MCP_HTTP_HOST override the bind host (even with no file)', async () => {
+    const config = await loadConfig({
+      skipFile: true,
+      env: {
+        DATABASE_URL: 'postgres://u:p@localhost:5432/x',
+        KOZOU_UI_HOST: '0.0.0.0',
+        KOZOU_MCP_HTTP_HOST: '0.0.0.0',
+      },
+    });
+    expect(config.server.ui.host).toBe('0.0.0.0');
+    expect(config.server.mcp.http.host).toBe('0.0.0.0');
   });
 
   it('expands ${VAR} placeholders from env', async () => {

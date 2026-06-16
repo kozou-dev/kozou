@@ -9,13 +9,19 @@ database:
   schemas: [public]
 
 server:
+  # The Admin UI and the MCP HTTP server have no authentication by default, so
+  # they bind loopback (127.0.0.1) — reachable from this machine only. Inside a
+  # container, set KOZOU_UI_HOST / KOZOU_MCP_HTTP_HOST to 0.0.0.0 so the port
+  # mapping reaches them (publish those host ports on 127.0.0.1 — see
+  # docker-compose.yml). Do not bind these to a public interface without an
+  # authenticating proxy in front.
   ui:
     port: 3333
-    host: 0.0.0.0
+    host: 127.0.0.1
   mcp:
     http:
       port: 3334
-      host: 0.0.0.0
+      host: 127.0.0.1
     stdio: false
     # Optional: let the MCP `call` tool EXECUTE exposed RPC functions (the ones
     # advertised by describe_functions). Default off = describe-only. When on,

@@ -46,7 +46,29 @@ export type StartHttpServerOptions = {
    *  non-loopback bind the startup warning is escalated: anyone who can reach
    *  the host could execute exposed functions as the execution role. */
   execution?: McpExecution;
+  /** Override the set of `Host` header values accepted by the DNS-rebinding
+   *  guard (host:port form, e.g. `mcp.internal:3334`). When omitted, a loopback
+   *  bind accepts the loopback names on the bound port and a specific
+   *  non-loopback bind accepts that host:port; a bind-all address (0.0.0.0 / ::)
+   *  cannot be enumerated, so pass this to enable the guard there. */
+  allowedHosts?: string[];
+  /** Override the set of `Origin` header values accepted by the DNS-rebinding
+   *  guard. When omitted it mirrors the allowed hosts under `http://`. Requests
+   *  with no `Origin` header (the usual non-browser MCP client) are always
+   *  allowed; the guard only rejects a *present* Origin that is not allowed. */
+  allowedOrigins?: string[];
+  /** Maximum accepted request body size in bytes. The endpoint has no
+   *  authentication, so an unbounded body would let any reachable client drive
+   *  the process toward OOM. Default: 1 MiB (MCP messages are small). A request
+   *  whose `Content-Length` exceeds this, or that streams past it, is rejected
+   *  with 413. */
+  maxBodyBytes?: number;
 };
+
+/** The DNS-rebinding guard: the hostnames this server accepts in the `Host`
+ *  (and, by default, `Origin`) header. `allowedOrigins`, when set, is an exact
+ *  Origin allowlist that replaces the hostname-based Origin check. */
+type RebindingGuard = { hostnames: Set<string>; allowedOrigins?: Set<string> };
 
 export type HttpServerHandle = {
   /** The actual bound port (resolves an ephemeral `0` to the real port). */
@@ -61,11 +83,104 @@ const DEFAULT_PORT = 3334;
 const DEFAULT_HOST = '127.0.0.1';
 const DEFAULT_MCP_PATH = '/mcp';
 const REFRESH_PATH = '/admin/refresh';
+const DEFAULT_MAX_BODY_BYTES = 1024 * 1024; // 1 MiB
+
+/** A client-error in reading the request body (oversized, or wrong media
+ *  type), carrying the HTTP status to return. */
+class HttpBodyError extends Error {
+  constructor(
+    readonly status: number,
+    message: string,
+  ) {
+    super(message);
+    this.name = 'HttpBodyError';
+  }
+}
 
 const LOOPBACK_HOSTS = new Set(['127.0.0.1', '::1', 'localhost', '::ffff:127.0.0.1']);
 
 export function isLoopbackHost(host: string): boolean {
   return LOOPBACK_HOSTS.has(host);
+}
+
+const BIND_ALL_HOSTS = new Set(['0.0.0.0', '::', '']);
+const LOOPBACK_HOSTNAMES = ['127.0.0.1', 'localhost', '::1'];
+
+/** The hostname portion of a `Host` header value, lowercased (hostnames are
+ *  case-insensitive) with the port and any IPv6 brackets removed:
+ *  `127.0.0.1:3334` -> `127.0.0.1`, `[::1]:3334` -> `::1`, `LOCALHOST` ->
+ *  `localhost`. */
+function hostnameOf(value: string): string {
+  const stripped = value.startsWith('[')
+    ? (() => {
+        const end = value.indexOf(']');
+        return end === -1 ? value : value.slice(1, end);
+      })()
+    : (() => {
+        const colon = value.indexOf(':');
+        return colon === -1 ? value : value.slice(0, colon);
+      })();
+  return stripped.toLowerCase();
+}
+
+/** Build the DNS-rebinding guard for a server bound to `host`. The MCP HTTP
+ *  transport has no authentication, so without a Host/Origin check a web page
+ *  in the operator's browser could rebind a name it controls to the loopback
+ *  address and drive this endpoint. The browser sets `Host` (and `Origin`)
+ *  honestly from the page URL and cannot be made to forge them, so refusing a
+ *  request whose hostname is not allowed defeats the rebinding vector.
+ *
+ *  This is *only* a browser-rebinding defence — it is not network access
+ *  control. A non-browser client (curl, a LAN process) can send any `Host`, so
+ *  reachability of a no-auth server must be constrained by the network (bind /
+ *  publish on loopback), not by this header check.
+ *
+ *  Matching is on the *hostname* (port-agnostic): a rebinding request carries
+ *  the attacker's hostname while the port is just whatever the server listens
+ *  on, and a port-pinned check would break behind Docker port mapping. Loopback
+ *  names are always accepted; a specific bound host and any `allowedHosts` are
+ *  added. */
+export function buildRebindingGuard(
+  host: string,
+  opts: { allowedHosts?: string[]; allowedOrigins?: string[] } = {},
+): RebindingGuard {
+  const hostnames = new Set<string>(LOOPBACK_HOSTNAMES);
+  if (!isLoopbackHost(host) && !BIND_ALL_HOSTS.has(host)) {
+    hostnames.add(hostnameOf(host));
+  }
+  for (const h of opts.allowedHosts ?? []) hostnames.add(hostnameOf(h));
+  const allowedOrigins =
+    opts.allowedOrigins && opts.allowedOrigins.length > 0 ? new Set(opts.allowedOrigins) : undefined;
+  return { hostnames, allowedOrigins };
+}
+
+/** Returns a rejection reason when the request's Host/Origin is not allowed by
+ *  the guard, or null when the request may proceed. The Host header must be
+ *  present and its hostname allowed. A *present* Origin must be allowed too
+ *  (exact match when `allowedOrigins` is set, else its hostname must be
+ *  allowed); a missing Origin — the usual non-browser MCP client — is fine. */
+function validateRebindingHeaders(req: IncomingMessage, guard: RebindingGuard): string | null {
+  const host = headerValue(req.headers.host);
+  if (host === undefined || !guard.hostnames.has(hostnameOf(host))) {
+    return 'Host header is not allowed for this server.';
+  }
+  const origin = headerValue(req.headers.origin);
+  if (origin !== undefined) {
+    if (guard.allowedOrigins !== undefined) {
+      if (!guard.allowedOrigins.has(origin)) return 'Origin is not allowed for this server.';
+    } else {
+      let originHostname: string | undefined;
+      try {
+        originHostname = new URL(origin).hostname;
+      } catch {
+        originHostname = undefined;
+      }
+      if (originHostname === undefined || !guard.hostnames.has(originHostname)) {
+        return 'Origin is not allowed for this server.';
+      }
+    }
+  }
+  return null;
 }
 
 function nonLoopbackWarning(host: string, prefix: string, executionRole?: string): string {
@@ -114,10 +229,23 @@ export async function startHttpServer(
   // Active MCP sessions, keyed by the transport-issued session id.
   const transports = new Map<string, StreamableHTTPServerTransport>();
 
+  // The DNS-rebinding guard is hostname-based and known up front; build it here
+  // so the request handler (which only runs after listen()) closes over it.
+  const guard = buildRebindingGuard(host, opts);
+
+  const maxBodyBytes = opts.maxBodyBytes ?? DEFAULT_MAX_BODY_BYTES;
+
   const httpServer = createServer((req, res) => {
-    handleRequest(req, res, cache, mcpPath, transports, opts.execution).catch((err) => {
-      respondError(res, 500, err instanceof Error ? err.message : String(err));
-    });
+    handleRequest(req, res, cache, mcpPath, transports, opts.execution, guard, maxBodyBytes).catch(
+      (err) => {
+        // Never echo the raw error to the client (it can carry stack/database
+        // detail); log it server-side and return a generic message.
+        process.stderr.write(
+          `${prefix} request failed: ${err instanceof Error ? err.message : String(err)}\n`,
+        );
+        respondError(res, 500, 'Internal server error.');
+      },
+    );
   });
 
   await new Promise<void>((resolve, reject) => {
@@ -133,6 +261,10 @@ export async function startHttpServer(
   process.stderr.write(
     `${prefix} MCP HTTP listening on http://${host}:${boundPort}` +
       ` (MCP: ${mcpPath}, refresh: POST ${REFRESH_PATH})\n`,
+  );
+  process.stderr.write(
+    `${prefix} DNS-rebinding guard: accepting Host names ${[...guard.hostnames].join(', ')}` +
+      ` (set allowedHosts to add more)\n`,
   );
 
   return {
@@ -155,7 +287,27 @@ async function handleRequest(
   mcpPath: string,
   transports: Map<string, StreamableHTTPServerTransport>,
   execution: McpExecution | undefined,
+  guard: RebindingGuard,
+  maxBodyBytes: number,
 ): Promise<void> {
+  // DNS-rebinding guard: reject requests whose Host/Origin is not allowed
+  // before doing any work, covering every route (the MCP endpoint and
+  // /admin/refresh, both of which a rebound page could otherwise drive).
+  const rejection = validateRebindingHeaders(req, guard);
+  if (rejection !== null) {
+    respondError(res, 403, rejection);
+    return;
+  }
+
+  // Reject an over-large body up front when the client declares its size, so a
+  // huge declared payload is refused before any of it is buffered. This guards
+  // every route, including requests the SDK transport reads itself.
+  const declared = Number(headerValue(req.headers['content-length']));
+  if (Number.isFinite(declared) && declared > maxBodyBytes) {
+    respondError(res, 413, 'Request body too large.');
+    return;
+  }
+
   const url = new URL(req.url ?? '/', 'http://localhost');
 
   if (url.pathname === REFRESH_PATH) {
@@ -170,7 +322,7 @@ async function handleRequest(
   }
 
   if (url.pathname === mcpPath) {
-    await handleMcp(req, res, cache, transports, execution);
+    await handleMcp(req, res, cache, transports, execution, maxBodyBytes);
     return;
   }
 
@@ -183,6 +335,7 @@ async function handleMcp(
   cache: SchemaCache,
   transports: Map<string, StreamableHTTPServerTransport>,
   execution: McpExecution | undefined,
+  maxBodyBytes: number,
 ): Promise<void> {
   const sessionId = headerValue(req.headers['mcp-session-id']);
 
@@ -193,6 +346,30 @@ async function handleMcp(
       respondError(res, 404, `Unknown MCP session: ${sessionId}`);
       return;
     }
+    // A POST carries a JSON-RPC message body. Read it through the capped reader
+    // here (rather than letting the SDK transport buffer the raw stream itself)
+    // so an established session cannot stream an unbounded body — the
+    // Content-Length short-circuit above only catches a *declared* size. GET
+    // (the SSE stream) and DELETE (session teardown) carry no body, so they go
+    // straight to the transport.
+    if (req.method === 'POST') {
+      let body: unknown;
+      try {
+        body = await readJsonBody(req, maxBodyBytes);
+      } catch (err) {
+        if (err instanceof HttpBodyError) {
+          respondError(res, err.status, err.message);
+          return;
+        }
+        throw err;
+      }
+      if (body === undefined) {
+        respondError(res, 400, 'Bad Request: empty or invalid JSON body.');
+        return;
+      }
+      await existing.handleRequest(req, res, body);
+      return;
+    }
     await existing.handleRequest(req, res);
     return;
   }
@@ -200,7 +377,16 @@ async function handleMcp(
   // No session id: this must be an initialize request that opens a new
   // session. The body is read once here so we can both classify it and
   // hand it to the transport (which would otherwise consume the stream).
-  const body = await readJsonBody(req);
+  let body: unknown;
+  try {
+    body = await readJsonBody(req, maxBodyBytes);
+  } catch (err) {
+    if (err instanceof HttpBodyError) {
+      respondError(res, err.status, err.message);
+      return;
+    }
+    throw err;
+  }
   if (!isInitializeRequest(body)) {
     respondError(
       res,
@@ -233,10 +419,26 @@ function headerValue(value: string | string[] | undefined): string | undefined {
   return value;
 }
 
-async function readJsonBody(req: IncomingMessage): Promise<unknown> {
+async function readJsonBody(req: IncomingMessage, maxBodyBytes: number): Promise<unknown> {
+  // Reject a non-JSON media type up front (when one is declared). A missing
+  // Content-Type is tolerated — some clients omit it on a JSON POST.
+  const contentType = headerValue(req.headers['content-type']);
+  if (contentType !== undefined && !/^application\/json\b/i.test(contentType)) {
+    throw new HttpBodyError(415, 'Unsupported Media Type: expected application/json.');
+  }
+
   const chunks: Buffer[] = [];
+  let total = 0;
   for await (const chunk of req) {
-    chunks.push(chunk as Buffer);
+    const buf = chunk as Buffer;
+    total += buf.length;
+    // Enforce the cap while streaming so a chunked / Content-Length-less body
+    // cannot grow the buffer past the limit. Throwing exits the async iterator
+    // (which stops reading); the caller maps this to a 413 response.
+    if (total > maxBodyBytes) {
+      throw new HttpBodyError(413, 'Request body too large.');
+    }
+    chunks.push(buf);
   }
   if (chunks.length === 0) return undefined;
   const raw = Buffer.concat(chunks).toString('utf8');

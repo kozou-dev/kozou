@@ -21,7 +21,10 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-kozou}
       POSTGRES_DB: ${POSTGRES_DB:-kozou}
     ports:
-      - "${POSTGRES_PORT:-5432}:5432"
+      # Loopback only: the default credentials above mean this port must not be
+      # reachable from the LAN. Connect local tools via 127.0.0.1; change this
+      # deliberately (with real credentials) if you need external DB access.
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
     volumes:
       - ./migrations:/docker-entrypoint-initdb.d:ro
     healthcheck:
@@ -44,6 +47,11 @@ services:
       # Set it to the exact URL you open in the browser; override if you
       # publish the Admin UI on a different host or port.
       ORIGIN: ${KOZOU_ORIGIN:-http://localhost:3333}
+      # Bind the no-auth Admin UI and MCP HTTP server to all interfaces *inside*
+      # the container so the loopback-published host ports below can reach them.
+      # They default to loopback when run outside a container.
+      KOZOU_UI_HOST: 0.0.0.0
+      KOZOU_MCP_HTTP_HOST: 0.0.0.0
       # JWT auth (see .env.example). Compose reads .env for ${VAR}
       # interpolation only, so every variable must be forwarded here
       # explicitly to reach the container. An empty value means unset:
@@ -66,9 +74,14 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    # Published on host loopback only: the Admin UI and the MCP HTTP server have
+    # no authentication by default, so they must not be reachable from the LAN.
+    # The client (your browser / MCP client) runs on this host and reaches them
+    # at 127.0.0.1. To expose them beyond this host, put an authenticating proxy
+    # in front and change the bind deliberately — do not publish them unguarded.
     ports:
-      - "3333:3333"   # Admin UI
-      - "3334:3334"   # MCP HTTP
+      - "127.0.0.1:3333:3333"   # Admin UI (no auth by default)
+      - "127.0.0.1:3334:3334"   # MCP HTTP (no auth)
 
 # --- PostgREST opt-out -------------------------------------------------------
 # Kozou serves REST in-process by default. To use an external PostgREST
@@ -84,7 +97,7 @@ services:
 #       PGRST_DB_SCHEMA: public
 #       PGRST_DB_ANON_ROLE: ${POSTGRES_USER:-kozou}
 #     ports:
-#       - "3000:3000"
+#       - "127.0.0.1:3000:3000"
 #     depends_on:
 #       postgres:
 #         condition: service_healthy

@@ -26,17 +26,22 @@ import { z } from 'zod';
 // applies. `.prefault({})` therefore reproduces the zod 3 behaviour of
 // "absent section -> object filled entirely from inner defaults".
 
+// The Admin UI and MCP HTTP server have no authentication of their own, so they
+// default to loopback — reachable only from the machine running `kozou dev`. To
+// bind all interfaces (e.g. inside a container so a port mapping can reach it),
+// set KOZOU_UI_HOST / KOZOU_MCP_HTTP_HOST=0.0.0.0 (honoured in loadConfig) and
+// publish the host port on loopback — see the docker-compose template.
 const uiServerSchema = z
   .object({
     port: z.number().int().min(0).max(65_535).default(3333),
-    host: z.string().min(1).default('0.0.0.0'),
+    host: z.string().min(1).default('127.0.0.1'),
   })
   .prefault({});
 
 const mcpHttpServerSchema = z
   .object({
     port: z.number().int().min(0).max(65_535).default(3334),
-    host: z.string().min(1).default('0.0.0.0'),
+    host: z.string().min(1).default('127.0.0.1'),
   })
   .prefault({});
 
@@ -355,6 +360,36 @@ function injectDatabaseUrlFromEnv(raw: unknown, env: NodeJS.ProcessEnv): unknown
   return obj;
 }
 
+// Bind-host overrides from the environment for the no-auth dev surfaces. They
+// default to loopback (see uiServerSchema / mcpHttpServerSchema); a container
+// sets KOZOU_UI_HOST / KOZOU_MCP_HTTP_HOST to 0.0.0.0 so a (loopback-published)
+// port mapping can reach them. Honoured even when there is no config file —
+// `${VAR}` expansion only reaches values written in the YAML.
+function injectServerHostsFromEnv(raw: unknown, env: NodeJS.ProcessEnv): unknown {
+  const uiHost = env.KOZOU_UI_HOST;
+  const mcpHost = env.KOZOU_MCP_HTTP_HOST;
+  if (!uiHost && !mcpHost) return raw;
+  const asObj = (v: unknown): Record<string, unknown> =>
+    v !== null && typeof v === 'object' ? { ...(v as Record<string, unknown>) } : {};
+
+  const obj = asObj(raw);
+  const server = asObj(obj.server);
+  if (uiHost) {
+    const ui = asObj(server.ui);
+    ui.host = uiHost;
+    server.ui = ui;
+  }
+  if (mcpHost) {
+    const mcp = asObj(server.mcp);
+    const http = asObj(mcp.http);
+    http.host = mcpHost;
+    mcp.http = http;
+    server.mcp = mcp;
+  }
+  obj.server = server;
+  return obj;
+}
+
 function splitList(value: string | undefined): string[] | undefined {
   if (value === undefined) return undefined;
   const items = value
@@ -462,9 +497,12 @@ export async function loadConfig(opts: LoadConfigOptions = {}): Promise<KozouCon
   const expanded = expandEnvVars(withDbDefault, env);
   // Build `auth` from KOZOU_JWT_* env after expansion (env secrets verbatim).
   const withAuth = injectAuthFromEnv(expanded, env);
+  // Apply KOZOU_UI_HOST / KOZOU_MCP_HTTP_HOST overrides (e.g. a container that
+  // needs to bind 0.0.0.0), even with no config file.
+  const withHosts = injectServerHostsFromEnv(withAuth, env);
 
   try {
-    return configSchema.parse(withAuth);
+    return configSchema.parse(withHosts);
   } catch (err) {
     if (err instanceof z.ZodError) {
       throw new KozouConfigError(
