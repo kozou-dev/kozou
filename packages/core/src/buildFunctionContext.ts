@@ -162,15 +162,17 @@ function inferArgWidget(arg: RawFunctionArg, enumValues: string[] | null): Widge
   });
 }
 
-/** ENUM members for an argument's type, matched by type name (preferring the
- *  function's own schema when an enum name is reused across schemas). */
-function findEnumValues(
+/** ENUM members for a type, matched by type name (`udtName`), preferring the
+ *  given schema when an enum name is reused across schemas. Shared by the
+ *  function-argument path and the table/view column path so a native ENUM
+ *  resolves to its members the same way everywhere. */
+export function findEnumValues(
   enums: RawEnum[],
   udtName: string,
-  fnSchema: string,
+  schema: string,
 ): string[] | undefined {
   const match =
-    enums.find((e) => e.name === udtName && e.schema === fnSchema) ??
+    enums.find((e) => e.name === udtName && e.schema === schema) ??
     enums.find((e) => e.name === udtName);
   return match?.values;
 }
