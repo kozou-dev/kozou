@@ -26,7 +26,23 @@ describe('parseListParamsFromUrl', () => {
 
     expect(result.search).toBe('svelte');
     expect(result.filters).toEqual({
-      __or: 'title.ilike.*svelte*,subtitle.ilike.*svelte*,author.ilike.*svelte*',
+      __or: 'title.ilike."*svelte*",subtitle.ilike."*svelte*",author.ilike."*svelte*"',
+    });
+  });
+
+  it('double-quotes a term with reserved characters so it does not corrupt the or() tree', () => {
+    const result = parseListParamsFromUrl({
+      url: new URL(
+        `http://app.example/tables/public.people?q=${encodeURIComponent('Smith, John')}`,
+      ),
+      searchFields: ['name'],
+    });
+
+    expect(result.search).toBe('Smith, John');
+    // The comma in the term sits inside the quoted value, so it is no longer
+    // read as the or() value separator.
+    expect(result.filters).toEqual({
+      __or: 'name.ilike."*Smith, John*"',
     });
   });
 

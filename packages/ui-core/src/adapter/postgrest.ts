@@ -21,6 +21,7 @@ import type {
 } from '@kozou/core';
 
 import { AdapterError, type AdapterErrorInit } from './errors.js';
+import { quoteLikeValue } from './search-quote.js';
 import type { FetchLike } from './types.js';
 
 const DEFAULT_PAGE_SIZE = 50;
@@ -214,8 +215,10 @@ export class PostgrestDataAdapter implements DataAdapter {
       : [...primaryKey, params.labelField];
     query.set('select', selectFields.join(','));
     if (params.query.length > 0 && params.searchFields.length > 0) {
+      // Double-quote the term so reserved characters (`,` `(` `)` `.`) are
+      // matched literally instead of corrupting the `or=(...)` logic tree.
       const orExpr = params.searchFields
-        .map((field) => `${field}.ilike.*${params.query}*`)
+        .map((field) => `${field}.ilike.${quoteLikeValue(params.query)}`)
         .join(',');
       query.set('or', `(${orExpr})`);
     }

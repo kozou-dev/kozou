@@ -50,9 +50,48 @@ describe('PostgrestDataAdapter.searchRelation', () => {
     expect(url.pathname).toBe('/authors');
     expect(url.searchParams.get('select')).toBe('id,name');
     expect(url.searchParams.get('or')).toBe(
-      '(name.ilike.*aus*,pen_name.ilike.*aus*)',
+      '(name.ilike."*aus*",pen_name.ilike."*aus*")',
     );
     expect(url.searchParams.get('limit')).toBe('10');
+  });
+
+  it('double-quotes a search term with reserved characters', async () => {
+    const { calls, fetch } = makeFetch(() => jsonResponse([]));
+    const adapter = new PostgrestDataAdapter({
+      baseUrl: 'http://api.example',
+      fetch,
+    });
+
+    await adapter.searchRelation('authors', {
+      query: 'Smith, John (Jr.)',
+      labelField: 'name',
+      searchFields: ['name'],
+      limit: 10,
+    });
+
+    const url = new URL(calls[0].url);
+    // The reserved characters (`,` `(` `)` `.`) sit inside the quoted value, so
+    // they are matched literally instead of being read as or() structure.
+    expect(url.searchParams.get('or')).toBe('(name.ilike."*Smith, John (Jr.)*")');
+  });
+
+  it('escapes embedded double quotes and backslashes in the search term', async () => {
+    const { calls, fetch } = makeFetch(() => jsonResponse([]));
+    const adapter = new PostgrestDataAdapter({
+      baseUrl: 'http://api.example',
+      fetch,
+    });
+
+    await adapter.searchRelation('authors', {
+      query: 'a"b\\c',
+      labelField: 'name',
+      searchFields: ['name'],
+      limit: 10,
+    });
+
+    const url = new URL(calls[0].url);
+    // `\` -> `\\` and `"` -> `\"` inside the quoted value.
+    expect(url.searchParams.get('or')).toBe('(name.ilike."*a\\"b\\\\c*")');
   });
 
   it('omits the or=() filter when the query string is empty', async () => {
