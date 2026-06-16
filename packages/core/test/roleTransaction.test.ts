@@ -17,9 +17,10 @@ function makeClient(opts: { failOn?: (text: string) => boolean; failRollback?: b
   client: PoolClient;
   calls: Recorded[];
   releases: () => number;
+  releaseArgs: () => Array<boolean | Error | undefined>;
 } {
   const calls: Recorded[] = [];
-  let releases = 0;
+  const releaseCalls: Array<boolean | Error | undefined> = [];
   const client: PoolClient = {
     query: ((text: string, values?: unknown[]) => {
       calls.push({ text, values });
@@ -31,11 +32,16 @@ function makeClient(opts: { failOn?: (text: string) => boolean; failRollback?: b
       }
       return Promise.resolve({ rows: [], rowCount: 0 });
     }) as PoolClient['query'],
-    release: () => {
-      releases += 1;
+    release: (err?: boolean | Error) => {
+      releaseCalls.push(err);
     },
   };
-  return { client, calls, releases: () => releases };
+  return {
+    client,
+    calls,
+    releases: () => releaseCalls.length,
+    releaseArgs: () => releaseCalls,
+  };
 }
 
 function poolOf(client: PoolClient): ConnectionPool {
@@ -67,6 +73,32 @@ describe('runInRoleTransaction', () => {
     // Claims are a bound parameter, never interpolated.
     expect(calls[2].values).toEqual(['request.jwt.claims', JSON.stringify({ sub: 'ada' })]);
     expect(releases()).toBe(1);
+  });
+
+  it('opens a plain read/write BEGIN by default (writes allowed)', async () => {
+    const { client, calls } = makeClient();
+    await runInRoleTransaction(poolOf(client), TX, async () => undefined);
+    expect(calls[0].text).toBe('BEGIN');
+  });
+
+  it('opens BEGIN READ ONLY when the transaction is marked read-only', async () => {
+    const { client, calls } = makeClient();
+    await runInRoleTransaction(poolOf(client), { ...TX, readOnly: true }, async (db) => {
+      await db.query('SELECT 1');
+    });
+    expect(calls.map((c) => c.text)).toEqual([
+      'BEGIN READ ONLY',
+      'SET LOCAL ROLE "app_reader"',
+      'SELECT set_config($1, $2, true)',
+      'SELECT 1',
+      'COMMIT',
+    ]);
+  });
+
+  it('treats readOnly:false the same as the default (read/write)', async () => {
+    const { client, calls } = makeClient();
+    await runInRoleTransaction(poolOf(client), { ...TX, readOnly: false }, async () => undefined);
+    expect(calls[0].text).toBe('BEGIN');
   });
 
   it('quotes the role identifier (defense in depth)', async () => {
@@ -135,8 +167,8 @@ describe('runInRoleTransaction', () => {
     expect(releases()).toBe(1);
   });
 
-  it('swallows a ROLLBACK failure and still surfaces the original error', async () => {
-    const { client, releases } = makeClient({ failRollback: true });
+  it('swallows a ROLLBACK failure, surfaces the original error, and destroys the client', async () => {
+    const { client, releases, releaseArgs } = makeClient({ failRollback: true });
     const boom = new Error('original');
     await expect(
       runInRoleTransaction(poolOf(client), TX, async () => {
@@ -144,5 +176,14 @@ describe('runInRoleTransaction', () => {
       }),
     ).rejects.toBe(boom);
     expect(releases()).toBe(1);
+    // A failed rollback leaves the connection in an unknown state: it must be
+    // released with an error so the pool discards it instead of reusing it.
+    expect(releaseArgs()[0]).toBe(boom);
+  });
+
+  it('releases the client cleanly (no error arg) on the success path', async () => {
+    const { client, releaseArgs } = makeClient();
+    await runInRoleTransaction(poolOf(client), TX, async () => undefined);
+    expect(releaseArgs()).toEqual([undefined]);
   });
 });

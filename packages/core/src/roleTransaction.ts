@@ -36,6 +36,15 @@ export type RoleTransaction = {
   claimsGuc: string;
   /** Claims object published for RLS. Pass `{}` when there are none. */
   claims: unknown;
+  /** Open the transaction as `READ ONLY` so the database rejects any data
+   *  change for the duration of the work. Set this for read-only operations
+   *  (a GET / list / lookup): it makes the read-safe contract hold at the
+   *  database level rather than relying on the role's grants, so a SELECT that
+   *  reaches a volatile function or a writable/INSTEAD-triggered view cannot
+   *  perform a write that then commits. Defaults to a read/write transaction,
+   *  which a write operation (insert/update/delete, or a function call that may
+   *  mutate) needs. */
+  readOnly?: boolean;
 };
 
 /**
@@ -54,8 +63,15 @@ export async function runInRoleTransaction<T>(
   work: (db: Queryable) => Promise<T>,
 ): Promise<T> {
   const client = await pool.connect();
+  // When set, the connection could not be cleanly rolled back, so it is
+  // released as broken (destroyed) rather than returned to the pool.
+  let unclean: Error | undefined;
   try {
-    await client.query('BEGIN');
+    // A read-only operation opens the transaction READ ONLY so PostgreSQL
+    // rejects any write for its duration; SET LOCAL ROLE and publishing the
+    // claims are catalog/session changes, not data writes, so they remain
+    // allowed inside a READ ONLY transaction.
+    await client.query(tx.readOnly === true ? 'BEGIN READ ONLY' : 'BEGIN');
     try {
       await client.query(`SET LOCAL ROLE ${quoteIdent(tx.role)}`);
     } catch {
@@ -71,10 +87,12 @@ export async function runInRoleTransaction<T>(
     try {
       await client.query('ROLLBACK');
     } catch {
-      // The connection may already be in a failed state; nothing to do.
+      // Rollback failed: the connection's transaction state is unknown, so
+      // flag it to be destroyed on release instead of reused from the pool.
+      unclean = err instanceof Error ? err : new Error(String(err));
     }
     throw err;
   } finally {
-    client.release();
+    client.release(unclean);
   }
 }

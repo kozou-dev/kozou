@@ -151,10 +151,15 @@ async function dispatchAuthed(
     // Run the request inside the shared role-transaction envelope: the role is
     // assumed and the claims are published, then routing runs every query on
     // the dedicated client so the role + the database's row-level-security
-    // policies apply.
+    // policies apply. A GET only ever reads, so its envelope is opened READ
+    // ONLY: the database then refuses any write for the request regardless of
+    // the role's grants (a SELECT that reaches a volatile function or a
+    // writable view cannot mutate). Every write method routes to a read/write
+    // transaction.
+    const readOnly = (req.method ?? 'GET').toUpperCase() === 'GET';
     const result = await runInRoleTransaction(
       pool,
-      { role: auth.role, claimsGuc: authenticator.claimsGuc, claims: auth.claims },
+      { role: auth.role, claimsGuc: authenticator.claimsGuc, claims: auth.claims, readOnly },
       (client) => handleApiRequest({ ...base, db: client }, httpReq),
     );
     respondJson(res, result.status, result.body);
@@ -241,6 +246,12 @@ export async function startApiServer(opts: StartApiServerOptions): Promise<ApiSe
   };
 
   const pool = opts.pool;
+  // The READ ONLY read guarantee (a GET cannot commit a write) is part of the
+  // authenticated role-transaction envelope, which always runs each request on
+  // a dedicated pooled client. The unauthenticated path keeps its prior direct
+  // dispatch on the caller's `db` (autocommit): it is loopback-only by default
+  // and enforces no per-request identity, and routing its reads through `pool`
+  // would silently change the executor's authority when `db` and `pool` differ.
   const listener =
     authenticator !== undefined && pool !== undefined
       ? (req: IncomingMessage, res: ServerResponse): void => {
