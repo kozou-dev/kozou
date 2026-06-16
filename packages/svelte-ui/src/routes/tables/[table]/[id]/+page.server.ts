@@ -10,7 +10,7 @@
 // from re-fetching the same target rows; lookup misses fall back to
 // rendering the raw FK value.
 
-import { error, redirect } from '@sveltejs/kit';
+import { error, fail, redirect } from '@sveltejs/kit';
 
 import type { TableContext } from '@kozou/core';
 
@@ -19,6 +19,7 @@ import {
   parseResourceId,
   resolveFkLabels,
 } from '@kozou/ui-core';
+import { adapterErrorToFailure } from '$lib/server/adapter-error.js';
 import { getAdapter } from '$lib/server/adapter.js';
 
 import type { Actions, PageServerLoad } from './$types';
@@ -94,7 +95,19 @@ export const actions: Actions = {
       throw error(403, `The configured role may not delete from ${table.qualifiedName}.`);
     }
     const id = parseResourceId(params.id, table.primaryKey);
-    await getAdapter(locals.schema).delete(table.qualifiedName, id);
+    // A database rejection (e.g. a foreign-key restriction from a child row,
+    // or a privilege / RLS denial) surfaces as an AdapterError. Report it
+    // readably on the detail page instead of a generic 500; a non-recoverable
+    // error (5xx / network) propagates unchanged.
+    try {
+      await getAdapter(locals.schema).delete(table.qualifiedName, id);
+    } catch (err) {
+      const failure = adapterErrorToFailure(err);
+      if (failure !== null) {
+        return fail(failure.status, { message: failure.message });
+      }
+      throw err;
+    }
     throw redirect(303, `/tables/${table.qualifiedName}`);
   },
 };

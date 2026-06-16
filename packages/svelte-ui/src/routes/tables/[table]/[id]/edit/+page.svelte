@@ -40,7 +40,7 @@
   });
 
   // svelte-ignore state_referenced_locally
-  const { form, errors, enhance, submitting } = superForm(data.form, {
+  const { form, errors, enhance, submitting, message } = superForm(data.form, {
     dataType: 'json',
   });
 
@@ -82,6 +82,14 @@
 </p>
 
 <form method="POST" use:enhance class="space-y-4">
+  {#if $message}
+    <p
+      role="alert"
+      class="rounded-md border border-destructive bg-destructive/10 px-3 py-2 text-sm text-destructive"
+    >
+      {$message}
+    </p>
+  {/if}
   {#each data.table.columns as col (col.name)}
     <!-- Unlike the create form, a defaulted NOT NULL column stays REQUIRED
          on edit: an UPDATE cannot express "reset to DEFAULT", so an empty

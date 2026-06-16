@@ -17,6 +17,7 @@ import {
 import { applyPrivilegeReadonly } from '$lib/form/privilege-readonly.js';
 import { zodFromTable } from '$lib/form/zod-from-table.js';
 import { encodeResourceId, parseResourceId } from '@kozou/ui-core';
+import { adapterErrorToFailure } from '$lib/server/adapter-error.js';
 import { getAdapter } from '$lib/server/adapter.js';
 import { readFormWithCompositePicks } from '$lib/server/composite-form.js';
 import {
@@ -117,7 +118,26 @@ export const actions: Actions = {
       'update',
     );
     const id = parseResourceId(params.id, table.primaryKey);
-    await getAdapter(locals.schema).update(table.qualifiedName, id, payload);
+    // A database rejection (unique / FK / CHECK violation, privilege / RLS
+    // denial) surfaces as an AdapterError. Re-render the form with the user's
+    // input and a readable message instead of a generic 500 that discards it;
+    // a non-recoverable error (5xx / network) propagates unchanged.
+    try {
+      await getAdapter(locals.schema).update(table.qualifiedName, id, payload);
+    } catch (err) {
+      const failure = adapterErrorToFailure(err);
+      if (failure !== null) {
+        // Surface the message through superforms' status-message channel (the
+        // form's `message` field), and mark the form invalid so it re-renders
+        // with the user's input on BOTH the enhanced and the no-JS paths —
+        // the same failure shape as a validation failure (a `valid` form
+        // returned via `fail` can be reset to the current row on SSR).
+        form.valid = false;
+        form.message = failure.message;
+        return fail(failure.status, { form });
+      }
+      throw err;
+    }
     throw redirect(303, `/tables/${table.qualifiedName}/${encodeResourceId(id)}`);
   },
 };

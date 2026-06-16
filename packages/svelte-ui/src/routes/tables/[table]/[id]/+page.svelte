@@ -3,7 +3,9 @@
 
   import { formatCellValue } from '@kozou/ui-core';
 
-  let { data } = $props();
+  // `form` is the action result; surface a message returned by a rejected
+  // delete (e.g. a foreign-key restriction) instead of a generic 500 (#170).
+  let { data, form } = $props();
 </script>
 
 <h1 class="mb-1 text-2xl font-semibold">{data.table.label}</h1>
@@ -48,6 +50,15 @@
     </div>
   {/each}
 </dl>
+
+{#if form?.message}
+  <p
+    role="alert"
+    class="mt-8 rounded-md border border-destructive bg-destructive/10 px-3 py-2 text-sm text-destructive"
+  >
+    {form.message}
+  </p>
+{/if}
 
 <div class="mt-8 flex flex-wrap gap-3">
   <a
