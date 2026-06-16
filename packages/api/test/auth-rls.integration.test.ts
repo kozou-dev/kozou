@@ -101,6 +101,28 @@ describe('@kozou/api JWT + RLS (generic fixture)', () => {
 @expose: rpc';
         REVOKE EXECUTE ON FUNCTION secret_op() FROM PUBLIC;
       `);
+
+      // A write side-effect reachable from a *read* path: a volatile function
+      // that inserts a row, exposed both as a view column (hit on a GET) and as
+      // an RPC (hit on a POST). The read path runs READ ONLY, so the GET must
+      // not be able to commit the insert, while the POST still can.
+      await admin.query(`
+        CREATE TABLE read_side_effects (id serial PRIMARY KEY, note text);
+        GRANT SELECT, INSERT ON read_side_effects TO app_reader;
+        GRANT USAGE, SELECT ON SEQUENCE read_side_effects_id_seq TO app_reader;
+
+        CREATE FUNCTION log_and_count() RETURNS integer LANGUAGE sql VOLATILE AS $$
+          INSERT INTO "${db.schema}".read_side_effects (note) VALUES ('touched');
+          SELECT count(*)::int FROM "${db.schema}".read_side_effects;
+        $$;
+        COMMENT ON FUNCTION log_and_count() IS 'Inserts a row, returns the new count.
+@expose: rpc';
+        REVOKE EXECUTE ON FUNCTION log_and_count() FROM PUBLIC;
+        GRANT EXECUTE ON FUNCTION log_and_count() TO app_reader;
+
+        CREATE VIEW read_probe AS SELECT log_and_count() AS hits;
+        GRANT SELECT ON read_probe TO app_reader;
+      `);
     } finally {
       await admin.end();
     }
@@ -304,6 +326,45 @@ describe('@kozou/api JWT + RLS (generic fixture)', () => {
       const body = (await r.json()) as { error: { code: string; message: string } };
       expect(body.error.code).toBe('bad_request');
       expect(body.error.message).toBe('Request body is not valid JSON.');
+    });
+  });
+
+  describe('read requests run in a READ ONLY transaction', () => {
+    const countSideEffects = async (): Promise<number> => {
+      const c = new pkg.Client({ connectionString: db.connectionString });
+      await c.connect();
+      try {
+        const r = await c.query(`SELECT count(*)::int AS n FROM "${db.schema}".read_side_effects`);
+        return (r.rows[0] as { n: number }).n;
+      } finally {
+        await c.end();
+      }
+    };
+
+    it('a write path (POST /rpc) still commits the function-driven insert', async () => {
+      const jwt = await token({ sub: 'ada', role: 'app_reader' });
+      const before = await countSideEffects();
+      const r = await fetch(`${base}/rpc/${db.schema}.log_and_count`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${jwt}`, 'content-type': 'application/json' },
+        body: '{}',
+      });
+      expect(r.status).toBe(200);
+      expect(await r.json()).toBe(before + 1);
+      expect(await countSideEffects()).toBe(before + 1);
+    });
+
+    it('a read path (GET on a view whose column writes) cannot commit the write', async () => {
+      const jwt = await token({ sub: 'ada', role: 'app_reader' });
+      const before = await countSideEffects();
+      const r = await fetch(`${base}/read_probe`, {
+        headers: { Authorization: `Bearer ${jwt}` },
+      });
+      // The insert inside the volatile function is refused by the READ ONLY
+      // transaction, so the request errors rather than returning rows...
+      expect(r.status).toBeGreaterThanOrEqual(400);
+      // ...and, decisively, the GET committed nothing.
+      expect(await countSideEffects()).toBe(before);
     });
   });
 
