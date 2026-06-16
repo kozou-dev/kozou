@@ -7,10 +7,12 @@
 //   - the MCP Streamable HTTP server, run in-process via @kozou/mcp's
 //     startHttpServer.
 //
-// Both default to 0.0.0.0 (so `docker compose` port mapping
-// works); a loud warning fires on a non-loopback bind because the UI and
-// MCP listeners have no authentication of their own (the in-house API may
-// enforce JWT auth; the Admin UI warning distinguishes that case).
+// Both bind loopback (127.0.0.1) by default because the UI and MCP listeners
+// have no authentication of their own; a container opts into 0.0.0.0 via
+// KOZOU_UI_HOST / KOZOU_MCP_HTTP_HOST (the compose template sets these and
+// publishes the host ports on loopback). A loud warning fires on a non-loopback
+// bind (the in-house API may enforce JWT auth; the Admin UI warning
+// distinguishes that case).
 //
 // The Admin UI is an adapter-node (SvelteKit) server: without ORIGIN it
 // assumes https and rejects every form POST over plain http with a 403.

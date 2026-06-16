@@ -66,7 +66,8 @@ describe('buildAdminUiEnv', () => {
       // The data-adapter URL flows straight from config (default host).
       KOZOU_ADAPTER_URL: config.adapter.url,
       PORT: '3333',
-      HOST: '0.0.0.0',
+      // The Admin UI binds the configured host — loopback by default.
+      HOST: '127.0.0.1',
       ORIGIN: 'http://localhost:3333',
       NODE_ENV: 'production',
     });
