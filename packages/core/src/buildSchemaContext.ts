@@ -1,4 +1,4 @@
-import type { RawColumn, RawIntrospection, RawTable, RawView } from './types/raw.js';
+import type { RawColumn, RawEnum, RawIntrospection, RawTable, RawView } from './types/raw.js';
 import type { ColumnHints, TableHints, UIHints, ViewHints } from './types/ui-hints.js';
 import type {
   ColumnContext,
@@ -14,7 +14,7 @@ import { parseCommentTags } from './parseCommentTags.js';
 import { extractCheckEnums } from './checkEnum.js';
 import { inferWidget } from './widget.js';
 import { inferDisplayField } from './displayField.js';
-import { buildFunctionContexts, type RpcBuildConfig } from './buildFunctionContext.js';
+import { buildFunctionContexts, findEnumValues, type RpcBuildConfig } from './buildFunctionContext.js';
 
 export type BuildOptions = {
   raw: RawIntrospection;
@@ -199,8 +199,9 @@ function buildTableContext(input: {
   hints: TableHints | undefined;
   issues: BuildIssue[];
   knownTables: Set<string>;
+  enums: RawEnum[];
 }): TableContext {
-  const { table, hints, issues, knownTables } = input;
+  const { table, hints, issues, knownTables, enums } = input;
   const parsed = parseCommentTags(table.comment);
   const enumMap = extractCheckEnums(table.checks);
   const fkColumns = new Set<string>();
@@ -216,7 +217,10 @@ function buildTableContext(input: {
       primaryKey: table.primaryKey,
       foreignKeyColumns: fkColumns,
       singleColumnForeignKeyColumns: singleFkColumns,
-      enumValues: enumMap.get(c.name) ?? null,
+      // A CHECK-constraint pseudo-enum takes precedence (it can narrow further);
+      // otherwise fall back to a native ENUM type resolved by udtName, the same
+      // way function arguments resolve theirs.
+      enumValues: enumMap.get(c.name) ?? findEnumValues(enums, c.udtName, table.schema) ?? null,
       hints: hints?.columns?.[c.name],
     }),
   );
@@ -283,8 +287,9 @@ function buildViewContext(input: {
   view: RawView;
   hints: ViewHints | undefined;
   issues: BuildIssue[];
+  enums: RawEnum[];
 }): ViewContext {
-  const { view, hints, issues } = input;
+  const { view, hints, issues, enums } = input;
   const parsed = parseCommentTags(view.comment);
 
   const declaredColumnNames = new Set(view.columns.map((c) => c.name));
@@ -302,13 +307,16 @@ function buildViewContext(input: {
   const columns = view.columns.map<ColumnContext>((c) => {
     const colParsed = parseCommentTags(c.comment);
     const colHints = hints?.columns?.[c.name];
+    // A view column has no CHECK constraints, but it can still be typed as a
+    // native ENUM — resolve its members by udtName like the table path does.
+    const enumValues = findEnumValues(enums, c.udtName, view.schema) ?? null;
     const widget: WidgetType =
       colHints?.widget ??
       colParsed.widget ??
       inferWidget({
         column: c,
         isForeignKey: false,
-        enumValues: null,
+        enumValues,
         commentBody: colParsed.body,
       });
     return {
@@ -324,7 +332,7 @@ function buildViewContext(input: {
       aiDescription: joinAi(colParsed.ai),
       policy: colParsed.policy,
       widget,
-      enumValues: null,
+      enumValues,
       readonly: colHints?.readonly ?? true,
     };
   });
@@ -445,6 +453,7 @@ export async function buildSchemaContext(opts: BuildOptions): Promise<SchemaCont
       hints: uiHints?.tables?.[t.name],
       issues,
       knownTables,
+      enums: raw.enums,
     }),
   );
 
@@ -453,6 +462,7 @@ export async function buildSchemaContext(opts: BuildOptions): Promise<SchemaCont
       view: v,
       hints: uiHints?.views?.[v.name],
       issues,
+      enums: raw.enums,
     }),
   );
 

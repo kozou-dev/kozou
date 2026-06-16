@@ -93,6 +93,60 @@ describe('buildSchemaContext', () => {
     expect(cols.find((c) => c.name === 'display_name')!.widget).toBe('currency');
   });
 
+  it('resolves a native ENUM column to its members (enum-select + enumValues)', async () => {
+    const raw = makeRaw({
+      enums: [{ schema: 'public', name: 'order_status', values: ['open', 'paid', 'shipped'] }],
+      tables: [
+        makeTable('orders', {
+          columns: [makeCol('id', 'uuid'), makeCol('status', 'order_status', { nullable: false })],
+          primaryKey: ['id'],
+        }),
+      ],
+    });
+    const ctx = await buildSchemaContext({ raw });
+    const status = ctx.tables[0]!.columns.find((c) => c.name === 'status')!;
+    // Same resolution as a function argument of the same type: by udtName.
+    expect(status.enumValues).toEqual(['open', 'paid', 'shipped']);
+    expect(status.widget).toBe('enum-select');
+  });
+
+  it('resolves a native ENUM column on a view as well', async () => {
+    const raw = makeRaw({
+      enums: [{ schema: 'public', name: 'order_status', values: ['open', 'paid'] }],
+      views: [
+        {
+          schema: 'public',
+          name: 'order_summary',
+          comment: null,
+          columns: [makeCol('status', 'order_status')],
+          underlyingTables: [],
+          definition: 'SELECT status FROM orders',
+        },
+      ],
+    });
+    const ctx = await buildSchemaContext({ raw });
+    const status = ctx.views[0]!.columns.find((c) => c.name === 'status')!;
+    expect(status.enumValues).toEqual(['open', 'paid']);
+    expect(status.widget).toBe('enum-select');
+  });
+
+  it('a CHECK-constraint pseudo-enum takes precedence over a native ENUM type', async () => {
+    const raw = makeRaw({
+      enums: [{ schema: 'public', name: 'order_status', values: ['open', 'paid', 'shipped'] }],
+      tables: [
+        makeTable('orders', {
+          columns: [makeCol('id', 'uuid'), makeCol('status', 'order_status')],
+          primaryKey: ['id'],
+          // A CHECK narrows the column further than the native type.
+          checks: [{ name: 'orders_status_chk', expression: "status IN ('open', 'paid')" }],
+        }),
+      ],
+    });
+    const ctx = await buildSchemaContext({ raw });
+    const status = ctx.tables[0]!.columns.find((c) => c.name === 'status')!;
+    expect(status.enumValues).toEqual(['open', 'paid']);
+  });
+
   it('displayField inference (UIHints > heuristic)', async () => {
     const raw = makeRaw({
       tables: [
