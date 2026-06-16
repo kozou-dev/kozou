@@ -49,6 +49,14 @@ export function forbidden(message: string): KozouApiError {
   return new KozouApiError(403, 'forbidden', message);
 }
 
+export function payloadTooLarge(message: string): KozouApiError {
+  return new KozouApiError(413, 'payload_too_large', message);
+}
+
+export function unsupportedMediaType(message: string): KozouApiError {
+  return new KozouApiError(415, 'unsupported_media_type', message);
+}
+
 // ---- Database error mapping ------------------------------------------------
 //
 // The SQLSTATE classification lives in @kozou/core (shared with the MCP

@@ -104,6 +104,32 @@ describe('startApiServer over real HTTP', () => {
     expect((await r.json()) as unknown).toEqual({ id: 'new', display_name: 'Ada' });
     expect(calls[0].values).toEqual(['Ada']);
   });
+
+  it('rejects an over-sized request body with 413', async () => {
+    const { db } = recordingDb(() => ({ rows: [], rowCount: 0 }));
+    server = await startApiServer({ schema, db, host: '127.0.0.1', port: 0, maxBodyBytes: 64 });
+    const r = await fetch(`http://127.0.0.1:${server.port}/authors`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ display_name: 'a'.repeat(200) }),
+    });
+    expect(r.status).toBe(413);
+    expect(((await r.json()) as { error: { code: string } }).error.code).toBe('payload_too_large');
+  });
+
+  it('rejects a non-JSON Content-Type with 415', async () => {
+    const { db } = recordingDb(() => ({ rows: [], rowCount: 0 }));
+    server = await startApiServer({ schema, db, host: '127.0.0.1', port: 0 });
+    const r = await fetch(`http://127.0.0.1:${server.port}/authors`, {
+      method: 'POST',
+      headers: { 'content-type': 'text/plain' },
+      body: 'display_name=Ada',
+    });
+    expect(r.status).toBe(415);
+    expect(((await r.json()) as { error: { code: string } }).error.code).toBe(
+      'unsupported_media_type',
+    );
+  });
 });
 
 describe('createApiRequestListener', () => {
@@ -114,13 +140,26 @@ describe('createApiRequestListener', () => {
     const result = await driveListener(listener, '/%E0%A4%A');
     expect(result.status).toBe(404); // malformed segment -> raw -> unknown resource
   });
+
+  it('enforces the body cap while streaming (no Content-Length) with 413', async () => {
+    const { db } = recordingDb(() => ({ rows: [], rowCount: 0 }));
+    const listener = createApiRequestListener({ db, lookup: buildResourceLookup(schema) }, 64);
+    // The body is yielded by the async iterator with no Content-Length, so only
+    // the streaming counter can catch it.
+    const result = await driveListener(listener, '/authors', 'POST', Buffer.alloc(500, 0x78));
+    expect(result.status).toBe(413);
+  });
 });
 
-/** Drive the listener with a minimal fake req/res pair and resolve on end(). */
+/** Drive the listener with a minimal fake req/res pair and resolve on end().
+ *  An optional `body` is yielded by the request's async iterator with no
+ *  Content-Length header — so it exercises the streaming path, not the
+ *  declared-length short-circuit. */
 function driveListener(
   listener: (req: IncomingMessage, res: ServerResponse) => void,
   url: string,
   method = 'GET',
+  body?: Buffer,
 ): Promise<{ status: number; body: string }> {
   return new Promise((resolve) => {
     let status = 0;
@@ -134,15 +173,18 @@ function driveListener(
         headersSent = true;
         return res as unknown as ServerResponse;
       },
-      end(body?: string) {
-        resolve({ status, body: body ?? '' });
+      end(b?: string) {
+        resolve({ status, body: b ?? '' });
       },
     } as unknown as ServerResponse;
     const req = {
       url,
       method,
+      headers: {},
       [Symbol.asyncIterator]() {
-        return (async function* (): AsyncGenerator<Buffer> {})();
+        return (async function* (): AsyncGenerator<Buffer> {
+          if (body !== undefined) yield body;
+        })();
       },
     } as unknown as IncomingMessage;
     listener(req, res);

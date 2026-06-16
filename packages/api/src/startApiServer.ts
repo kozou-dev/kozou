@@ -14,7 +14,14 @@ import type { AddressInfo } from 'node:net';
 import { runInRoleTransaction } from '@kozou/core';
 import type { ConnectionPool, SchemaContext } from '@kozou/core';
 
-import { badRequest, errorBody, KozouApiError, mapDatabaseError } from './errors.js';
+import {
+  badRequest,
+  errorBody,
+  KozouApiError,
+  mapDatabaseError,
+  payloadTooLarge,
+  unsupportedMediaType,
+} from './errors.js';
 import {
   handleApiRequest,
   type ApiHandlerDeps,
@@ -49,6 +56,10 @@ export type StartApiServerOptions = {
   version?: string;
   /** Prefix used in stderr log lines. Default: '[@kozou/api]'. */
   logPrefix?: string;
+  /** Maximum accepted request body size in bytes. A body whose Content-Length
+   *  exceeds this, or that streams past it, is rejected with 413; bounds the
+   *  memory a single request can buffer. Default: 4 MiB. */
+  maxBodyBytes?: number;
 };
 
 export type ApiServerHandle = {
@@ -62,6 +73,7 @@ export type ApiServerHandle = {
 
 const DEFAULT_PORT = 3335;
 const DEFAULT_HOST = '127.0.0.1';
+const DEFAULT_MAX_BODY_BYTES = 4 * 1024 * 1024; // 4 MiB (write payloads / RPC args)
 
 const LOOPBACK_HOSTS = new Set(['127.0.0.1', '::1', 'localhost', '::ffff:127.0.0.1']);
 
@@ -92,21 +104,25 @@ function nonLoopbackWarning(host: string, prefix: string, authed: boolean): stri
  */
 export function createApiRequestListener(
   deps: ApiHandlerDeps,
+  maxBodyBytes: number = DEFAULT_MAX_BODY_BYTES,
 ): (req: IncomingMessage, res: ServerResponse) => void {
   return (req, res) => {
     // Same sanitizer as the authenticated path: log the detail server-side,
     // never return raw error text in the body.
-    dispatch(deps, req, res).catch((err: unknown) => respondError(res, err));
+    dispatch(deps, req, res, maxBodyBytes).catch((err: unknown) => respondError(res, err));
   };
 }
 
-async function buildHttpRequest(req: IncomingMessage): Promise<ApiHttpRequest> {
+async function buildHttpRequest(
+  req: IncomingMessage,
+  maxBodyBytes: number,
+): Promise<ApiHttpRequest> {
   const url = new URL(req.url ?? '/', 'http://localhost');
   const segments = url.pathname
     .split('/')
     .filter((s) => s.length > 0)
     .map((s) => safeDecode(s));
-  const body = await readJsonBody(req);
+  const body = await readJsonBody(req, maxBodyBytes);
   return {
     method: req.method ?? 'GET',
     segments,
@@ -120,8 +136,9 @@ async function dispatch(
   deps: ApiHandlerDeps,
   req: IncomingMessage,
   res: ServerResponse,
+  maxBodyBytes: number,
 ): Promise<void> {
-  const result = await handleApiRequest(deps, await buildHttpRequest(req));
+  const result = await handleApiRequest(deps, await buildHttpRequest(req, maxBodyBytes));
   respondJson(res, result.status, result.body);
 }
 
@@ -136,6 +153,7 @@ async function dispatchAuthed(
   pool: ConnectionPool,
   req: IncomingMessage,
   res: ServerResponse,
+  maxBodyBytes: number,
 ): Promise<void> {
   let auth;
   try {
@@ -146,7 +164,7 @@ async function dispatchAuthed(
     return;
   }
 
-  const httpReq = await buildHttpRequest(req);
+  const httpReq = await buildHttpRequest(req, maxBodyBytes);
   try {
     // Run the request inside the shared role-transaction envelope: the role is
     // assumed and the claims are published, then routing runs every query on
@@ -193,16 +211,37 @@ function respondError(res: ServerResponse, err: unknown): void {
   respondJson(res, 500, errorBody('internal', 'Internal server error.'));
 }
 
-async function readJsonBody(req: IncomingMessage): Promise<unknown> {
+async function readJsonBody(req: IncomingMessage, maxBodyBytes: number): Promise<unknown> {
+  // Reject an over-large body before buffering when the client declares its
+  // size, so a huge declared payload never reaches memory.
+  const declared = Number(singleHeader(req.headers, 'content-length'));
+  if (Number.isFinite(declared) && declared > maxBodyBytes) {
+    throw payloadTooLarge('Request body too large.');
+  }
+
   const chunks: Buffer[] = [];
+  let total = 0;
   for await (const chunk of req) {
-    chunks.push(chunk as Buffer);
+    const buf = chunk as Buffer;
+    total += buf.length;
+    // Enforce the cap while streaming too, so a chunked / Content-Length-less
+    // body cannot grow the buffer past the limit.
+    if (total > maxBodyBytes) {
+      throw payloadTooLarge('Request body too large.');
+    }
+    chunks.push(buf);
   }
   if (chunks.length === 0) return undefined;
   const raw = Buffer.concat(chunks).toString('utf8');
   // An empty or whitespace-only body is an absent body (a no-argument RPC call
   // or an all-default write), not a parse error.
   if (raw.trim().length === 0) return undefined;
+  // A non-empty body must be JSON: reject a declared non-JSON media type with
+  // 415 (a missing Content-Type is tolerated — some clients omit it).
+  const contentType = singleHeader(req.headers, 'content-type');
+  if (contentType !== undefined && !/^application\/json\b/i.test(contentType)) {
+    throw unsupportedMediaType('Unsupported Media Type: expected application/json.');
+  }
   try {
     return JSON.parse(raw);
   } catch {
@@ -252,14 +291,15 @@ export async function startApiServer(opts: StartApiServerOptions): Promise<ApiSe
   // dispatch on the caller's `db` (autocommit): it is loopback-only by default
   // and enforces no per-request identity, and routing its reads through `pool`
   // would silently change the executor's authority when `db` and `pool` differ.
+  const maxBodyBytes = opts.maxBodyBytes ?? DEFAULT_MAX_BODY_BYTES;
   const listener =
     authenticator !== undefined && pool !== undefined
       ? (req: IncomingMessage, res: ServerResponse): void => {
-          dispatchAuthed(base, authenticator, pool, req, res).catch((err: unknown) =>
+          dispatchAuthed(base, authenticator, pool, req, res, maxBodyBytes).catch((err: unknown) =>
             respondError(res, err),
           );
         }
-      : createApiRequestListener(base);
+      : createApiRequestListener(base, maxBodyBytes);
   const httpServer = createServer(listener);
 
   await new Promise<void>((resolve, reject) => {
