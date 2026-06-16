@@ -39,6 +39,13 @@ type IndexRow = {
   is_unique: boolean;
 };
 
+// `fetchTables` returns ordinary tables (relkind 'r') and declarative
+// partitioned *parent* tables (relkind 'p'), but never the individual
+// partitions (`relispartition`): a caller addresses the parent, and a write to
+// it is routed to the right partition by PostgreSQL, so surfacing every leaf
+// would double the schema and let a write bypass routing. A partitioned parent
+// carries its own columns / primary key / constraints, so it reads like a
+// normal table downstream.
 export async function fetchTables(client: Client, schemas: string[]): Promise<RawTable[]> {
   if (schemas.length === 0) return [];
 
@@ -57,7 +64,8 @@ export async function fetchTables(client: Client, schemas: string[]): Promise<Ra
      FROM pg_class c
      JOIN pg_namespace n ON n.oid = c.relnamespace
      LEFT JOIN pg_description d ON d.objoid = c.oid AND d.objsubid = 0
-     WHERE c.relkind = 'r'
+     WHERE c.relkind IN ('r', 'p')
+       AND NOT c.relispartition
        AND n.nspname = ANY($1)
      ORDER BY n.nspname, c.relname`,
     [schemas],
@@ -98,7 +106,8 @@ export async function fetchTables(client: Client, schemas: string[]): Promise<Ra
      JOIN pg_type t ON t.oid = a.atttypid
      LEFT JOIN pg_attrdef ad ON ad.adrelid = a.attrelid AND ad.adnum = a.attnum
      LEFT JOIN pg_description d ON d.objoid = a.attrelid AND d.objsubid = a.attnum
-     WHERE c.relkind = 'r'
+     WHERE c.relkind IN ('r', 'p')
+       AND NOT c.relispartition
        AND n.nspname = ANY($1)
        AND a.attnum > 0
        AND NOT a.attisdropped
@@ -142,7 +151,8 @@ export async function fetchTables(client: Client, schemas: string[]): Promise<Ra
      JOIN pg_class ic ON ic.oid = ix.indexrelid
      JOIN pg_class t ON t.oid = ix.indrelid
      JOIN pg_namespace n ON n.oid = t.relnamespace
-     WHERE t.relkind = 'r'
+     WHERE t.relkind IN ('r', 'p')
+       AND NOT t.relispartition
        AND n.nspname = ANY($1)
        AND NOT ix.indisprimary
      ORDER BY n.nspname, t.relname, ic.relname`,
