@@ -27,14 +27,13 @@ When reporting, please include as much of the following as you can:
 
 ## Supported Versions
 
-Only the latest `v0.1.x` line receives security fixes. The `v0.0.x`
-tags were package-name reservations published before any functional
-code existed; they are not supported.
+Only the latest `1.x` release line receives security fixes. The `0.x`
+releases predate the v1.0 stable contract and are no longer supported.
 
 | Version  | Supported          |
 |----------|--------------------|
-| `0.1.x`  | :white_check_mark: |
-| `0.0.x`  | :x:                |
+| `1.x`    | :white_check_mark: |
+| `< 1.0`  | :x:                |
 
 ## Scope
 
