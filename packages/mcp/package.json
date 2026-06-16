@@ -1,6 +1,6 @@
 {
   "name": "@kozou/mcp",
-  "version": "1.8.1",
+  "version": "1.9.0",
   "description": "Kozou MCP server for AI agents (stdio + HTTP)",
   "license": "Apache-2.0",
   "repository": {
