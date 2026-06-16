@@ -116,8 +116,11 @@ export async function mcpCommand(opts: McpOptions = {}): Promise<void> {
 
   if (opts.http === true) {
     await startHttpServer(cache, {
-      port: opts.port,
-      host: opts.host,
+      // Precedence: a CLI flag overrides the config, which overrides the
+      // library default — matching `kozou dev`. (`??` so an explicit `--port 0`
+      // for an ephemeral port is honoured rather than falling back to config.)
+      port: opts.port ?? config.server.mcp.http.port,
+      host: opts.host ?? config.server.mcp.http.host,
       logPrefix: '[kozou mcp]',
       execution,
     });
