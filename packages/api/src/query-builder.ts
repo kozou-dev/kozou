@@ -725,18 +725,27 @@ export function buildListQuery(
 
   const whereClause = whereParts.length > 0 ? ` WHERE ${whereParts.join(' AND ')}` : '';
 
-  // ORDER BY: explicit sort, else default to the primary key for stable
-  // pagination. Views (no PK) fall back to no ordering.
+  // ORDER BY: an explicit sort, else the primary key. Either way the primary
+  // key is appended as a final tiebreaker so the order is total and paging is
+  // stable — a sort on a non-unique column otherwise leaves rows that tie free
+  // to come back in a different order between requests, which makes LIMIT/OFFSET
+  // skip or repeat them across page boundaries. Views (no PK) cannot get a
+  // tiebreaker and fall back to the requested sort (or no ordering).
   const orderParts: string[] = [];
+  const sortedFields = new Set<string>();
   if (params.sort && params.sort.length > 0) {
     for (const s of params.sort) {
       if (!columnsByName.has(s.field)) {
         throw badRequest(`Unknown sort column "${s.field}" on resource "${resource.name}".`);
       }
       orderParts.push(`${quoteIdent(s.field)} ${s.order === 'desc' ? 'DESC' : 'ASC'}`);
+      sortedFields.add(s.field);
     }
-  } else {
-    for (const pk of resource.primaryKey) {
+  }
+  // Append every primary-key column not already named by the explicit sort
+  // (this also produces the default PK ordering when no sort was given).
+  for (const pk of resource.primaryKey) {
+    if (!sortedFields.has(pk)) {
       orderParts.push(`${quoteIdent(pk)} ASC`);
     }
   }

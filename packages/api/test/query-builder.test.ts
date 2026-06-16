@@ -495,20 +495,53 @@ describe('buildListQuery', () => {
     expect(q.dataValues).toEqual(['1', '%lov%', DEFAULT_PAGE_SIZE, 0]);
   });
 
-  it('honours explicit multi-column sort', () => {
+  it('honours explicit multi-column sort and appends the PK as a tiebreaker', () => {
     const q = buildListQuery(authors, {
       sort: [
         { field: 'display_name', order: 'desc' },
         { field: 'rank', order: 'asc' },
       ],
     });
-    expect(q.dataText).toContain('ORDER BY "display_name" DESC, "rank" ASC');
+    // The PK is appended so the order is total and paging stays stable across
+    // rows that tie on the requested (non-unique) columns.
+    expect(q.dataText).toContain('ORDER BY "display_name" DESC, "rank" ASC, "id" ASC');
+  });
+
+  it('does not duplicate a PK column already named in the explicit sort', () => {
+    const q = buildListQuery(authors, { sort: [{ field: 'id', order: 'desc' }] });
+    expect(q.dataText).toContain('ORDER BY "id" DESC');
+    expect(q.dataText).not.toContain('"id" DESC, "id" ASC');
   });
 
   it('omits ORDER BY for a view with no primary key and no sort', () => {
     const v = viewResource('vw', [col('a', 'text')]);
     const q = buildListQuery(v, {});
     expect(q.dataText).not.toContain('ORDER BY');
+  });
+
+  it('honours an explicit sort on a PK-less view without inventing a tiebreaker', () => {
+    const v = viewResource('vw', [col('a', 'text')]);
+    const q = buildListQuery(v, { sort: [{ field: 'a', order: 'asc' }] });
+    expect(q.dataText).toContain('ORDER BY "a" ASC');
+    // No PK to append, so the ORDER BY ends at the requested column.
+    expect(q.dataText).toMatch(/ORDER BY "a" ASC(?! *,)/);
+  });
+
+  it('appends only the unnamed columns of a composite PK as tiebreakers', () => {
+    const lines = tableResource(
+      'order_lines',
+      [
+        col('order_id', 'uuid', { isPrimaryKey: true, nullable: false }),
+        col('line_no', 'number', { dataType: 'integer', isPrimaryKey: true, nullable: false }),
+        col('note', 'text'),
+      ],
+      ['order_id', 'line_no'],
+    );
+    // The sort names one of the two PK columns (DESC); only the other PK column
+    // is appended (ASC), and the named one is not re-appended.
+    const q = buildListQuery(lines, { sort: [{ field: 'order_id', order: 'desc' }] });
+    expect(q.dataText).toContain('ORDER BY "order_id" DESC, "line_no" ASC');
+    expect(q.dataText).not.toContain('"order_id" DESC, "line_no" ASC, "order_id"');
   });
 
   it('clamps pagination (page floor, pageSize cap, defaults)', () => {
