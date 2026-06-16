@@ -88,8 +88,8 @@ Advisory only: enforcement stays in PostgreSQL (GRANTs + your RLS). See
 Use the runtime image directly:
 
 ```bash
-docker pull ghcr.io/kozou-dev/kozou:v1.8.1
-docker run --rm ghcr.io/kozou-dev/kozou:v1.8.1 mcp --help
+docker pull ghcr.io/kozou-dev/kozou:v1.9.0
+docker run --rm ghcr.io/kozou-dev/kozou:v1.9.0 mcp --help
 ```
 
 Or install the packages for library / embedded use:
@@ -124,7 +124,7 @@ via JWKS, or a minimal self-hosted issuer. See
 
 ## Requirements
 
-Runtime requirements for v1.8.1:
+Runtime requirements for v1.9.0:
 
 - **PostgreSQL 16 or later** — the canonical source of truth
 - **Docker 24 or later** (optional) — recommended for the `docker compose up` stack, which brings up PostgreSQL and a `kozou` service running `kozou dev` (the bundled Admin UI + MCP HTTP server, plus Kozou's in-house REST backend served in-process) from `ghcr.io/kozou-dev/kozou` (a multi-arch image, native on linux/amd64 and linux/arm64). The default stack needs **no separate REST container**; to opt out and use an external PostgREST instead, set `adapter.type: postgrest` and add the (commented) service in the scaffold's `docker-compose.yml`.
@@ -152,6 +152,7 @@ Contributors additionally need **pnpm 9 or later**. See [CONTRIBUTING.md](CONTRI
 - v1.7.0 (shipped): the framework-agnostic read-path of the reference Admin UI is extracted into a new published package, **`@kozou/ui-core`**, which `@kozou/svelte-ui` now depends on. The two `DataAdapter` implementations, list-parameter parsing, view-column heuristics, cell formatting, foreign-key label resolution, resource-id handling, and the schema / FK-row caches move out of the SvelteKit app unchanged, so the same logic can drive more than one UI framework. This is the structural step of the React UI exploration: a minimal React (Next.js) read spike renders list + detail by consuming `@kozou/ui-core` verbatim, with no change to the shared core — evidence that the read-path abstraction is framework-agnostic. (The spike is an internal example, not a published second UI; `@kozou/svelte-ui` stays the reference Admin UI.) Also: `@kozou/api` now rejects a malformed, non-empty JSON request body with a `400` instead of treating it as an empty body (issue #145). The `@kozou/svelte-ui` public API is unchanged.
 - v1.8.0 (shipped): **opt-in privilege-aware AI context** — point Kozou at a role (`introspection.respectPrivileges`) and the MCP `describe_table` / `describe_view` tools and `kozou docs` now also tell the agent what that role may *touch*: each relation is annotated with the role's effective GRANTs (relation-level `SELECT`/`INSERT`/`UPDATE`/`DELETE`, plus per-column `insertable` / `updatable` on tables), and `kozou docs` grows a per-table "Security" section. Unlike the Admin UI's privilege mode, the AI surfaces **annotate rather than hide** — a table the role cannot `SELECT` still appears, marked `select: false`, so the agent is told its limits rather than left guessing. It reuses the existing privilege introspection (no new queries) and is advisory only: enforcement stays in PostgreSQL (GRANTs + your RLS). When the MCP `call` execution tool is enabled, the annotated role is tied to the execution role so describe and act never disagree. Default off ⇒ every surface stays schema-wide. `kozou docs` also now renders per-column `@ai` / `@policy` notes. See [`examples/quickstart`](examples/quickstart).
 - v1.8.1 (shipped): a security-hardening patch. The unauthenticated MCP HTTP server gains **DNS-rebinding protection** — it validates the request `Host` / `Origin` against an allowlist before handling it, so a page in the operator's browser cannot drive it by rebinding a hostname to loopback — and a **request-body size limit** (both the MCP server and `@kozou/api` reject an over-large body with `413`, and a non-JSON body with `415`, instead of buffering it unbounded). Read requests (`GET`) now run in a `READ ONLY` transaction, so a read cannot commit a write regardless of the role's grants. The bundled dev stack is **loopback by default**: the Admin UI and MCP HTTP server bind `127.0.0.1` (set `KOZOU_UI_HOST` / `KOZOU_MCP_HTTP_HOST` to expose them inside a container), and the scaffold and quickstart `docker-compose` files publish every port (Admin UI, MCP, database) on `127.0.0.1` only. See the repository's security advisory.
+- v1.9.0 (shipped): field-report fixes for the introspection and REST surfaces. Native PostgreSQL `ENUM` columns are now recognized — a column typed as a native enum gets the `enum-select` widget, a string-literal union in the generated client, and an `enum` in OpenAPI / the MCP context, matching how the same type already resolved as a function argument. Declarative **partitioned parent tables** and **materialized views** are now introspected (the parent is surfaced and reads like a normal table while its leaf partitions stay hidden; a materialized view appears as a read-only view) — previously both were silently absent from every surface. A list query with an explicit `sort` on a non-unique column now appends the primary key as a tiebreaker, so `LIMIT`/`OFFSET` pagination is stable across pages. And `kozou mcp --http` honours `server.mcp.http.{port,host}` from `kozou.config.yaml`, matching `kozou dev`.
 - Beyond v1.8: React UI exploration — optional write-path parity (a second UI driving create / edit / delete across both adapters)
 
 ## Name

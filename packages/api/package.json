@@ -1,6 +1,6 @@
 {
   "name": "@kozou/api",
-  "version": "1.8.1",
+  "version": "1.9.0",
   "description": "Kozou's own REST layer: serves table CRUD / VIEW reads / OpenAPI from a SchemaContext.",
   "license": "Apache-2.0",
   "repository": {
