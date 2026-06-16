@@ -11,6 +11,8 @@
 
 import type { ListParams, SortSpec } from '@kozou/core';
 
+import { quoteLikeValue } from '../adapter/search-quote.js';
+
 const DEFAULT_PAGE = 1;
 export const DEFAULT_PAGE_SIZE = 50;
 
@@ -44,8 +46,10 @@ export function parseListParamsFromUrl(
 
   const filters: Record<string, unknown> = {};
   if (q.length > 0 && searchFields.length > 0) {
+    // The term is double-quoted so reserved characters (`,` `(` `)` `.`) are
+    // matched literally instead of corrupting the `or=(...)` logic tree.
     filters.__or = searchFields
-      .map((field) => `${field}.ilike.*${q}*`)
+      .map((field) => `${field}.ilike.${quoteLikeValue(q)}`)
       .join(',');
   }
 
