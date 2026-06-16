@@ -86,7 +86,10 @@ export async function fetchAndAttachPrivileges(
        has_table_privilege($2, c.oid, 'DELETE') AS del
      FROM pg_class c
      JOIN pg_namespace n ON n.oid = c.relnamespace
-     WHERE c.relkind IN ('r', 'v', 'm')
+     -- Cover the same relations fetchTables / fetchViews surface: ordinary
+     -- tables + partitioned parents (not leaf partitions) + views + matviews.
+     WHERE c.relkind IN ('r', 'p', 'v', 'm')
+       AND NOT c.relispartition
        AND n.nspname = ANY($1)`,
     [schemas, role],
     'fetchPrivileges (relations)',
@@ -108,7 +111,10 @@ export async function fetchAndAttachPrivileges(
      FROM pg_attribute a
      JOIN pg_class c ON c.oid = a.attrelid
      JOIN pg_namespace n ON n.oid = c.relnamespace
-     WHERE c.relkind = 'r'
+     -- Tables and partitioned parents (per-column write grants apply to both);
+     -- leaf partitions are excluded, matching the relation set above.
+     WHERE c.relkind IN ('r', 'p')
+       AND NOT c.relispartition
        AND n.nspname = ANY($1)
        AND a.attnum > 0
        AND NOT a.attisdropped`,
