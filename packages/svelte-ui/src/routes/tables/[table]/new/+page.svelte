@@ -40,7 +40,7 @@
   });
 
   // svelte-ignore state_referenced_locally
-  const { form, errors, enhance, submitting } = superForm(data.form, {
+  const { form, errors, enhance, submitting, message } = superForm(data.form, {
     dataType: 'json',
   });
 
@@ -80,6 +80,14 @@
 <p class="mb-6 text-sm text-muted-foreground">{data.table.qualifiedName}</p>
 
 <form method="POST" use:enhance class="space-y-4">
+  {#if $message}
+    <p
+      role="alert"
+      class="rounded-md border border-destructive bg-destructive/10 px-3 py-2 text-sm text-destructive"
+    >
+      {$message}
+    </p>
+  {/if}
   {#each data.table.columns as col (col.name)}
     <!-- Mirrors the schema's required predicate: a DB-suppliable column
          (DEFAULT / generated) accepts the empty value — the payload drops it
