@@ -43,9 +43,19 @@
     primaryKey = [],
   }: Props = $props();
 
+  // First occurrence of a field wins, so the visual ↑/↓ indicator agrees with
+  // `primarySort` (and with the database, where `ORDER BY x ASC, x DESC` is
+  // dominated by the first key) even on a degenerate `?sort=x:asc,x:desc` URL.
+  // Reversing before building the Map makes the earliest entry the last write.
   const sortLookup = $derived(
-    new Map(listParams.sort.map((s) => [s.field, s.order])),
+    new Map([...listParams.sort].reverse().map((s) => [s.field, s.order])),
   );
+  // The URL contract allows a multi-column sort (`?sort=a:asc,b:desc`), but
+  // ARIA wants at most one active `aria-sort` per table — the primary one. So
+  // the visual ↑/↓ indicator follows every sorted column (`sortLookup`), while
+  // `aria-sort` is announced only for the first sort field; all others read
+  // `none`.
+  const primarySort = $derived(listParams.sort[0]);
   const totalPages = $derived(
     Math.max(1, Math.ceil(total / listParams.pageSize)),
   );
@@ -68,6 +78,7 @@
     name="q"
     value={listParams.search}
     placeholder="Search…"
+    aria-label="Search rows"
     class="min-w-0 flex-1 rounded-md border border-input bg-background px-3 py-2 text-sm"
   />
   <button
@@ -91,7 +102,14 @@
     <thead class="bg-muted">
       <tr>
         {#each columns as col (col.name)}
-          <th class="px-3 py-2 text-left font-medium">
+          <th
+            class="px-3 py-2 text-left font-medium"
+            aria-sort={primarySort?.field === col.name
+              ? primarySort.order === 'asc'
+                ? 'ascending'
+                : 'descending'
+              : 'none'}
+          >
             <a href={buildSortHref(listParams, col.name)} class="hover:underline">
               {col.label}
               {#if sortLookup.has(col.name)}
