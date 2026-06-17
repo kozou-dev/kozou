@@ -379,4 +379,73 @@ describe('MCP tools: @policy is surfaced to the AI agent (no DB)', () => {
     expect(t.privileges).toBeUndefined();
     expect(t.columns.find((c) => c.name === 'status')!.insertable).toBeUndefined();
   });
+
+  // Row-level security signal. Surfaced unconditionally
+  // (unlike the opt-in privilege mode): a boolean + advisory note, never the
+  // policy expressions.
+  const withRls = (rowSecurity: {
+    enabled: boolean;
+    forced: boolean;
+    hasPolicies: boolean;
+  }): RawIntrospection => ({
+    ...raw,
+    tables: [{ ...raw.tables[0]!, rowSecurity }],
+  });
+
+  it('describe_table surfaces rowSecurity with an advisory note when RLS is on', async () => {
+    const ctx = await buildSchemaContext({
+      raw: withRls({ enabled: true, forced: false, hasPolicies: true }),
+    });
+    const t = describeTable({ qualifiedName: 'public.orders' }, ctx);
+    expect(t.rowSecurity).toMatchObject({ enabled: true, forced: false, hasPolicies: true });
+    expect(t.rowSecurity!.note).toMatch(/row-level security is enabled/i);
+    expect(t.rowSecurity!.note).toMatch(/do not assume a result is complete/i);
+  });
+
+  it('describe_table flags default-deny when RLS is on but no policy exists', async () => {
+    const ctx = await buildSchemaContext({
+      raw: withRls({ enabled: true, forced: false, hasPolicies: false }),
+    });
+    const t = describeTable({ qualifiedName: 'public.orders' }, ctx);
+    expect(t.rowSecurity).toMatchObject({ enabled: true, hasPolicies: false });
+    expect(t.rowSecurity!.note).toMatch(/default-deny/i);
+  });
+
+  it('describe_table notes forced RLS (applies to the owner too)', async () => {
+    const ctx = await buildSchemaContext({
+      raw: withRls({ enabled: true, forced: true, hasPolicies: true }),
+    });
+    const t = describeTable({ qualifiedName: 'public.orders' }, ctx);
+    expect(t.rowSecurity!.forced).toBe(true);
+    expect(t.rowSecurity!.note).toMatch(/owner/i);
+  });
+
+  it('describe_table surfaces rowSecurity (no note) when RLS is off', async () => {
+    const ctx = await buildSchemaContext({
+      raw: withRls({ enabled: false, forced: false, hasPolicies: false }),
+    });
+    const t = describeTable({ qualifiedName: 'public.orders' }, ctx);
+    expect(t.rowSecurity).toEqual({ enabled: false, forced: false, hasPolicies: false });
+    expect(t.rowSecurity!.note).toBeUndefined();
+  });
+
+  it('describe_table never leaks a policy expression', async () => {
+    // The fixture has no expression to leak, but assert the surface shape never
+    // grows an expression-bearing field even when RLS is fully on.
+    const ctx = await buildSchemaContext({
+      raw: withRls({ enabled: true, forced: true, hasPolicies: true }),
+    });
+    const t = describeTable({ qualifiedName: 'public.orders' }, ctx);
+    expect(Object.keys(t.rowSecurity!).sort()).toEqual(
+      ['enabled', 'forced', 'hasPolicies', 'note'].sort(),
+    );
+  });
+
+  it('describe_table omits rowSecurity for a context built before the field existed', async () => {
+    const ctx = await buildSchemaContext({ raw });
+    type MaybeRls = { rowSecurity?: unknown };
+    for (const t of ctx.tables) delete (t as MaybeRls).rowSecurity;
+    const t = describeTable({ qualifiedName: 'public.orders' }, ctx);
+    expect(t.rowSecurity).toBeUndefined();
+  });
 });

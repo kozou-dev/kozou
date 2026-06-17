@@ -7,6 +7,9 @@ type TableRow = {
   name: string;
   comment: string | null;
   row_count_estimate: number | null;
+  row_security_enabled: boolean;
+  row_security_forced: boolean;
+  has_policies: boolean;
 };
 
 type ColumnRow = {
@@ -56,11 +59,19 @@ export async function fetchTables(client: Client, schemas: string[]): Promise<Ra
     // analyzed", which we surface as null so downstream consumers
     // always see "non-negative count or unknown" instead of mixing the
     // sentinel into the numeric domain.
+    // `relrowsecurity` / `relforcerowsecurity` carry the table's row-level
+    // security status; the EXISTS probe reports whether any
+    // policy is defined *without reading the policy expressions* — those encode
+    // the authorization model and are deliberately never surfaced. RLS enabled
+    // with no policy is effectively default-deny for non-owner roles.
     `SELECT
        n.nspname AS schema,
        c.relname AS name,
        d.description AS comment,
-       CASE WHEN c.reltuples < 0 THEN NULL ELSE c.reltuples::float8 END AS row_count_estimate
+       CASE WHEN c.reltuples < 0 THEN NULL ELSE c.reltuples::float8 END AS row_count_estimate,
+       c.relrowsecurity AS row_security_enabled,
+       c.relforcerowsecurity AS row_security_forced,
+       EXISTS (SELECT 1 FROM pg_policy p WHERE p.polrelid = c.oid) AS has_policies
      FROM pg_class c
      JOIN pg_namespace n ON n.oid = c.relnamespace
      LEFT JOIN pg_description d ON d.objoid = c.oid AND d.objsubid = 0
@@ -211,6 +222,11 @@ export async function fetchTables(client: Client, schemas: string[]): Promise<Ra
       foreignKeys: [],
       checks: [],
       indexes: indexByTable.get(key) ?? [],
+      rowSecurity: {
+        enabled: row.row_security_enabled,
+        forced: row.row_security_forced,
+        hasPolicies: row.has_policies,
+      },
       // pg returns float8 as a JS number; round to integer because
       // the contract types this as `number | null` and a fractional
       // estimate would be misleading at the MCP surface.

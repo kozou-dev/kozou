@@ -289,6 +289,7 @@ function buildTableContext(input: {
     aiDescription: joinAi(parsed.ai),
     policy: parsed.policy,
     ...(table.privileges ? { privileges: table.privileges } : {}),
+    ...(table.rowSecurity ? { rowSecurity: table.rowSecurity } : {}),
     primaryKey: table.primaryKey,
     displayField,
     columns,

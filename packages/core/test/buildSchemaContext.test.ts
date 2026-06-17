@@ -880,4 +880,45 @@ describe('buildSchemaContext privilege-aware (#99)', () => {
     expect(ctx.tables[0]!.privileges).toBeUndefined();
     expect(ctx.tables[0]!.columns[0]!.insertable).toBeUndefined();
   });
+
+  describe('row-level security signal', () => {
+    it('passes rowSecurity from the raw table through to the context', async () => {
+      const raw = makeRaw({
+        tables: [
+          makeTable('orders', {
+            rowSecurity: { enabled: true, forced: false, hasPolicies: true },
+          }),
+        ],
+      });
+      const ctx = await buildSchemaContext({ raw });
+      expect(ctx.tables[0]!.rowSecurity).toEqual({
+        enabled: true,
+        forced: false,
+        hasPolicies: true,
+      });
+    });
+
+    it('omits rowSecurity when the raw table lacks it (older context)', async () => {
+      const raw = makeRaw({ tables: [makeTable('orders')] });
+      const ctx = await buildSchemaContext({ raw });
+      expect(ctx.tables[0]!.rowSecurity).toBeUndefined();
+    });
+
+    it('never sets rowSecurity on a view (tables only)', async () => {
+      const raw = makeRaw({
+        views: [
+          {
+            schema: 'public',
+            name: 'vw_orders',
+            comment: null,
+            columns: [],
+            underlyingTables: [],
+            definition: 'SELECT 1',
+          },
+        ],
+      });
+      const ctx = await buildSchemaContext({ raw });
+      expect('rowSecurity' in ctx.views[0]!).toBe(false);
+    });
+  });
 });
