@@ -4,8 +4,8 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomBytes } from 'node:crypto';
 import ts from 'typescript';
-import { buildSchemaContext, type RawColumn, type RawIntrospection } from '@kozou/core';
-import { emitRowTypes, mapDataType } from '../src/index.js';
+import { buildSchemaContext, type ColumnContext, type RawColumn, type RawIntrospection } from '@kozou/core';
+import { emitRowTypes, mapColumnType, mapDataType } from '../src/index.js';
 
 function col(name: string, dataType: string, overrides: Partial<RawColumn> = {}): RawColumn {
   return {
@@ -240,6 +240,28 @@ describe('mapDataType', () => {
     expect(mapDataType('('.repeat(50_000))).toBe('unknown');
     expect(mapDataType('text)')).toBe('string'); // stray ")" at depth 0
     expect(mapDataType('text((')).toBe('string'); // unmatched "("
+  });
+});
+
+describe('mapColumnType', () => {
+  // Only the two fields mapColumnType reads are relevant; the rest of
+  // ColumnContext is irrelevant to the mapping, so a cast keeps the cases terse.
+  const col = (enumValues: string[] | null, dataType: string): ColumnContext =>
+    ({ enumValues, dataType }) as ColumnContext;
+
+  it('renders an enum column as a string-literal union', () => {
+    expect(mapColumnType(col(['draft', 'live'], 'text'))).toBe("'draft' | 'live'");
+  });
+
+  it('wraps an array-of-enum column in parens with the [] suffix (#180)', () => {
+    // Latent today — introspect does not populate enumValues for an array
+    // column — but the branch must compose array-awareness so the [] is never
+    // silently dropped if array-of-enum resolution is added later.
+    expect(mapColumnType(col(['draft', 'live'], 'text[]'))).toBe("('draft' | 'live')[]");
+  });
+
+  it('falls back to the dataType mapping when there are no enum values', () => {
+    expect(mapColumnType(col(null, 'integer[]'))).toBe('number[]');
   });
 });
 

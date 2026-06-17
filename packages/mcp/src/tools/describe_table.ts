@@ -1,4 +1,5 @@
 import type { SchemaContext } from '@kozou/core';
+import { McpToolError } from '../errors.js';
 import {
   describeTableInputSchema,
   type DescribeTableInput,
@@ -10,7 +11,7 @@ export function describeTable(input: DescribeTableInput, ctx: SchemaContext): De
   const parsed = describeTableInputSchema.parse(input);
   const table = ctx.tables.find((t) => t.qualifiedName === parsed.qualifiedName);
   if (!table) {
-    throw new Error(`Table not found: ${parsed.qualifiedName}`);
+    throw new McpToolError(`Table not found: ${parsed.qualifiedName}`);
   }
 
   // Annotate every FK column with its referenced column. For a composite FK

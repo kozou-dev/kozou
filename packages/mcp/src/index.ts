@@ -6,6 +6,7 @@ export { createMcpServer } from './server.js';
 export { SchemaCache, type SchemaCacheOptions } from './schemaCache.js';
 export type { McpExecution } from './execution.js';
 export { successResult, errorResult, type McpToolResult } from './result.js';
+export { McpToolError } from './errors.js';
 export { callTool } from './tools/call.js';
 export { startStdioServer, type StartStdioServerOptions } from './startStdioServer.js';
 export {

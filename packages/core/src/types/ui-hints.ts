@@ -49,7 +49,13 @@ const viewHintsSchema = z.object({
   columns: z.record(z.string(), columnHintsSchema).optional(),
 });
 
-/** Top-level zod schema for UIHints YAML. Used by loadUIHints. */
+/** Top-level zod schema for UIHints YAML. Used by loadUIHints.
+ *
+ *  Keys are relation names. A bare name (`users`) matches that relation in any
+ *  schema and is the common single-schema form; a schema-qualified key
+ *  (`audit.users`) is preferred during lookup, so two same-named relations in
+ *  different schemas can each carry their own hints without colliding (see
+ *  `lookupHints` in buildSchemaContext). */
 export const uiHintsSchema = z.object({
   tables: z.record(z.string(), tableHintsSchema).optional(),
   views: z.record(z.string(), viewHintsSchema).optional(),
