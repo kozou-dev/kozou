@@ -88,8 +88,8 @@ Advisory only: enforcement stays in PostgreSQL (GRANTs + your RLS). See
 Use the runtime image directly:
 
 ```bash
-docker pull ghcr.io/kozou-dev/kozou:v1.9.1
-docker run --rm ghcr.io/kozou-dev/kozou:v1.9.1 mcp --help
+docker pull ghcr.io/kozou-dev/kozou:v1.10.0
+docker run --rm ghcr.io/kozou-dev/kozou:v1.10.0 mcp --help
 ```
 
 Or install the packages for library / embedded use:
@@ -124,7 +124,7 @@ via JWKS, or a minimal self-hosted issuer. See
 
 ## Requirements
 
-Runtime requirements for v1.9.1:
+Runtime requirements for v1.10.0:
 
 - **PostgreSQL 16 or later** — the canonical source of truth
 - **Docker 24 or later** (optional) — recommended for the `docker compose up` stack, which brings up PostgreSQL and a `kozou` service running `kozou dev` (the bundled Admin UI + MCP HTTP server, plus Kozou's in-house REST backend served in-process) from `ghcr.io/kozou-dev/kozou` (a multi-arch image, native on linux/amd64 and linux/arm64). The default stack needs **no separate REST container**; to opt out and use an external PostgREST instead, set `adapter.type: postgrest` and add the (commented) service in the scaffold's `docker-compose.yml`.
@@ -154,7 +154,8 @@ Contributors additionally need **pnpm 9 or later**. See [CONTRIBUTING.md](CONTRI
 - v1.8.1 (shipped): a security-hardening patch. The unauthenticated MCP HTTP server gains **DNS-rebinding protection** — it validates the request `Host` / `Origin` against an allowlist before handling it, so a page in the operator's browser cannot drive it by rebinding a hostname to loopback — and a **request-body size limit** (both the MCP server and `@kozou/api` reject an over-large body with `413`, and a non-JSON body with `415`, instead of buffering it unbounded). Read requests (`GET`) now run in a `READ ONLY` transaction, so a read cannot commit a write regardless of the role's grants. The bundled dev stack is **loopback by default**: the Admin UI and MCP HTTP server bind `127.0.0.1` (set `KOZOU_UI_HOST` / `KOZOU_MCP_HTTP_HOST` to expose them inside a container), and the scaffold and quickstart `docker-compose` files publish every port (Admin UI, MCP, database) on `127.0.0.1` only. See the repository's security advisory.
 - v1.9.0 (shipped): field-report fixes for the introspection and REST surfaces. Native PostgreSQL `ENUM` columns are now recognized — a column typed as a native enum gets the `enum-select` widget, a string-literal union in the generated client, and an `enum` in OpenAPI / the MCP context, matching how the same type already resolved as a function argument. Declarative **partitioned parent tables** and **materialized views** are now introspected (the parent is surfaced and reads like a normal table while its leaf partitions stay hidden; a materialized view appears as a read-only view) — previously both were silently absent from every surface. A list query with an explicit `sort` on a non-unique column now appends the primary key as a tiebreaker, so `LIMIT`/`OFFSET` pagination is stable across pages. And `kozou mcp --http` honours `server.mcp.http.{port,host}` from `kozou.config.yaml`, matching `kozou dev`.
 - v1.9.1 (shipped): field-report fixes for the reference Admin UI and the external REST adapter. A create / update / delete that the database rejects (a unique / foreign-key / check violation, or a privilege / row-level-security denial) now re-renders the form with the user's input and a readable message instead of a generic 500 that discarded it. And free-text search under the external REST (PostgREST) opt-out now quotes the term, so a value containing reserved characters (`,` `(` `)` `.`) is matched literally instead of corrupting the query. Also bumps a transitive dependency for a published security advisory.
-- Beyond v1.8: React UI exploration — optional write-path parity (a second UI driving create / edit / delete across both adapters)
+- v1.10.0 (shipped): list-endpoint scaling and developer-experience improvements, all additive. **`@kozou/api` list pagination** gains two opt-in controls: a `?count=exact|estimated|none` mode (the default `exact` count is unchanged; `estimated` uses the planner's O(1) row estimate; `none` skips the count and returns `total: null`), and **keyset (cursor) pagination** via `?after=` / `?before=` that pages by the list's effective order (sort + primary-key tiebreaker) in O(page) instead of walking a deep `OFFSET`. Cursors are opaque, round-trip every column type losslessly, and order correctly across composite-key, mixed-direction, and nullable sorts; offset paging is unchanged. The **MCP `list_tables` / `list_views`** tools now return `sourceSchemas` and `outOfScope`, so an agent can tell a schema outside the introspection scope from one that is simply empty (the no-op `includeSystem` input is retired from the tool). The reference Admin UI's **list table is more accessible**: the search field has a real accessible name and sortable column headers expose `aria-sort`. Plus minor cleanups — UI Hints keyed by schema-qualified name so same-named relations in different schemas no longer collide, array-aware codegen enum types, and an MCP tool-dispatch error that no longer echoes raw internal text.
+- Beyond v1.10: React UI exploration — optional write-path parity (a second UI driving create / edit / delete across both adapters)
 
 ## Name
 
