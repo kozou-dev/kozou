@@ -20,10 +20,13 @@ describe('list_tables schemas', () => {
   it('input: empty object pass', () => {
     expect(() => listTablesInputSchema.parse({})).not.toThrow();
   });
-  it('input: schema + includeSystem pass', () => {
-    expect(() =>
-      listTablesInputSchema.parse({ schema: 'public', includeSystem: false }),
-    ).not.toThrow();
+  it('input: the deprecated includeSystem key is still accepted (source-compat)', () => {
+    // includeSystem is a no-op, dropped from the MCP tool definition but kept
+    // in this exported input type so existing TypeScript callers do not break;
+    // the handler ignores it.
+    const parsed = listTablesInputSchema.parse({ schema: 'public', includeSystem: false });
+    expect(parsed.schema).toBe('public');
+    expect(parsed.includeSystem).toBe(false);
   });
   it('input: invalid type throw', () => {
     expect(() => listTablesInputSchema.parse({ schema: 123 })).toThrow();
@@ -31,6 +34,8 @@ describe('list_tables schemas', () => {
   it('output: valid pass', () => {
     expect(() =>
       listTablesOutputSchema.parse({
+        sourceSchemas: ['public'],
+        outOfScope: false,
         tables: [
           {
             qualifiedName: 'public.a',
@@ -42,9 +47,22 @@ describe('list_tables schemas', () => {
       }),
     ).not.toThrow();
   });
-  it('output: missing field throw', () => {
+  it('output: missing sourceSchemas/outOfScope throw', () => {
     expect(() =>
-      listTablesOutputSchema.parse({ tables: [{ qualifiedName: 'a' }] }),
+      listTablesOutputSchema.parse({
+        tables: [
+          { qualifiedName: 'public.a', label: 'A', description: null, rowCountEstimate: null },
+        ],
+      }),
+    ).toThrow();
+  });
+  it('output: missing table field throw', () => {
+    expect(() =>
+      listTablesOutputSchema.parse({
+        sourceSchemas: ['public'],
+        outOfScope: false,
+        tables: [{ qualifiedName: 'a' }],
+      }),
     ).toThrow();
   });
 });
@@ -137,6 +155,8 @@ describe('list_views schemas', () => {
   it('output: valid pass', () => {
     expect(() =>
       listViewsOutputSchema.parse({
+        sourceSchemas: ['public'],
+        outOfScope: false,
         views: [{ qualifiedName: 'public.v', label: 'V', purpose: 'p' }],
       }),
     ).not.toThrow();
@@ -144,9 +164,18 @@ describe('list_views schemas', () => {
   it('output: null purpose pass', () => {
     expect(() =>
       listViewsOutputSchema.parse({
+        sourceSchemas: ['public'],
+        outOfScope: false,
         views: [{ qualifiedName: 'public.v', label: 'V', purpose: null }],
       }),
     ).not.toThrow();
+  });
+  it('output: missing sourceSchemas/outOfScope throw', () => {
+    expect(() =>
+      listViewsOutputSchema.parse({
+        views: [{ qualifiedName: 'public.v', label: 'V', purpose: null }],
+      }),
+    ).toThrow();
   });
 });
 

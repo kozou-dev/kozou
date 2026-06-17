@@ -33,12 +33,16 @@ const SERVER_VERSION = pkg.version;
 const TOOL_DEFINITIONS = [
   {
     name: 'list_tables',
-    description: 'List tables with their labels and descriptions',
+    description:
+      'List tables with their labels and descriptions. Also returns ' +
+      '`sourceSchemas` (the introspected schemas) and `outOfScope` (true when ' +
+      'the requested schema was not introspected), so an empty `tables` for an ' +
+      'out-of-scope schema is distinguishable from an in-scope empty one. The ' +
+      'introspected set is configured when the schema is built, not per call.',
     inputSchema: {
       type: 'object',
       properties: {
         schema: { type: 'string', description: 'Target schema (default: public)' },
-        includeSystem: { type: 'boolean', description: 'Include system schemas (currently ignored)' },
       },
     },
   },
@@ -53,7 +57,11 @@ const TOOL_DEFINITIONS = [
   },
   {
     name: 'list_views',
-    description: 'List views with their labels and purposes',
+    description:
+      'List views with their labels and purposes. Also returns `sourceSchemas` ' +
+      '(the introspected schemas) and `outOfScope` (true when the requested ' +
+      'schema was not introspected), so an empty `views` for an out-of-scope ' +
+      'schema is distinguishable from an in-scope empty one.',
     inputSchema: {
       type: 'object',
       properties: { schema: { type: 'string', description: 'Target schema (default: public)' } },
