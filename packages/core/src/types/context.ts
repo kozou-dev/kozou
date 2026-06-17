@@ -48,6 +48,25 @@ export type RelationPrivileges = {
   delete: boolean;
 };
 
+/** Row-level security status of a table. A role-independent
+ *  structural fact, surfaced unconditionally (unlike the opt-in per-role
+ *  `privileges`): it tells an AI agent that the rows it sees may be filtered and
+ *  its writes may be rejected by the connecting role's policies, so it should not
+ *  assume a result is complete. The policy *expressions* are deliberately never
+ *  read or surfaced (security-sensitive). Advisory only: PostgreSQL enforces RLS
+ *  whether or not the agent knows about it. Surfaced on tables only — a view
+ *  carries no `relrowsecurity`, and whether it masks its underlying tables' RLS
+ *  depends on `security_invoker`, so claiming a view is unfiltered would mislead. */
+export type RowSecurity = {
+  /** RLS is enabled on the table (`pg_class.relrowsecurity`). */
+  enabled: boolean;
+  /** RLS also applies to the table owner (`pg_class.relforcerowsecurity`). */
+  forced: boolean;
+  /** At least one policy exists (existence only; expressions are never read).
+   *  `enabled` true with `hasPolicies` false ⇒ default-deny for non-owners. */
+  hasPolicies: boolean;
+};
+
 export type TableContext = {
   schema: string;
   name: string;
@@ -70,6 +89,10 @@ export type TableContext = {
    *  Surfaced read-only to AI agents / `kozou docs`; enforcement stays in
    *  PostgreSQL. */
   privileges?: RelationPrivileges;
+  /** Row-level security status. Surfaced unconditionally
+   *  (not gated by the privilege role). `undefined` only on a context built
+   *  before this field existed. Tables only — never set on a view. */
+  rowSecurity?: RowSecurity;
   primaryKey: string[];
   /** From UI Hints; otherwise a heuristic */
   displayField: string | null;

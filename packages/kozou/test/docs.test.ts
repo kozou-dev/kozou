@@ -258,6 +258,32 @@ describe('emitMarkdown', () => {
     expect(md).toContain('never expose in aggregate reports');
     expect(md).not.toContain('**Security**');
   });
+
+  // Row-level security signal: a per-table line, surfaced
+  // only when RLS is enabled, and only on tables. The policy expressions are
+  // never read or shown.
+  it('renders a Row-level security line when RLS is enabled (with policies)', async () => {
+    const raw = makeRaw();
+    raw.tables[0]!.rowSecurity = { enabled: true, forced: false, hasPolicies: true };
+    const md = emitMarkdown(await buildSchemaContext({ raw }));
+    expect(md).toContain('**Row-level security**');
+    expect(md).toContain('filtered by policy');
+  });
+
+  it('notes default-deny when RLS is enabled with no policy, and forced for the owner', async () => {
+    const raw = makeRaw();
+    raw.tables[0]!.rowSecurity = { enabled: true, forced: true, hasPolicies: false };
+    const md = emitMarkdown(await buildSchemaContext({ raw }));
+    expect(md).toContain('default-deny');
+    expect(md).toContain('table owner');
+  });
+
+  it('omits the Row-level security line when RLS is disabled', async () => {
+    const raw = makeRaw();
+    raw.tables[0]!.rowSecurity = { enabled: false, forced: false, hasPolicies: false };
+    const md = emitMarkdown(await buildSchemaContext({ raw }));
+    expect(md).not.toContain('**Row-level security**');
+  });
 });
 
 describe('docsCommand', () => {

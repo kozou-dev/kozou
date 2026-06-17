@@ -14,6 +14,7 @@ export type {
   RawFunctionArg,
   RawFunctionReturn,
   RawFunctionSearchPathElement,
+  RawRowSecurity,
   FkAction,
 } from './types/raw.js';
 
@@ -24,6 +25,7 @@ export type {
   WidgetType,
   RelationContext,
   RelationPrivileges,
+  RowSecurity,
   ViewContext,
   EnumContext,
   ConceptContext,

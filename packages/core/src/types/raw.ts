@@ -40,6 +40,26 @@ export type RawColumnPrivileges = {
   update: boolean;
 };
 
+/** Whether a table is protected by row-level security (RLS), from `pg_class`
+ *  and the existence of any `pg_policy` row. This is a role-independent
+ *  structural fact (like a primary key), read unconditionally — not the opt-in,
+ *  per-role privilege mode. It tells an AI agent that results may be filtered
+ *  and writes may be rejected for the connecting role; the policy *expressions*
+ *  (USING / WITH CHECK) are deliberately NOT read or surfaced (they encode the
+ *  authorization model and are treated as security-sensitive). Advisory only:
+ *  PostgreSQL enforces RLS regardless of whether the agent knows about it. */
+export type RawRowSecurity = {
+  /** `pg_class.relrowsecurity`: RLS is enabled on the table. */
+  enabled: boolean;
+  /** `pg_class.relforcerowsecurity`: RLS also applies to the table owner (and
+   *  roles that would otherwise bypass it without BYPASSRLS). */
+  forced: boolean;
+  /** Whether at least one policy exists for the table (existence only — the
+   *  policy expressions are never read). When `enabled` is true but this is
+   *  false, the table is effectively default-deny for non-owner roles. */
+  hasPolicies: boolean;
+};
+
 export type RawTable = {
   schema: string;
   name: string;
@@ -53,6 +73,10 @@ export type RawTable = {
   /** Privileges of the serving role, present only in privilege-aware mode
    *  (issue #99). `undefined` = not evaluated. */
   privileges?: RawTablePrivileges;
+  /** Row-level security status of the table (always read in any mode).
+   *  `undefined` only on a raw record built before this field existed, so
+   *  consumers treat absence as "unknown" rather than "no RLS". */
+  rowSecurity?: RawRowSecurity;
   /** Planner-maintained row count estimate (`pg_class.reltuples`).
    *  PostgreSQL stores -1 for "never analyzed"; that case maps to
    *  null here so consumers always see "a non-negative count, or
