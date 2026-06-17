@@ -15,6 +15,7 @@ import { badRequest } from './errors.js';
 import { quoteIdent, qualified } from './ident.js';
 import { buildEmbedSelectFragment, type EmbedNode } from './embed.js';
 import type { Resource } from './schema-lookup.js';
+import type { CursorOrderKey, DecodedCursor } from './cursor.js';
 
 export { quoteIdent };
 
@@ -69,6 +70,11 @@ export type ListQueryParams = {
   embed?: EmbedNode[];
   /** Count strategy for `total` (default `exact`). */
   count?: CountMode;
+  /** Keyset cursor: return the page strictly after this boundary, in the
+   *  effective order (issue #185). Mutually exclusive with `before`. */
+  after?: DecodedCursor;
+  /** Keyset cursor: return the page strictly before this boundary. */
+  before?: DecodedCursor;
 };
 
 const SCALAR_OP_SQL: Record<ScalarFilterOperator, string> = {
@@ -648,6 +654,22 @@ export type BuiltListQuery = {
   /** Effective (clamped) pagination echoed back in the response. */
   page: number;
   pageSize: number;
+  /** The effective forward ORDER BY (sort + primary-key tiebreakers), used to
+   *  encode the response cursors from the boundary rows (issue #185). Optional
+   *  for back-compat: `buildListQuery` always sets it; readers normalize with
+   *  `orderKey ?? []`. The page query over-fetches one row (LIMIT pageSize + 1)
+   *  so the handler can tell whether a further page exists; it trims to
+   *  `pageSize` before responding. */
+  orderKey?: CursorOrderKey[];
+  /** True when a `before` cursor was used: the rows come back in reversed
+   *  traversal order, so the handler reverses them to forward order. Optional
+   *  for back-compat; normalize with `reverseRows ?? false`. */
+  reverseRows?: boolean;
+  /** Private SELECT aliases (positionally aligned with `orderKey`) carrying each
+   *  ordering column's exact PostgreSQL text form, so the handler can encode a
+   *  lossless cursor and then strip them from the response rows (issue #185).
+   *  Empty when the resource has no primary key. Optional for back-compat. */
+  cursorKeyAliases?: string[];
 };
 
 export type BuiltGetQuery = {
@@ -744,40 +766,95 @@ export function buildListQuery(
     }
   }
 
-  const whereClause = whereParts.length > 0 ? ` WHERE ${whereParts.join(' AND ')}` : '';
+  // Snapshot the filter/search WHERE *before* any keyset boundary is added:
+  // `total` must be the full filtered count, independent of which page (cursor)
+  // is being fetched.
+  const countWhereClause = whereParts.length > 0 ? ` WHERE ${whereParts.join(' AND ')}` : '';
+  const countValues = [...whereValues];
 
-  // ORDER BY: an explicit sort, else the primary key. Either way the primary
-  // key is appended as a final tiebreaker so the order is total and paging is
-  // stable — a sort on a non-unique column otherwise leaves rows that tie free
-  // to come back in a different order between requests, which makes LIMIT/OFFSET
-  // skip or repeat them across page boundaries. Views (no PK) cannot get a
-  // tiebreaker and fall back to the requested sort (or no ordering).
-  const orderParts: string[] = [];
+  // Effective forward ORDER BY: the explicit sort columns, then every
+  // primary-key column not already named — the tiebreaker that makes the order
+  // total, so paging is stable and a keyset boundary is unambiguous. Views (no
+  // PK) get no tiebreaker and fall back to the requested sort (or no ordering).
   const sortedFields = new Set<string>();
+  const orderKey: CursorOrderKey[] = [];
   if (params.sort && params.sort.length > 0) {
     for (const s of params.sort) {
       if (!columnsByName.has(s.field)) {
         throw badRequest(`Unknown sort column "${s.field}" on resource "${resource.name}".`);
       }
-      orderParts.push(`${quoteIdent(s.field)} ${s.order === 'desc' ? 'DESC' : 'ASC'}`);
+      orderKey.push({ field: s.field, order: s.order === 'desc' ? 'desc' : 'asc' });
       sortedFields.add(s.field);
     }
   }
-  // Append every primary-key column not already named by the explicit sort
-  // (this also produces the default PK ordering when no sort was given).
   for (const pk of resource.primaryKey) {
-    if (!sortedFields.has(pk)) {
-      orderParts.push(`${quoteIdent(pk)} ASC`);
-    }
+    if (!sortedFields.has(pk)) orderKey.push({ field: pk, order: 'asc' });
   }
-  const orderClause = orderParts.length > 0 ? ` ORDER BY ${orderParts.join(', ')}` : '';
+
+  const pushValue = (value: unknown): string => {
+    whereValues.push(value);
+    return `$${whereValues.length}`;
+  };
+
+  // Keyset (cursor) pagination (issue #185): with an `after`/`before` cursor,
+  // page by a row-comparison against the effective order instead of OFFSET, so
+  // deep navigation is O(page) not O(offset). It requires a total order (a
+  // primary key); `before` walks the reversed order and the handler then
+  // re-reverses the rows. Offset paging is untouched when no cursor is given.
+  const cursor = params.after ?? params.before;
+  let reverseRows = false;
+  let traversal = orderKey;
+  if (cursor !== undefined) {
+    if (params.after !== undefined && params.before !== undefined) {
+      throw badRequest('Use only one of "after" or "before", not both.');
+    }
+    if (resource.primaryKey.length === 0) {
+      throw badRequest(
+        `Keyset pagination (after/before) needs a primary key; "${resource.name}" has none — use page/pageSize.`,
+      );
+    }
+    if (params.page !== undefined && params.page > 1) {
+      throw badRequest('Keyset pagination (after/before) cannot be combined with page.');
+    }
+    assertCursorMatchesOrder(cursor, orderKey, resource);
+    assertCursorValuesParsable(cursor, columnsByName, resource);
+    reverseRows = params.before !== undefined;
+    traversal = reverseRows ? flipOrder(orderKey) : orderKey;
+    const isNullable = (field: string): boolean => columnsByName.get(field)?.nullable ?? true;
+    whereParts.push(buildKeysetPredicate(traversal, cursor.values, pushValue, isNullable));
+  }
+
+  const whereClause = whereParts.length > 0 ? ` WHERE ${whereParts.join(' AND ')}` : '';
+  const orderClause = traversal.length > 0 ? ` ORDER BY ${renderOrderBy(traversal)}` : '';
 
   const page = clampPage(params.page);
   const pageSize = clampPageSize(params.pageSize);
-  const offset = (page - 1) * pageSize;
 
   const cols = selectColumns(resource);
   const table = qualified(resource);
+
+  // Cursor key columns (issue #185): a cursor must round-trip a boundary row's
+  // ordering values *exactly*. The JS values node-postgres parses are lossy for
+  // a cursor (a `timestamp`/`date` becomes a Date that JSON shifts to UTC; a
+  // non-finite float becomes null), so instead project each ordering column a
+  // second time as its PostgreSQL text form under a private alias. The handler
+  // reads these for the cursor and strips them from the response rows; binding
+  // the text back compares losslessly for every type. Only added when the
+  // resource has a primary key (the only case cursors are offered). The alias
+  // namespace is chosen to not collide with any selected column or embed key,
+  // so stripping it never drops real response data.
+  const occupiedNames = new Set<string>(resource.columns.map((c) => c.name));
+  for (const node of params.embed ?? []) occupiedNames.add(node.key);
+  const cursorKeyAliases =
+    resource.primaryKey.length > 0 ? makeCursorAliases(orderKey.length, occupiedNames) : [];
+  const cursorKeySql =
+    cursorKeyAliases.length > 0
+      ? ', ' +
+        orderKey
+          .map((k, i) => `${quoteIdent(k.field)}::text AS ${quoteIdent(cursorKeyAliases[i]!)}`)
+          .join(', ')
+      : '';
+
   // Embeds append correlated subqueries to the SELECT list only — they add no
   // bound parameters, so the $n numbering above is unaffected.
   const embedSql =
@@ -785,30 +862,196 @@ export function buildListQuery(
       ? buildEmbedSelectFragment(params.embed, table, { n: 0 })
       : '';
 
-  const dataValues = [...whereValues, pageSize, offset];
+  // Keyset mode pages by the WHERE predicate (LIMIT only); offset mode keeps
+  // LIMIT/OFFSET. Either way LIMIT/OFFSET params come after every WHERE value
+  // (filters + search + any keyset boundary values). The LIMIT over-fetches one
+  // row (pageSize + 1) so the handler can tell whether a further page exists in
+  // the traversal direction; it trims back to `pageSize` before responding.
   const limitParam = `$${whereValues.length + 1}`;
-  const offsetParam = `$${whereValues.length + 2}`;
-  const dataText = `SELECT ${cols}${embedSql} FROM ${table}${whereClause}${orderClause} LIMIT ${limitParam} OFFSET ${offsetParam}`;
+  const fetchLimit = pageSize + 1;
+  let dataValues: unknown[];
+  let dataText: string;
+  if (cursor !== undefined) {
+    dataValues = [...whereValues, fetchLimit];
+    dataText = `SELECT ${cols}${cursorKeySql}${embedSql} FROM ${table}${whereClause}${orderClause} LIMIT ${limitParam}`;
+  } else {
+    const offsetParam = `$${whereValues.length + 2}`;
+    dataValues = [...whereValues, fetchLimit, (page - 1) * pageSize];
+    dataText = `SELECT ${cols}${cursorKeySql}${embedSql} FROM ${table}${whereClause}${orderClause} LIMIT ${limitParam} OFFSET ${offsetParam}`;
+  }
 
-  // The count never sees ORDER BY / LIMIT / OFFSET / embeds — they do not
-  // change how many rows match the filters. Both forms are built (cheap string
-  // work); the handler runs only the one the requested mode needs. `estimated`
-  // asks the planner for an O(1) row estimate; `none` skips counting entirely.
-  const fromWhere = `FROM ${table}${whereClause}`;
-  const countText = `SELECT count(*) AS total ${fromWhere}`;
-  const estimateText = `EXPLAIN (FORMAT JSON) SELECT 1 ${fromWhere}`;
+  // The count never sees ORDER BY / LIMIT / OFFSET / embeds / keyset boundary —
+  // they do not change how many rows match the filters. Both forms are built
+  // (cheap string work); the handler runs only the one the requested mode
+  // needs. `estimated` asks the planner for an O(1) row estimate; `none` skips
+  // counting entirely.
+  const countFromWhere = `FROM ${table}${countWhereClause}`;
+  const countText = `SELECT count(*) AS total ${countFromWhere}`;
+  const estimateText = `EXPLAIN (FORMAT JSON) SELECT 1 ${countFromWhere}`;
   const countMode: CountMode = params.count ?? 'exact';
 
   return {
     dataText,
     dataValues,
     countText,
-    countValues: [...whereValues],
+    countValues,
     countMode,
     estimateText,
     page,
     pageSize,
+    orderKey,
+    reverseRows,
+    cursorKeyAliases,
   };
+}
+
+/** Render an ORDER BY column list (e.g. `"a" ASC, "b" DESC`). NULL placement is
+ *  PostgreSQL's default for each direction (ASC => NULLS LAST, DESC => NULLS
+ *  FIRST), which the keyset predicate's NULL handling mirrors. */
+function renderOrderBy(order: CursorOrderKey[]): string {
+  return order.map((k) => `${quoteIdent(k.field)} ${k.order === 'desc' ? 'DESC' : 'ASC'}`).join(', ');
+}
+
+/** The reversed traversal order used for a `before` cursor. */
+function flipOrder(order: CursorOrderKey[]): CursorOrderKey[] {
+  return order.map((k) => ({ field: k.field, order: k.order === 'asc' ? 'desc' : 'asc' }));
+}
+
+/** Private SELECT aliases for the text-cast cursor key columns, guaranteed not
+ *  to collide with any `occupied` name (selected columns + embed keys) so that
+ *  stripping them from the response never drops real data. The base prefix is
+ *  lengthened with `_` until none of the `count` aliases is occupied. */
+function makeCursorAliases(count: number, occupied: Set<string>): string[] {
+  let prefix = '__kozou_cursor';
+  const collides = (p: string): boolean => {
+    for (let i = 0; i < count; i++) if (occupied.has(`${p}_${i}`)) return true;
+    return false;
+  };
+  while (collides(prefix)) prefix = `${prefix}_`;
+  return Array.from({ length: count }, (_, i) => `${prefix}_${i}`);
+}
+
+/** A cursor is only valid for the exact order it was issued for; a changed
+ *  `sort` must not silently misinterpret the boundary values. */
+function assertCursorMatchesOrder(
+  cursor: DecodedCursor,
+  orderKey: CursorOrderKey[],
+  resource: Resource,
+): void {
+  const matches =
+    cursor.order.length === orderKey.length &&
+    cursor.order.every((k, i) => k.field === orderKey[i]!.field && k.order === orderKey[i]!.order);
+  if (!matches) {
+    throw badRequest(
+      `Pagination cursor does not match the current sort order on "${resource.name}".`,
+    );
+  }
+}
+
+/** Reject a (forged/tampered) cursor whose boundary value cannot parse as its
+ *  column's type *before* it reaches PostgreSQL — a 400, not a 500 — mirroring
+ *  the id / filter / write-body pre-flight. Only the pre-flightable scalar
+ *  families are checked (others fall through to PostgreSQL, as elsewhere); a
+ *  NULL boundary is always allowed (it is valid for a nullable column). The
+ *  order signature is already confirmed to match `columnsByName`'s columns. */
+function assertCursorValuesParsable(
+  cursor: DecodedCursor,
+  columnsByName: Map<string, ColumnContext>,
+  resource: Resource,
+): void {
+  cursor.order.forEach((key, i) => {
+    const value = cursor.values[i];
+    if (value === null) return;
+    const column = columnsByName.get(key.field);
+    if (column === undefined) return;
+    const type = preflightType(column);
+    const base = baseScalarType(type);
+    if (base === null || !isPreflightableScalar(base)) return;
+    if (!valueFitsType(base, type, String(value))) {
+      throw badRequest(
+        `Pagination cursor value "${String(value)}" is not valid for column "${key.field}" ` +
+          `(${column.dataType}) on resource "${resource.name}".`,
+      );
+    }
+  });
+}
+
+/** Build the keyset WHERE predicate: rows strictly after `values` in the given
+ *  traversal order. The lexicographic expansion is
+ *  `AFTER_1 OR (EQ_1 AND AFTER_2) OR (EQ_1 AND EQ_2 AND AFTER_3) OR ...`, with
+ *  NULL ordering following PostgreSQL defaults (ASC => NULLS LAST, DESC =>
+ *  NULLS FIRST) so it matches the ORDER BY exactly. Every boundary value is a
+ *  bound parameter via `pushValue`. */
+function buildKeysetPredicate(
+  order: CursorOrderKey[],
+  values: unknown[],
+  pushValue: (value: unknown) => string,
+  isNullable: (field: string) => boolean,
+): string {
+  const terms: string[] = [];
+  for (let i = 0; i < order.length; i++) {
+    // Skip a column that can yield no strictly-later rows (ASC + NULL boundary),
+    // checked without binding a value so the parameter order stays left-to-right
+    // ($1, $2, ... in textual order). Deeper columns still apply under the
+    // equality prefix.
+    if (afterIsEmpty(order[i]!, values[i], isNullable(order[i]!.field))) continue;
+    const ands: string[] = [];
+    for (let j = 0; j < i; j++) {
+      ands.push(eqPredicate(order[j]!.field, values[j], pushValue, isNullable(order[j]!.field)));
+    }
+    ands.push(afterPredicate(order[i]!, values[i], pushValue, isNullable(order[i]!.field)));
+    terms.push(ands.length === 1 ? ands[0]! : `(${ands.join(' AND ')})`);
+  }
+  // A single term is already atomic or self-parenthesized; only a multi-term OR
+  // needs wrapping so it binds correctly when ANDed with the other filters.
+  if (terms.length === 0) return 'false';
+  return terms.length === 1 ? terms[0]! : `(${terms.join(' OR ')})`;
+}
+
+/** Whether a column's strictly-after set is empty in its traversal direction:
+ *  only an ASC, nullable column with a NULL boundary (NULLs sort last, so
+ *  nothing follows). No value is bound — this is a pure decision. */
+function afterIsEmpty(key: CursorOrderKey, value: unknown, nullable: boolean): boolean {
+  return nullable && value === null && key.order === 'asc';
+}
+
+/** Equality on one ordering column for the lexicographic prefix. NULL-aware
+ *  only when the column is nullable (a NOT NULL column never has a NULL
+ *  boundary value, so the plain `=` is both correct and cleaner). */
+function eqPredicate(
+  field: string,
+  value: unknown,
+  pushValue: (v: unknown) => string,
+  nullable: boolean,
+): string {
+  const col = quoteIdent(field);
+  if (nullable && value === null) return `${col} IS NULL`;
+  return `${col} = ${pushValue(value)}`;
+}
+
+/** "Strictly after `value`" for one column in its traversal direction. For a
+ *  nullable column it honors PostgreSQL's default NULL placement (ASC => NULLS
+ *  LAST, DESC => NULLS FIRST). The empty case (ASC + NULL boundary) is handled
+ *  upstream by {@link afterIsEmpty}, so it is never reached here. A NOT NULL
+ *  column needs no NULL handling — a plain `>` / `<` is correct and cleaner. */
+function afterPredicate(
+  key: CursorOrderKey,
+  value: unknown,
+  pushValue: (v: unknown) => string,
+  nullable: boolean,
+): string {
+  const col = quoteIdent(key.field);
+  const asc = key.order === 'asc';
+  if (nullable && value === null) {
+    // DESC (NULLS FIRST): every non-NULL follows the leading NULL group.
+    // (ASC + NULL is empty and filtered out before this point.)
+    return `${col} IS NOT NULL`;
+  }
+  const p = pushValue(value);
+  if (!nullable) return `${col} ${asc ? '>' : '<'} ${p}`;
+  // ASC: a greater value, or a NULL (NULLs sort after non-NULLs). DESC: a
+  // smaller value (NULLs are the leading group, so never "after").
+  return asc ? `(${col} > ${p} OR ${col} IS NULL)` : `${col} < ${p}`;
 }
 
 /** Primary key columns for an item-by-id operation. A PK-less resource (a

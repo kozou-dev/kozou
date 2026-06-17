@@ -501,6 +501,21 @@ function listParameters(): JsonObject[] {
         'like `page`/`sort`/`search` — it shadows any column named `count` from ' +
         'the filter grammar.',
     ),
+    queryParam(
+      'after',
+      { type: 'string' },
+      'Keyset cursor: return the page strictly after this opaque cursor (take it ' +
+        'from a prior response\'s `nextCursor`). Pages in the current order in ' +
+        'O(page) rather than O(offset). Requires a primary key; cannot be ' +
+        'combined with `before` or with `page` > 1. The cursor is opaque — do ' +
+        'not construct or parse it.',
+    ),
+    queryParam(
+      'before',
+      { type: 'string' },
+      'Keyset cursor: return the page strictly before this opaque cursor (from a ' +
+        'prior response\'s `prevCursor`). Same constraints as `after`.',
+    ),
   ];
 }
 
@@ -591,8 +606,18 @@ function listResultSchema(rowRef: JsonObject): JsonObject {
       total: { type: ['integer', 'null'] },
       page: { type: 'integer' },
       pageSize: { type: 'integer' },
+      // Opaque keyset cursors (issue #185): pass back as `?after=` / `?before=`.
+      // null when there is no such page (or the resource has no primary key).
+      nextCursor: {
+        type: ['string', 'null'],
+        description: 'Opaque cursor for the next page; pass as `?after=`. Null when there is no further page or the resource has no primary key.',
+      },
+      prevCursor: {
+        type: ['string', 'null'],
+        description: 'Opaque cursor for the previous page; pass as `?before=`. Null on the first page.',
+      },
     },
-    required: ['rows', 'total', 'page', 'pageSize'],
+    required: ['rows', 'total', 'page', 'pageSize', 'nextCursor', 'prevCursor'],
   };
 }
 
