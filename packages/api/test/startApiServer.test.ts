@@ -58,6 +58,8 @@ describe('startApiServer over real HTTP', () => {
       total: 1,
       page: 1,
       pageSize: 5,
+      nextCursor: null,
+      prevCursor: null,
     });
 
     const missing = await fetch(`${base}/nope`);

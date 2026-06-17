@@ -43,7 +43,7 @@ describe('buildListQuery', () => {
     expect(q.dataText).toContain('ORDER BY "id" ASC');
     expect(q.dataText).toContain('LIMIT $1 OFFSET $2');
     expect(q.dataText).not.toContain('WHERE');
-    expect(q.dataValues).toEqual([DEFAULT_PAGE_SIZE, 0]);
+    expect(q.dataValues).toEqual([DEFAULT_PAGE_SIZE + 1, 0]);
     expect(q.countText).toBe('SELECT count(*) AS total FROM "public"."authors"');
     expect(q.countValues).toEqual([]);
     expect(q.page).toBe(1);
@@ -76,13 +76,175 @@ describe('buildListQuery', () => {
     );
   });
 
+  // ---- Keyset (cursor) pagination (#185) ----
+  const cursorFor = (
+    order: { field: string; order: 'asc' | 'desc' }[],
+    values: unknown[],
+  ) => ({ order, values });
+
+  const ranked = tableResource('ranked', [
+    col('id', 'uuid', { isPrimaryKey: true, nullable: false }),
+    col('score', 'number', { nullable: true, dataType: 'integer' }),
+  ]);
+  const orderLines = tableResource(
+    'order_lines',
+    [
+      col('order_id', 'number', { isPrimaryKey: true, nullable: false, dataType: 'integer' }),
+      col('line_no', 'number', { isPrimaryKey: true, nullable: false, dataType: 'integer' }),
+      col('product', 'text'),
+    ],
+    ['order_id', 'line_no'],
+  );
+
+  it('after: keyset predicate on a single non-null PK, LIMIT only, no OFFSET (#185)', () => {
+    const q = buildListQuery(authors, { after: cursorFor([{ field: 'id', order: 'asc' }], [SAMPLE_UUID]) });
+    expect(q.dataText).toContain('WHERE "id" > $1');
+    expect(q.dataText).toContain('ORDER BY "id" ASC');
+    expect(q.dataText).toContain('LIMIT $2');
+    expect(q.dataText).not.toContain('OFFSET');
+    expect(q.dataValues).toEqual([SAMPLE_UUID, DEFAULT_PAGE_SIZE + 1]);
+    expect(q.reverseRows).toBe(false);
+    expect(q.orderKey).toEqual([{ field: 'id', order: 'asc' }]);
+    // total is still the full filtered count (the keyset boundary is excluded).
+    expect(q.countText).toBe('SELECT count(*) AS total FROM "public"."authors"');
+    expect(q.countValues).toEqual([]);
+  });
+
+  it('before: walks the reversed order and flags reverseRows (#185)', () => {
+    const q = buildListQuery(authors, { before: cursorFor([{ field: 'id', order: 'asc' }], [SAMPLE_UUID]) });
+    expect(q.dataText).toContain('WHERE "id" < $1');
+    expect(q.dataText).toContain('ORDER BY "id" DESC');
+    expect(q.dataText).not.toContain('OFFSET');
+    expect(q.reverseRows).toBe(true);
+    // orderKey stays the forward order (used to encode the response cursors).
+    expect(q.orderKey).toEqual([{ field: 'id', order: 'asc' }]);
+  });
+
+  it('after: composite PK expands lexicographically (#185)', () => {
+    const q = buildListQuery(orderLines, {
+      after: cursorFor(
+        [
+          { field: 'order_id', order: 'asc' },
+          { field: 'line_no', order: 'asc' },
+        ],
+        [5, 3],
+      ),
+    });
+    expect(q.dataText).toContain(
+      'WHERE ("order_id" > $1 OR ("order_id" = $2 AND "line_no" > $3))',
+    );
+    expect(q.dataValues).toEqual([5, 5, 3, DEFAULT_PAGE_SIZE + 1]);
+  });
+
+  it('mixed asc/desc with a nullable sort column, non-null boundary (#185)', () => {
+    const q = buildListQuery(ranked, {
+      sort: [{ field: 'score', order: 'desc' }],
+      after: cursorFor(
+        [
+          { field: 'score', order: 'desc' },
+          { field: 'id', order: 'asc' },
+        ],
+        [50, SAMPLE_UUID],
+      ),
+    });
+    expect(q.dataText).toContain('WHERE ("score" < $1 OR ("score" = $2 AND "id" > $3))');
+    expect(q.dataText).toContain('ORDER BY "score" DESC, "id" ASC');
+    expect(q.dataValues).toEqual([50, 50, SAMPLE_UUID, DEFAULT_PAGE_SIZE + 1]);
+  });
+
+  it('nullable DESC sort column with a NULL boundary honors NULLS FIRST (#185)', () => {
+    const q = buildListQuery(ranked, {
+      sort: [{ field: 'score', order: 'desc' }],
+      after: cursorFor(
+        [
+          { field: 'score', order: 'desc' },
+          { field: 'id', order: 'asc' },
+        ],
+        [null, SAMPLE_UUID],
+      ),
+    });
+    // DESC + NULL boundary: every non-NULL follows the leading NULL group; then
+    // within the NULL group, order by id.
+    expect(q.dataText).toContain('WHERE ("score" IS NOT NULL OR ("score" IS NULL AND "id" > $1))');
+    expect(q.dataValues).toEqual([SAMPLE_UUID, DEFAULT_PAGE_SIZE + 1]);
+  });
+
+  it('nullable ASC sort column with a NULL boundary drops the dead term (#185)', () => {
+    const q = buildListQuery(ranked, {
+      sort: [{ field: 'score', order: 'asc' }],
+      after: cursorFor(
+        [
+          { field: 'score', order: 'asc' },
+          { field: 'id', order: 'asc' },
+        ],
+        [null, SAMPLE_UUID],
+      ),
+    });
+    // ASC + NULL boundary: nothing follows a NULL (NULLS LAST), so the leading
+    // term is dropped; remaining rows are the same NULL group ordered by id.
+    expect(q.dataText).toContain('WHERE ("score" IS NULL AND "id" > $1)');
+    expect(q.dataValues).toEqual([SAMPLE_UUID, DEFAULT_PAGE_SIZE + 1]);
+  });
+
+  it('rejects after + before together (400) (#185)', () => {
+    expect(() =>
+      buildListQuery(authors, {
+        after: cursorFor([{ field: 'id', order: 'asc' }], ['a']),
+        before: cursorFor([{ field: 'id', order: 'asc' }], ['b']),
+      }),
+    ).toThrow(/only one of "after" or "before"/);
+  });
+
+  it('rejects a cursor on a primary-key-less resource (400) (#185)', () => {
+    const v = viewResource('vw_active', [col('id', 'uuid'), col('label', 'text')]);
+    expect(() =>
+      buildListQuery(v, { after: cursorFor([{ field: 'id', order: 'asc' }], ['a']) }),
+    ).toThrow(/needs a primary key/);
+  });
+
+  it('rejects a cursor combined with page > 1 (400) (#185)', () => {
+    expect(() =>
+      buildListQuery(authors, { page: 2, after: cursorFor([{ field: 'id', order: 'asc' }], ['a']) }),
+    ).toThrow(/cannot be combined with page/);
+  });
+
+  it('rejects a cursor whose order does not match the current sort (400) (#185)', () => {
+    expect(() =>
+      buildListQuery(authors, { after: cursorFor([{ field: 'id', order: 'desc' }], ['a']) }),
+    ).toThrow(/does not match the current sort/);
+  });
+
+  it('rejects a cursor whose boundary value is invalid for the column type (400) (#185)', () => {
+    // Shape-valid in the cursor but not a parseable uuid for the PK — pre-flighted
+    // to a 400 instead of reaching PostgreSQL as a 500 (a forged/tampered cursor).
+    expect(() =>
+      buildListQuery(authors, {
+        after: cursorFor([{ field: 'id', order: 'asc' }], ['not-a-uuid']),
+      }),
+    ).toThrow(/is not valid for column "id"/);
+  });
+
+  it('cursor key aliases never collide with a real column of the same name (#185)', () => {
+    // A (pathological) column literally named like the private cursor alias: the
+    // alias namespace is lengthened so the real column is still selected and is
+    // not dropped by the handler's alias stripping.
+    const weird = tableResource(
+      '__cursors',
+      [col('__kozou_cursor_0', 'number', { isPrimaryKey: true, nullable: false, dataType: 'integer' })],
+      ['__kozou_cursor_0'],
+    );
+    const q = buildListQuery(weird, {});
+    expect(q.cursorKeyAliases).toEqual(['__kozou_cursor__0']);
+    expect(q.dataText).toContain('"__kozou_cursor_0"::text AS "__kozou_cursor__0"');
+  });
+
   it('applies column-equality filters as bound parameters', () => {
     const q = buildListQuery(authors, {
       filters: [{ column: 'display_name', op: 'eq', value: 'Ada' }],
     });
     expect(q.dataText).toContain('WHERE "display_name" = $1');
     expect(q.dataText).toContain('LIMIT $2 OFFSET $3');
-    expect(q.dataValues).toEqual(['Ada', DEFAULT_PAGE_SIZE, 0]);
+    expect(q.dataValues).toEqual(['Ada', DEFAULT_PAGE_SIZE + 1, 0]);
     expect(q.countText).toContain('WHERE "display_name" = $1');
     expect(q.countValues).toEqual(['Ada']);
   });
@@ -98,7 +260,7 @@ describe('buildListQuery', () => {
     for (const { op, sql } of cases) {
       const q = buildListQuery(authors, { filters: [{ column: 'rank', op, value: '5' }] });
       expect(q.dataText).toContain(`WHERE "rank" ${sql} $1`);
-      expect(q.dataValues).toEqual(['5', DEFAULT_PAGE_SIZE, 0]);
+      expect(q.dataValues).toEqual(['5', DEFAULT_PAGE_SIZE + 1, 0]);
       expect(q.countValues).toEqual(['5']);
     }
   });
@@ -123,7 +285,7 @@ describe('buildListQuery', () => {
     });
     expect(q.dataText).toContain('WHERE "display_name" IN ($1, $2)');
     expect(q.dataText).toContain('LIMIT $3 OFFSET $4');
-    expect(q.dataValues).toEqual(['Ada', 'Grace', DEFAULT_PAGE_SIZE, 0]);
+    expect(q.dataValues).toEqual(['Ada', 'Grace', DEFAULT_PAGE_SIZE + 1, 0]);
     expect(q.countValues).toEqual(['Ada', 'Grace']);
   });
 
@@ -138,7 +300,7 @@ describe('buildListQuery', () => {
       filters: [{ column: 'rank', op: 'is', keyword: 'null' }],
     });
     expect(nul.dataText).toContain('WHERE "rank" IS NULL');
-    expect(nul.dataValues).toEqual([DEFAULT_PAGE_SIZE, 0]); // no filter value bound
+    expect(nul.dataValues).toEqual([DEFAULT_PAGE_SIZE + 1, 0]); // no filter value bound
 
     const notnull = buildListQuery(authors, {
       filters: [{ column: 'rank', op: 'is', keyword: 'notnull' }],
@@ -493,13 +655,13 @@ describe('buildListQuery', () => {
       ],
     });
     expect(q.dataText).toContain('WHERE "rank" >= $1 AND "rank" <= $2');
-    expect(q.dataValues).toEqual(['10', '20', DEFAULT_PAGE_SIZE, 0]);
+    expect(q.dataValues).toEqual(['10', '20', DEFAULT_PAGE_SIZE + 1, 0]);
   });
 
   it('searches across text/textarea columns only, reusing one placeholder', () => {
     const q = buildListQuery(authors, { search: 'lov' });
     expect(q.dataText).toContain('("display_name" ILIKE $1 OR "bio" ILIKE $1)');
-    expect(q.dataValues).toEqual(['%lov%', DEFAULT_PAGE_SIZE, 0]);
+    expect(q.dataValues).toEqual(['%lov%', DEFAULT_PAGE_SIZE + 1, 0]);
   });
 
   it('skips search when the resource has no text-like columns', () => {
@@ -518,7 +680,7 @@ describe('buildListQuery', () => {
       search: 'lov',
     });
     expect(q.dataText).toContain('WHERE "rank" = $1 AND ("display_name" ILIKE $2 OR "bio" ILIKE $2)');
-    expect(q.dataValues).toEqual(['1', '%lov%', DEFAULT_PAGE_SIZE, 0]);
+    expect(q.dataValues).toEqual(['1', '%lov%', DEFAULT_PAGE_SIZE + 1, 0]);
   });
 
   it('honours explicit multi-column sort and appends the PK as a tiebreaker', () => {
@@ -575,7 +737,7 @@ describe('buildListQuery', () => {
     expect(buildListQuery(authors, { pageSize: 0 }).pageSize).toBe(DEFAULT_PAGE_SIZE);
     expect(buildListQuery(authors, { pageSize: 9999 }).pageSize).toBe(MAX_PAGE_SIZE);
     const q = buildListQuery(authors, { page: 3, pageSize: 10 });
-    expect(q.dataValues).toEqual([10, 20]); // offset = (3-1)*10
+    expect(q.dataValues).toEqual([11, 20]); // LIMIT pageSize+1; offset = (3-1)*10
   });
 
   it('rejects an unknown filter column with a 400', () => {
@@ -1080,7 +1242,7 @@ describe('embed in read queries', () => {
     });
     expect(q.dataText).toContain('WHERE "author_id" = $1 AND ("title" ILIKE $2)');
     expect(q.dataText).toContain('LIMIT $3 OFFSET $4');
-    expect(q.dataValues).toEqual([SAMPLE_UUID, '%foo%', DEFAULT_PAGE_SIZE, 0]);
+    expect(q.dataValues).toEqual([SAMPLE_UUID, '%foo%', DEFAULT_PAGE_SIZE + 1, 0]);
   });
 
   it('leaves the count query untouched when embedding', () => {

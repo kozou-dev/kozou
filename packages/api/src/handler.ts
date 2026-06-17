@@ -25,6 +25,7 @@ import {
   type CountMode,
 } from './query-builder.js';
 import { parseEmbedParam, resolveEmbedSpec } from './embed.js';
+import { decodeCursor, encodeCursor } from './cursor.js';
 import { buildRpcCall, shapeRpcResult, type FunctionLookup } from './rpc.js';
 
 // The minimal query interface (satisfied by both `pg.Pool` and `pg.Client`)
@@ -67,10 +68,20 @@ export type ApiHttpResult = {
 /** List query keys consumed as controls (not column filters). Shared with the
  *  OpenAPI generator so it never advertises a control key as a filterable
  *  column. */
-// `count` is a control key like `page`/`sort` (issue #177): it selects the
-// count strategy, not a column filter. As with the other control keys, this
-// shadows any column of the same name from the `<col>=<op>.<value>` grammar.
-export const RESERVED_PARAMS = new Set(['page', 'pageSize', 'sort', 'search', 'embed', 'count']);
+// Control keys consumed by the list grammar (not column filters): pagination,
+// ordering, search, embedding, the count strategy (#177), and the keyset
+// cursors (#185). As with all control keys, each shadows a same-named column
+// from the `<col>=<op>.<value>` filter grammar.
+export const RESERVED_PARAMS = new Set([
+  'page',
+  'pageSize',
+  'sort',
+  'search',
+  'embed',
+  'count',
+  'after',
+  'before',
+]);
 
 const COUNT_MODES = new Set<CountMode>(['exact', 'estimated', 'none']);
 
@@ -196,10 +207,83 @@ async function listResource(
             .then((r) => Number(r.rows[0]?.total ?? 0));
 
   const [dataResult, total] = await Promise.all([dataPromise, totalPromise]);
+  // The query over-fetched one row (LIMIT pageSize + 1) to tell whether a
+  // further page exists in the traversal direction; trim it off. A `before`
+  // cursor walks the reversed order, so restore forward order after trimming.
+  const reverseRows = built.reverseRows ?? false;
+  const hasMoreTraversal = dataResult.rows.length > built.pageSize;
+  const pageRows = hasMoreTraversal
+    ? dataResult.rows.slice(0, built.pageSize)
+    : dataResult.rows;
+  const ordered = reverseRows ? [...pageRows].reverse() : pageRows;
+  // Cursors are encoded from the private text-cast key aliases on the boundary
+  // rows (lossless round-trip); strip those aliases before responding.
+  const { nextCursor, prevCursor } = listCursors(ordered, built, params, resource, {
+    reverseRows,
+    hasMoreTraversal,
+  });
+  const aliases = built.cursorKeyAliases ?? [];
+  const rows = aliases.length > 0 ? ordered.map((row) => stripCursorKeys(row, aliases)) : ordered;
   return {
     status: 200,
-    body: { rows: dataResult.rows, total, page: built.page, pageSize: built.pageSize },
+    body: { rows, total, page: built.page, pageSize: built.pageSize, nextCursor, prevCursor },
   };
+}
+
+/** A shallow copy of `row` without the private cursor-key aliases. */
+function stripCursorKeys(
+  row: Record<string, unknown>,
+  aliases: string[],
+): Record<string, unknown> {
+  const copy: Record<string, unknown> = {};
+  for (const key of Object.keys(row)) {
+    if (!aliases.includes(key)) copy[key] = row[key];
+  }
+  return copy;
+}
+
+/** Compute the keyset cursors for a list page (issue #185). The over-fetched
+ *  sentinel row gives a precise "is there a further page in the traversal
+ *  direction" signal (`hasMoreTraversal`):
+ *   - a forward page (default / `after`) emits `nextCursor` only when more rows
+ *     follow, and `prevCursor` when we navigated forward to get here;
+ *   - a `before` page always has a page forward (where we came from), so it
+ *     emits `nextCursor`, and `prevCursor` only when more rows precede it.
+ *  Both are null for a resource without a primary key (no total order ⇒ keyset
+ *  is not offered) or an empty page. */
+function listCursors(
+  rows: Record<string, unknown>[],
+  built: ReturnType<typeof buildListQuery>,
+  params: ListQueryParams,
+  resource: Resource,
+  page: { reverseRows: boolean; hasMoreTraversal: boolean },
+): { nextCursor: string | null; prevCursor: string | null } {
+  const orderKey = built.orderKey ?? [];
+  const aliases = built.cursorKeyAliases ?? [];
+  const boundary = [rows[0]!, rows[rows.length - 1]!];
+  if (
+    rows.length === 0 ||
+    resource.primaryKey.length === 0 ||
+    orderKey.length === 0 ||
+    aliases.length !== orderKey.length ||
+    // Fail closed: every cursor-key alias must be present on the boundary rows
+    // (the query always projects them); otherwise emit no cursor rather than a
+    // corrupt one.
+    !boundary.every((row) => aliases.every((a) => a in row))
+  ) {
+    return { nextCursor: null, prevCursor: null };
+  }
+  // Boundary values come from the text-cast key aliases (exact PG text), so the
+  // cursor round-trips losslessly for every column type.
+  const encodeAt = (row: Record<string, unknown>): string =>
+    encodeCursor(orderKey, aliases.map((a) => row[a]));
+  const first = encodeAt(rows[0]!);
+  const last = encodeAt(rows[rows.length - 1]!);
+  if (page.reverseRows) {
+    return { nextCursor: last, prevCursor: page.hasMoreTraversal ? first : null };
+  }
+  const hasPrev = params.after !== undefined || (params.page !== undefined && params.page > 1);
+  return { nextCursor: page.hasMoreTraversal ? last : null, prevCursor: hasPrev ? first : null };
 }
 
 /** Read the planner's estimated output-row count from an `EXPLAIN (FORMAT JSON)`
@@ -376,6 +460,13 @@ export function parseListParams(query: URLSearchParams): ListQueryParams {
 
   const count = query.get('count');
   if (count !== null) params.count = parseCountMode(count);
+
+  // Keyset cursors (issue #185). Decoded here (shape-validated); the query
+  // builder validates the cursor's order against the resource's effective order.
+  const after = query.get('after');
+  if (after !== null) params.after = decodeCursor(after);
+  const before = query.get('before');
+  if (before !== null) params.before = decodeCursor(before);
 
   const sort = parseSort(query.get('sort'));
   if (sort.length > 0) params.sort = sort;

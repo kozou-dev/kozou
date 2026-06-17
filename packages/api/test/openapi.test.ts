@@ -223,6 +223,15 @@ describe('buildOpenApiDocument', () => {
     expect(listPageSchema(list).properties?.total?.type).toEqual(['integer', 'null']);
   });
 
+  it('documents the keyset cursor params and the response cursors (#185)', () => {
+    const list = build().paths['/authors'].get;
+    expect(paramNames(list)).toContain('after');
+    expect(paramNames(list)).toContain('before');
+    const props = listPageSchema(list).properties!;
+    expect(props.nextCursor?.type).toEqual(['string', 'null']);
+    expect(props.prevCursor?.type).toEqual(['string', 'null']);
+  });
+
   it('advertises count exactly once even when a resource has a column named count (#177)', () => {
     const schema = schemaOf([
       {

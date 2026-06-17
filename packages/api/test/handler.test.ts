@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { handleApiRequest, parseListParams, type ApiHandlerDeps } from '../src/handler.js';
 import type { ResourceLookup, Resource, ReverseRelation } from '../src/schema-lookup.js';
 import { col, tableResource, viewResource, recordingDb, relation, type RowSet } from './helpers.js';
+import { encodeCursor } from '../src/cursor.js';
 
 function lookupOf(resources: Resource[]): ResourceLookup {
   const m = new Map<string, Resource>();
@@ -88,7 +89,14 @@ describe('handleApiRequest — routing', () => {
     );
     const r = await handleApiRequest(deps, reqOf('GET', '/authors', 'pageSize=10'));
     expect(r.status).toBe(200);
-    expect(r.body).toEqual({ rows: [{ id: 'a' }, { id: 'b' }], total: 2, page: 1, pageSize: 10 });
+    expect(r.body).toEqual({
+      rows: [{ id: 'a' }, { id: 'b' }],
+      total: 2,
+      page: 1,
+      pageSize: 10,
+      nextCursor: null,
+      prevCursor: null,
+    });
     expect(calls).toHaveLength(2);
   });
 
@@ -96,7 +104,14 @@ describe('handleApiRequest — routing', () => {
     const { deps, calls } = depsWith(() => ({ rows: [{ id: 'a' }], rowCount: 1 }));
     const r = await handleApiRequest(deps, reqOf('GET', '/authors', 'count=none&pageSize=10'));
     expect(r.status).toBe(200);
-    expect(r.body).toEqual({ rows: [{ id: 'a' }], total: null, page: 1, pageSize: 10 });
+    expect(r.body).toEqual({
+      rows: [{ id: 'a' }],
+      total: null,
+      page: 1,
+      pageSize: 10,
+      nextCursor: null,
+      prevCursor: null,
+    });
     // Only the data query ran — no count(*) and no EXPLAIN.
     expect(calls).toHaveLength(1);
     expect(calls[0].text).not.toContain('count(*)');
@@ -111,7 +126,14 @@ describe('handleApiRequest — routing', () => {
     );
     const r = await handleApiRequest(deps, reqOf('GET', '/authors', 'count=estimated&pageSize=10'));
     expect(r.status).toBe(200);
-    expect(r.body).toEqual({ rows: [{ id: 'a' }], total: 4242, page: 1, pageSize: 10 });
+    expect(r.body).toEqual({
+      rows: [{ id: 'a' }],
+      total: 4242,
+      page: 1,
+      pageSize: 10,
+      nextCursor: null,
+      prevCursor: null,
+    });
     expect(calls).toHaveLength(2);
     expect(calls.some((c) => c.text.startsWith('EXPLAIN (FORMAT JSON)'))).toBe(true);
     expect(calls.every((c) => !c.text.includes('count(*)'))).toBe(true);
@@ -124,7 +146,14 @@ describe('handleApiRequest — routing', () => {
         : { rows: [{ id: 'a' }], rowCount: 1 },
     );
     const r = await handleApiRequest(deps, reqOf('GET', '/authors', 'count=exact&pageSize=10'));
-    expect(r.body).toEqual({ rows: [{ id: 'a' }], total: 7, page: 1, pageSize: 10 });
+    expect(r.body).toEqual({
+      rows: [{ id: 'a' }],
+      total: 7,
+      page: 1,
+      pageSize: 10,
+      nextCursor: null,
+      prevCursor: null,
+    });
     expect(calls).toHaveLength(2);
   });
 
@@ -149,6 +178,64 @@ describe('handleApiRequest — routing', () => {
     const { db, calls } = recordingDb(() => ({ rows: [], rowCount: 0 }));
     const deps: ApiHandlerDeps = { db, lookup: lookupOf([metrics]) };
     const r = await handleApiRequest(deps, reqOf('GET', '/metrics', 'count=eq.5'));
+    expect(r.status).toBe(400);
+    expect(errorOf(r.body).code).toBe('bad_request');
+    expect(calls).toHaveLength(0);
+  });
+
+  it('?after decodes to a keyset query (no OFFSET) and emits cursors (#185)', async () => {
+    const after = encodeCursor([{ field: 'id', order: 'asc' }], [AUTHOR_ID]);
+    // pageSize=2 over-fetches 3 (LIMIT pageSize + 1); returning the sentinel row
+    // signals "more", so nextCursor is emitted and the page is trimmed to 2.
+    // Each row carries the private text-cast cursor-key alias the real query
+    // projects (`__kozou_cursor_0` for the single-column id order); the handler
+    // encodes the cursor from it and strips it from the response.
+    const { deps, calls } = depsWith((text) =>
+      text.includes('count(*)')
+        ? { rows: [{ total: 9 }], rowCount: 1 }
+        : {
+            rows: [
+              { id: 'p', __kozou_cursor_0: 'p' },
+              { id: 'q', __kozou_cursor_0: 'q' },
+              { id: 'r', __kozou_cursor_0: 'r' },
+            ],
+            rowCount: 3,
+          },
+    );
+    const r = await handleApiRequest(deps, reqOf('GET', '/authors', `pageSize=2&after=${after}`));
+    expect(r.status).toBe(200);
+    const dataCall = calls.find((c) => !c.text.includes('count(*)'))!;
+    expect(dataCall.text).toContain('WHERE "id" > $1');
+    expect(dataCall.text).not.toContain('OFFSET');
+    const body = r.body as {
+      rows: { id: string }[];
+      nextCursor: string | null;
+      prevCursor: string | null;
+      total: number;
+    };
+    expect(body.rows.map((x) => x.id)).toEqual(['p', 'q']); // sentinel trimmed off
+    expect(body.total).toBe(9); // the full filtered count, not "rows after the cursor"
+    expect(body.nextCursor).not.toBeNull(); // sentinel present ⇒ more
+    expect(body.prevCursor).not.toBeNull(); // arrived via a cursor ⇒ can page back
+  });
+
+  it('rejects a malformed ?after cursor with a 400 before any query runs (#185)', async () => {
+    const { deps, calls } = depsWith(() => ({ rows: [], rowCount: 0 }));
+    const r = await handleApiRequest(deps, reqOf('GET', '/authors', 'after=zzzz'));
+    expect(r.status).toBe(400);
+    expect(errorOf(r.body).code).toBe('bad_request');
+    expect(calls).toHaveLength(0);
+  });
+
+  it('rejects a forged cursor whose boundary value is not a string (400) (#185)', async () => {
+    // A genuine cursor only carries text values; a forged non-string (here an
+    // array) is rejected at decode, before it can bind a non-scalar.
+    const forged = Buffer.from(
+      JSON.stringify({ o: [['id', 'asc']], v: [['nested']] }),
+      'utf8',
+    ).toString('base64url');
+    const { deps, calls } = depsWith(() => ({ rows: [], rowCount: 0 }));
+    const r = await handleApiRequest(deps, reqOf('GET', '/authors', `after=${forged}`));
     expect(r.status).toBe(400);
     expect(errorOf(r.body).code).toBe('bad_request');
     expect(calls).toHaveLength(0);
