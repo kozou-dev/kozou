@@ -22,6 +22,7 @@ import {
   type SortDirection,
   type Filter,
   type FilterOperator,
+  type CountMode,
 } from './query-builder.js';
 import { parseEmbedParam, resolveEmbedSpec } from './embed.js';
 import { buildRpcCall, shapeRpcResult, type FunctionLookup } from './rpc.js';
@@ -66,7 +67,21 @@ export type ApiHttpResult = {
 /** List query keys consumed as controls (not column filters). Shared with the
  *  OpenAPI generator so it never advertises a control key as a filterable
  *  column. */
-export const RESERVED_PARAMS = new Set(['page', 'pageSize', 'sort', 'search', 'embed']);
+// `count` is a control key like `page`/`sort` (issue #177): it selects the
+// count strategy, not a column filter. As with the other control keys, this
+// shadows any column of the same name from the `<col>=<op>.<value>` grammar.
+export const RESERVED_PARAMS = new Set(['page', 'pageSize', 'sort', 'search', 'embed', 'count']);
+
+const COUNT_MODES = new Set<CountMode>(['exact', 'estimated', 'none']);
+
+/** Parse the `?count=` control into a {@link CountMode}, 400-ing on anything
+ *  outside the allowed set so a typo is a clear client error. */
+function parseCountMode(raw: string): CountMode {
+  if (!(COUNT_MODES as Set<string>).has(raw)) {
+    throw badRequest(`Invalid count mode "${raw}"; use one of exact, estimated, none.`);
+  }
+  return raw as CountMode;
+}
 
 export async function handleApiRequest(
   deps: ApiHandlerDeps,
@@ -162,16 +177,41 @@ async function listResource(
   const embed = resolveEmbedSpec(resource, parseEmbedParam(query.get('embed')), deps.lookup);
   const built = buildListQuery(resource, { ...params, embed });
 
-  const [dataResult, countResult] = await Promise.all([
-    deps.db.query<Record<string, unknown>>(built.dataText, built.dataValues),
-    deps.db.query<{ total: string | number }>(built.countText, built.countValues),
-  ]);
+  // Run the page query and the count concurrently. `none` skips the count
+  // (total is null); `estimated` reads the planner's row estimate from EXPLAIN;
+  // `exact` is the precise count(*). Default is `exact`, preserving the wire.
+  const dataPromise = deps.db.query<Record<string, unknown>>(built.dataText, built.dataValues);
+  // `countMode` / `estimateText` are optional on the public type for back-compat
+  // (buildListQuery always sets them); normalize to the exact count otherwise.
+  const countMode = built.countMode ?? 'exact';
+  const totalPromise: Promise<number | null> =
+    countMode === 'none'
+      ? Promise.resolve(null)
+      : countMode === 'estimated' && built.estimateText !== undefined
+        ? deps.db
+            .query<Record<string, unknown>>(built.estimateText, built.countValues)
+            .then(estimateFromExplain)
+        : deps.db
+            .query<{ total: string | number }>(built.countText, built.countValues)
+            .then((r) => Number(r.rows[0]?.total ?? 0));
 
-  const total = Number(countResult.rows[0]?.total ?? 0);
+  const [dataResult, total] = await Promise.all([dataPromise, totalPromise]);
   return {
     status: 200,
     body: { rows: dataResult.rows, total, page: built.page, pageSize: built.pageSize },
   };
+}
+
+/** Read the planner's estimated output-row count from an `EXPLAIN (FORMAT JSON)`
+ *  result. The single row carries a `QUERY PLAN` column (node-postgres parses
+ *  the json automatically) whose top plan node holds `Plan Rows`. Falls back to
+ *  0 if the shape is ever unexpected. */
+function estimateFromExplain(result: { rows: Record<string, unknown>[] }): number {
+  const plan = result.rows[0]?.['QUERY PLAN'] as
+    | { Plan?: { 'Plan Rows'?: number } }[]
+    | undefined;
+  const rows = plan?.[0]?.Plan?.['Plan Rows'];
+  return typeof rows === 'number' && Number.isFinite(rows) ? Math.max(0, Math.round(rows)) : 0;
 }
 
 async function getResource(
@@ -333,6 +373,9 @@ export function parseListParams(query: URLSearchParams): ListQueryParams {
 
   const search = query.get('search');
   if (search !== null && search.length > 0) params.search = search;
+
+  const count = query.get('count');
+  if (count !== null) params.count = parseCountMode(count);
 
   const sort = parseSort(query.get('sort'));
   if (sort.length > 0) params.sort = sort;

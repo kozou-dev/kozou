@@ -51,6 +51,12 @@ export type Filter =
   | { column: string; op: 'in'; values: string[] }
   | { column: string; op: 'is'; keyword: IsKeyword };
 
+/** How `total` is computed for a list response (issue #177).
+ *  - `exact` (default): a precise `count(*)` over the filtered set.
+ *  - `estimated`: the planner's row estimate via `EXPLAIN` — O(1), approximate.
+ *  - `none`: skip counting entirely; `total` is null. */
+export type CountMode = 'exact' | 'estimated' | 'none';
+
 export type ListQueryParams = {
   page?: number;
   pageSize?: number;
@@ -61,6 +67,8 @@ export type ListQueryParams = {
   filters?: Filter[];
   /** Resolved forward to-one relations to inline as nested JSON objects. */
   embed?: EmbedNode[];
+  /** Count strategy for `total` (default `exact`). */
+  count?: CountMode;
 };
 
 const SCALAR_OP_SQL: Record<ScalarFilterOperator, string> = {
@@ -622,8 +630,21 @@ function assertWriteValuesParsable(resource: Resource, data: Record<string, unkn
 export type BuiltListQuery = {
   dataText: string;
   dataValues: unknown[];
+  /** The precise `count(*)` query over the filtered set — the default / `exact`
+   *  count. Always built (so this field stays stable for existing consumers);
+   *  run only when `countMode` is `exact`. */
   countText: string;
   countValues: unknown[];
+  /** Requested count strategy (issue #177). `exact` runs `countText`;
+   *  `estimated` runs `estimateText`; `none` skips counting and `total` is null.
+   *  Optional for back-compat: `buildListQuery` always sets it, but an
+   *  old-shape `BuiltListQuery` omits it, so readers normalize with
+   *  `countMode ?? 'exact'`. */
+  countMode?: CountMode;
+  /** `EXPLAIN (FORMAT JSON)` query for the planner's row estimate (`estimated`
+   *  mode). Uses the same bound `countValues`. Optional for back-compat; falls
+   *  back to the exact count when absent. */
+  estimateText?: string;
   /** Effective (clamped) pagination echoed back in the response. */
   page: number;
   pageSize: number;
@@ -769,13 +790,22 @@ export function buildListQuery(
   const offsetParam = `$${whereValues.length + 2}`;
   const dataText = `SELECT ${cols}${embedSql} FROM ${table}${whereClause}${orderClause} LIMIT ${limitParam} OFFSET ${offsetParam}`;
 
-  const countText = `SELECT count(*) AS total FROM ${table}${whereClause}`;
+  // The count never sees ORDER BY / LIMIT / OFFSET / embeds — they do not
+  // change how many rows match the filters. Both forms are built (cheap string
+  // work); the handler runs only the one the requested mode needs. `estimated`
+  // asks the planner for an O(1) row estimate; `none` skips counting entirely.
+  const fromWhere = `FROM ${table}${whereClause}`;
+  const countText = `SELECT count(*) AS total ${fromWhere}`;
+  const estimateText = `EXPLAIN (FORMAT JSON) SELECT 1 ${fromWhere}`;
+  const countMode: CountMode = params.count ?? 'exact';
 
   return {
     dataText,
     dataValues,
     countText,
     countValues: [...whereValues],
+    countMode,
+    estimateText,
     page,
     pageSize,
   };

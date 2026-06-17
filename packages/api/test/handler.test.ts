@@ -92,6 +92,68 @@ describe('handleApiRequest — routing', () => {
     expect(calls).toHaveLength(2);
   });
 
+  it('GET /<table>?count=none skips the count query and reports total null (#177)', async () => {
+    const { deps, calls } = depsWith(() => ({ rows: [{ id: 'a' }], rowCount: 1 }));
+    const r = await handleApiRequest(deps, reqOf('GET', '/authors', 'count=none&pageSize=10'));
+    expect(r.status).toBe(200);
+    expect(r.body).toEqual({ rows: [{ id: 'a' }], total: null, page: 1, pageSize: 10 });
+    // Only the data query ran — no count(*) and no EXPLAIN.
+    expect(calls).toHaveLength(1);
+    expect(calls[0].text).not.toContain('count(*)');
+    expect(calls[0].text).not.toContain('EXPLAIN');
+  });
+
+  it('GET /<table>?count=estimated reads the planner estimate via EXPLAIN (#177)', async () => {
+    const { deps, calls } = depsWith((text) =>
+      text.includes('EXPLAIN')
+        ? { rows: [{ 'QUERY PLAN': [{ Plan: { 'Plan Rows': 4242 } }] }], rowCount: 1 }
+        : { rows: [{ id: 'a' }], rowCount: 1 },
+    );
+    const r = await handleApiRequest(deps, reqOf('GET', '/authors', 'count=estimated&pageSize=10'));
+    expect(r.status).toBe(200);
+    expect(r.body).toEqual({ rows: [{ id: 'a' }], total: 4242, page: 1, pageSize: 10 });
+    expect(calls).toHaveLength(2);
+    expect(calls.some((c) => c.text.startsWith('EXPLAIN (FORMAT JSON)'))).toBe(true);
+    expect(calls.every((c) => !c.text.includes('count(*)'))).toBe(true);
+  });
+
+  it('GET /<table>?count=exact runs the precise count like the default (#177)', async () => {
+    const { deps, calls } = depsWith((text) =>
+      text.includes('count(*)')
+        ? { rows: [{ total: 7 }], rowCount: 1 }
+        : { rows: [{ id: 'a' }], rowCount: 1 },
+    );
+    const r = await handleApiRequest(deps, reqOf('GET', '/authors', 'count=exact&pageSize=10'));
+    expect(r.body).toEqual({ rows: [{ id: 'a' }], total: 7, page: 1, pageSize: 10 });
+    expect(calls).toHaveLength(2);
+  });
+
+  it('rejects an unknown count mode with 400 before any query runs (#177)', async () => {
+    const { deps, calls } = depsWith(() => ({ rows: [], rowCount: 0 }));
+    const r = await handleApiRequest(deps, reqOf('GET', '/authors', 'count=bogus'));
+    expect(r.status).toBe(400);
+    expect(errorOf(r.body).code).toBe('bad_request');
+    expect(calls).toHaveLength(0);
+  });
+
+  it('count is a control key, so it shadows a same-named column from the filter grammar (#177)', async () => {
+    // A table with a column literally named `count`. `?count=eq.5` is read as
+    // the count-mode control (not a filter) — like `page`/`sort`, the control
+    // key shadows the column — so the invalid mode value `eq.5` 400s rather
+    // than filtering. (Documented limitation, consistent with the other
+    // reserved control keys.)
+    const metrics = tableResource('metrics', [
+      col('id', 'uuid', { isPrimaryKey: true, nullable: false }),
+      col('count', 'number', { dataType: 'integer' }),
+    ]);
+    const { db, calls } = recordingDb(() => ({ rows: [], rowCount: 0 }));
+    const deps: ApiHandlerDeps = { db, lookup: lookupOf([metrics]) };
+    const r = await handleApiRequest(deps, reqOf('GET', '/metrics', 'count=eq.5'));
+    expect(r.status).toBe(400);
+    expect(errorOf(r.body).code).toBe('bad_request');
+    expect(calls).toHaveLength(0);
+  });
+
   it('GET /<table>/<id> returns the row when found', async () => {
     const { deps } = depsWith(() => ({ rows: [{ id: 'abc', display_name: 'Ada' }], rowCount: 1 }));
     const r = await handleApiRequest(deps, reqOf('GET', `/authors/${AUTHOR_ID}`));

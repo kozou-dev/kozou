@@ -50,6 +50,32 @@ describe('buildListQuery', () => {
     expect(q.pageSize).toBe(DEFAULT_PAGE_SIZE);
   });
 
+  it('defaults the count mode to exact when none is given (#177)', () => {
+    expect(buildListQuery(authors, {}).countMode).toBe('exact');
+  });
+
+  it('count=none sets the mode to none (the handler then skips counting) (#177)', () => {
+    expect(buildListQuery(authors, { count: 'none' }).countMode).toBe('none');
+  });
+
+  it('count=estimated builds an EXPLAIN over the same filtered set, no ORDER/LIMIT (#177)', () => {
+    const q = buildListQuery(authors, {
+      count: 'estimated',
+      filters: [{ column: 'display_name', op: 'eq', value: 'Ada' }],
+    });
+    expect(q.countMode).toBe('estimated');
+    expect(q.estimateText).toBe(
+      'EXPLAIN (FORMAT JSON) SELECT 1 FROM "public"."authors" WHERE "display_name" = $1',
+    );
+    expect(q.countValues).toEqual(['Ada']);
+    expect(q.estimateText).not.toMatch(/ORDER BY|LIMIT|OFFSET/);
+    // The exact count query is still built (kept for back-compat) over the
+    // same filter, even though estimated mode does not run it.
+    expect(q.countText).toBe(
+      'SELECT count(*) AS total FROM "public"."authors" WHERE "display_name" = $1',
+    );
+  });
+
   it('applies column-equality filters as bound parameters', () => {
     const q = buildListQuery(authors, {
       filters: [{ column: 'display_name', op: 'eq', value: 'Ada' }],
