@@ -492,6 +492,15 @@ function listParameters(): JsonObject[] {
     queryParam('pageSize', { type: 'integer', minimum: 1 }, 'Rows per page.'),
     queryParam('sort', { type: 'string' }, 'Comma-separated `field.asc` / `field.desc`.'),
     queryParam('search', { type: 'string' }, 'Free-text ILIKE across text columns.'),
+    queryParam(
+      'count',
+      { type: 'string', enum: ['exact', 'estimated', 'none'], default: 'exact' },
+      'How `total` is computed: `exact` (default) is a precise count over the ' +
+        'filtered set; `estimated` is the planner\'s O(1) row estimate; `none` ' +
+        'skips the count and returns `total: null`. This is a control key, so — ' +
+        'like `page`/`sort`/`search` — it shadows any column named `count` from ' +
+        'the filter grammar.',
+    ),
   ];
 }
 
@@ -577,7 +586,9 @@ function listResultSchema(rowRef: JsonObject): JsonObject {
     type: 'object',
     properties: {
       rows: { type: 'array', items: rowRef },
-      total: { type: 'integer' },
+      // `total` is the exact count by default, the planner estimate when
+      // `?count=estimated`, and null when `?count=none` (issue #177).
+      total: { type: ['integer', 'null'] },
       page: { type: 'integer' },
       pageSize: { type: 'integer' },
     },

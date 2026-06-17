@@ -203,6 +203,40 @@ describe('buildOpenApiDocument', () => {
   const paramNames = (op: unknown): string[] =>
     ((op as { parameters?: { name: string }[] }).parameters ?? []).map((p) => p.name);
 
+  const paramSchema = (op: unknown, name: string): SchemaObj | undefined =>
+    (op as { parameters?: { name: string; schema?: SchemaObj }[] }).parameters?.find(
+      (p) => p.name === name,
+    )?.schema;
+
+  // The collection 200 may be a `oneOf` (list page | relation-select options);
+  // pick the member that carries `total`.
+  const listPageSchema = (op: unknown): SchemaObj => {
+    const s = okSchema(op);
+    return s.oneOf?.find((m) => m.properties?.total) ?? s;
+  };
+
+  it('documents the count query parameter and a nullable total on list endpoints (#177)', () => {
+    const list = build().paths['/authors'].get;
+    expect(paramNames(list)).toContain('count');
+    expect(paramSchema(list, 'count')?.enum).toEqual(['exact', 'estimated', 'none']);
+    // total is null when count=none, so the schema allows null.
+    expect(listPageSchema(list).properties?.total?.type).toEqual(['integer', 'null']);
+  });
+
+  it('advertises count exactly once even when a resource has a column named count (#177)', () => {
+    const schema = schemaOf([
+      {
+        name: 'metrics',
+        columns: [col('id', 'uuid', { isPrimaryKey: true }), col('count', 'number')],
+        primaryKey: ['id'],
+      },
+    ]);
+    const list = (buildOpenApiDocument(schema) as unknown as Doc).paths['/metrics'].get;
+    expect(paramNames(list).filter((n) => n === 'count')).toEqual(['count']);
+    // The single count param is the mode control (enum), not a string filter.
+    expect(paramSchema(list, 'count')?.enum).toEqual(['exact', 'estimated', 'none']);
+  });
+
   it('advertises the embed parameter only where the resource has embeddable relations', () => {
     const schema = schemaOf([
       {

@@ -306,6 +306,27 @@ describe('@kozou/api integration (generic fixture)', () => {
     expect(body.rows).toHaveLength(3);
   });
 
+  it('count=none returns the page without a total (#177)', async () => {
+    const { status, body } = await getJson<{ rows: unknown[]; total: number | null }>(
+      '/authors?count=none',
+    );
+    expect(status).toBe(200);
+    expect(body.total).toBeNull();
+    expect(body.rows).toHaveLength(3);
+  });
+
+  it('count=estimated returns a planner estimate (matches exact after ANALYZE) (#177)', async () => {
+    // ANALYZE so reltuples is fresh; for an analyzed table with no filter the
+    // planner's row estimate equals the exact count. Comparing the two modes
+    // keeps the assertion robust to the table's actual row count at this point.
+    await pool.query(`ANALYZE "${db.schema}".authors`);
+    const exact = await getJson<ListBody>('/authors?count=exact');
+    const estimated = await getJson<ListBody>('/authors?count=estimated');
+    expect(estimated.status).toBe(200);
+    expect(typeof estimated.body.total).toBe('number');
+    expect(estimated.body.total).toBe(exact.body.total);
+  });
+
   it('paginates with page + pageSize', async () => {
     const page1 = await getJson<ListBody>('/authors?pageSize=2');
     expect(page1.body.rows).toHaveLength(2);
