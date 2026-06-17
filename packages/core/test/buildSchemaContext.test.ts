@@ -93,6 +93,64 @@ describe('buildSchemaContext', () => {
     expect(cols.find((c) => c.name === 'display_name')!.widget).toBe('currency');
   });
 
+  it('keys UIHints by schema-qualified name so same-named relations do not collide (#180)', async () => {
+    // `public.users` and `audit.users` would share one hints entry if keyed by
+    // the bare name; a schema-qualified key lets each carry its own label.
+    const raw = makeRaw({
+      schemas: ['public', 'audit'],
+      tables: [
+        makeTable('users', { schema: 'public', columns: [makeCol('id', 'uuid')], primaryKey: ['id'] }),
+        makeTable('users', { schema: 'audit', columns: [makeCol('id', 'uuid')], primaryKey: ['id'] }),
+      ],
+    });
+    const uiHints: UIHints = {
+      tables: {
+        'public.users': { label: 'People' },
+        'audit.users': { label: 'Audit Trail' },
+      },
+    };
+    // strict:true also proves the qualified keys are not flagged as hints on a
+    // non-existent relation — without recognizing `schema.name` in validation
+    // this build would throw before any label is applied.
+    const ctx = await buildSchemaContext({ raw, uiHints, strict: true });
+    const labelOf = (qn: string) => ctx.tables.find((t) => t.qualifiedName === qn)!.label;
+    expect(labelOf('public.users')).toBe('People');
+    expect(labelOf('audit.users')).toBe('Audit Trail');
+  });
+
+  it('accepts a schema-qualified UIHint key for a view under strict mode (#180)', async () => {
+    const raw = makeRaw({
+      views: [
+        {
+          schema: 'public',
+          name: 'vw_active',
+          comment: null,
+          columns: [makeCol('id', 'uuid')],
+          underlyingTables: [],
+          definition: 'SELECT 1',
+        },
+      ],
+    });
+    const ctx = await buildSchemaContext({
+      raw,
+      uiHints: { views: { 'public.vw_active': { label: 'Active' } } },
+      strict: true,
+    });
+    expect(ctx.views[0]!.label).toBe('Active');
+  });
+
+  it('still applies a bare-name UIHint to a single-schema relation (#180 back-compat)', async () => {
+    const raw = makeRaw({
+      tables: [makeTable('authors', { columns: [makeCol('id', 'uuid')], primaryKey: ['id'] })],
+    });
+    const ctx = await buildSchemaContext({
+      raw,
+      uiHints: { tables: { authors: { label: 'Writers' } } },
+      strict: true,
+    });
+    expect(ctx.tables[0]!.label).toBe('Writers');
+  });
+
   it('resolves a native ENUM column to its members (enum-select + enumValues)', async () => {
     const raw = makeRaw({
       enums: [{ schema: 'public', name: 'order_status', values: ['open', 'paid', 'shipped'] }],

@@ -70,6 +70,20 @@ function joinAi(ai: string[]): string | null {
   return ai.length > 0 ? ai.join('\n') : null;
 }
 
+/** Look up UI Hints for a relation, preferring a schema-qualified key
+ *  (`schema.name`) and falling back to the bare name. The fallback keeps
+ *  single-schema hint files working as before; the qualified key lets two
+ *  same-named relations in different schemas (e.g. `public.users` and
+ *  `audit.users`) each carry their own hints instead of colliding on one. */
+function lookupHints<T>(
+  hints: Record<string, T> | undefined,
+  schema: string,
+  name: string,
+): T | undefined {
+  if (hints === undefined) return undefined;
+  return hints[`${schema}.${name}`] ?? hints[name];
+}
+
 function buildColumn(input: {
   column: RawColumn;
   primaryKey: string[];
@@ -383,9 +397,12 @@ export async function buildSchemaContext(opts: BuildOptions): Promise<SchemaCont
   const knownTables = new Set(raw.tables.map((t) => `${t.schema}.${t.name}`));
   raw.views.forEach((v) => knownTables.add(`${v.schema}.${v.name}`));
 
+  // A hint key matches either the bare relation name or its schema-qualified
+  // form (`schema.name`), the same precedence `lookupHints` uses — so a valid
+  // qualified key is not mistaken for a hint on a non-existent relation.
   if (uiHints?.tables) {
     for (const tableName of Object.keys(uiHints.tables)) {
-      if (!raw.tables.some((t) => t.name === tableName)) {
+      if (!raw.tables.some((t) => t.name === tableName || `${t.schema}.${t.name}` === tableName)) {
         issues.push({
           path: `tables.${tableName}`,
           message: `UIHints table "${tableName}" does not exist in raw.tables`,
@@ -395,7 +412,7 @@ export async function buildSchemaContext(opts: BuildOptions): Promise<SchemaCont
   }
   if (uiHints?.views) {
     for (const viewName of Object.keys(uiHints.views)) {
-      if (!raw.views.some((v) => v.name === viewName)) {
+      if (!raw.views.some((v) => v.name === viewName || `${v.schema}.${v.name}` === viewName)) {
         issues.push({
           path: `views.${viewName}`,
           message: `UIHints view "${viewName}" does not exist in raw.views`,
@@ -450,7 +467,7 @@ export async function buildSchemaContext(opts: BuildOptions): Promise<SchemaCont
   const tables = visibleRawTables.map<TableContext>((t) =>
     buildTableContext({
       table: t,
-      hints: uiHints?.tables?.[t.name],
+      hints: lookupHints(uiHints?.tables, t.schema, t.name),
       issues,
       knownTables,
       enums: raw.enums,
@@ -460,7 +477,7 @@ export async function buildSchemaContext(opts: BuildOptions): Promise<SchemaCont
   const views = visibleRawViews.map<ViewContext>((v) =>
     buildViewContext({
       view: v,
-      hints: uiHints?.views?.[v.name],
+      hints: lookupHints(uiHints?.views, v.schema, v.name),
       issues,
       enums: raw.enums,
     }),

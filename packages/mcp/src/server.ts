@@ -17,6 +17,7 @@ import { callTool } from './tools/call.js';
 import type { SchemaCache } from './schemaCache.js';
 import type { McpExecution } from './execution.js';
 import { successResult, errorResult } from './result.js';
+import { McpToolError } from './errors.js';
 import type { SchemaContext } from '@kozou/core';
 
 // Read the advertised server version from this package's package.json so
@@ -190,10 +191,22 @@ export function createMcpServer(cache: SchemaCache, execution?: McpExecution): S
           return errorResult(`Unknown tool: ${name as string}`);
       }
     } catch (err) {
+      // A deliberate, client-safe tool error (e.g. "Table not found: <name>"
+      // echoing the caller's own input) is surfaced as-is so an agent can
+      // self-correct. Anything else — a zod parse failure, an unexpected
+      // programming or database error — can carry internal/identifier detail,
+      // so it is logged server-side and reported generically, mirroring the
+      // schema-unavailable catch above and the HTTP entrypoint's no-leak
+      // posture. The raw detail stays behind KOZOU_DEV.
+      if (err instanceof McpToolError) {
+        return errorResult(err.message);
+      }
       const dev = process.env.KOZOU_DEV === '1';
-      const msg = err instanceof Error ? err.message : String(err);
+      process.stderr.write(
+        `[kozou mcp] tool "${name}" failed: ${err instanceof Error ? err.message : String(err)}\n`,
+      );
       const detail = dev && err instanceof Error && err.stack ? `\n${err.stack}` : '';
-      return errorResult(`${msg}${detail}`);
+      return errorResult(`The "${name}" tool failed.${detail}`);
     }
   });
 

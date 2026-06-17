@@ -1,4 +1,5 @@
 import type { SchemaContext } from '@kozou/core';
+import { McpToolError } from '../errors.js';
 import {
   describeViewInputSchema,
   type DescribeViewInput,
@@ -9,7 +10,7 @@ export function describeView(input: DescribeViewInput, ctx: SchemaContext): Desc
   const parsed = describeViewInputSchema.parse(input);
   const view = ctx.views.find((v) => v.qualifiedName === parsed.qualifiedName);
   if (!view) {
-    throw new Error(`View not found: ${parsed.qualifiedName}`);
+    throw new McpToolError(`View not found: ${parsed.qualifiedName}`);
   }
   return {
     qualifiedName: view.qualifiedName,

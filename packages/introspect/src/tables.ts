@@ -76,7 +76,11 @@ export async function fetchTables(client: Client, schemas: string[]): Promise<Ra
     return [];
   }
 
-  const tableNames = tableRows.map((r) => r.name);
+  // Membership set for the per-column grouping guard below. The columns query
+  // scopes by schema/relkind in SQL but not by table name, so this filters the
+  // rows down to the tables we listed; a Set keeps that lookup O(1) rather than
+  // O(tables) per column row.
+  const tableNameSet = new Set(tableRows.map((r) => r.name));
 
   const columnRows = await runQuery<ColumnRow>(
     client,
@@ -163,7 +167,7 @@ export async function fetchTables(client: Client, schemas: string[]): Promise<Ra
   const tableKey = (schema: string, name: string) => `${schema}.${name}`;
   const columnsByTable = new Map<string, RawColumn[]>();
   for (const row of columnRows) {
-    if (!tableNames.includes(row.table)) continue;
+    if (!tableNameSet.has(row.table)) continue;
     const key = tableKey(row.schema, row.table);
     if (!columnsByTable.has(key)) columnsByTable.set(key, []);
     columnsByTable.get(key)!.push({

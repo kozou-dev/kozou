@@ -17,9 +17,20 @@ import type { ColumnContext } from '@kozou/core';
  *  `| null` — the caller appends that based on `nullable`. */
 export function mapColumnType(column: ColumnContext): string {
   if (column.enumValues && column.enumValues.length > 0) {
-    return column.enumValues.map(quoteStringLiteral).join(' | ');
+    const union = column.enumValues.map(quoteStringLiteral).join(' | ');
+    // An array column that also carries enum values is the union wrapped in
+    // parentheses with the array suffix (`('a' | 'b')[]`), mirroring how
+    // `mapDataType` collapses any array depth to a single `T[]`. Today no
+    // introspected column populates `enumValues` for an array type, so this
+    // guards against a silent `[]`-dropping regression if/when it does.
+    return isArrayType(column.dataType) ? `(${union})[]` : union;
   }
   return mapDataType(column.dataType);
+}
+
+/** Whether a `format_type(...)` string denotes an array (one or more `[]`). */
+function isArrayType(dataType: string): boolean {
+  return dataType.trim().endsWith('[]');
 }
 
 /** Map a `format_type(...)` string to a TypeScript type, resolving any array
