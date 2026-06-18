@@ -86,15 +86,5 @@ CLAUDE.md
 GEMINI.md
 .github/copilot-instructions.md
 
-# Basou - default ignore (Y-2 Section 1.3 / Y-1.5 Section 5.1)
-.basou/logs/
-.basou/raw/
-.basou/tmp/
-.basou/status.json
-.basou/sessions/*/events.jsonl
-.basou/sessions/*/artifacts/
-.basou/approvals/pending/
-.basou/approvals/resolved/
-
-# basou: local-only tooling state -- never commit (supersedes any narrow .basou patterns above)
+# Basou - local-only: never commit basou's trail (regenerable from the agents' logs)
 .basou/
