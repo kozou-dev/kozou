@@ -286,6 +286,292 @@ describe('emitMarkdown', () => {
   });
 });
 
+describe('emitMarkdown — entity-relationship diagram', () => {
+  it('emits a Mermaid erDiagram block under its own heading', async () => {
+    const md = emitMarkdown(await buildSchemaContext({ raw: makeRaw() }));
+    expect(md).toContain('## Entity-relationship diagram');
+    expect(md).toContain('```mermaid');
+    expect(md).toContain('erDiagram');
+  });
+
+  it('renders an entity block with PK / FK markers and a Mermaid-safe type token', async () => {
+    const md = emitMarkdown(await buildSchemaContext({ raw: makeRaw() }));
+    expect(md).toContain('  authors {');
+    expect(md).toContain('    uuid id PK');
+    // "timestamp with time zone" has spaces, illegal in a Mermaid attribute
+    // type — it is folded to underscores (the precise type stays in the table).
+    expect(md).toContain('    timestamp_with_time_zone deleted_at');
+    expect(md).toContain('    uuid author_id FK');
+  });
+
+  it('draws a foreign key as a parent→child crow\'s-foot edge (required, many-to-one)', async () => {
+    const md = emitMarkdown(await buildSchemaContext({ raw: makeRaw() }));
+    // books.author_id is NOT NULL and not unique ⇒ exactly-one parent (`||`),
+    // zero-or-more children (`o{`). No FK COMMENT ⇒ labelled with the column.
+    expect(md).toContain('  authors ||--o{ books : "author_id"');
+  });
+
+  it('marks a nullable foreign key as zero-or-one on the parent side', async () => {
+    const raw = makeRaw();
+    raw.tables[1]!.columns[1]!.nullable = true; // books.author_id
+    const md = emitMarkdown(await buildSchemaContext({ raw }));
+    expect(md).toContain('  authors |o--o{ books : "author_id"');
+  });
+
+  it('marks a unique foreign key as one-to-one (zero-or-one child)', async () => {
+    const raw = makeRaw();
+    raw.tables[1]!.indexes = [{ name: 'books_author_uniq', columns: ['author_id'], unique: true }];
+    const md = emitMarkdown(await buildSchemaContext({ raw }));
+    expect(md).toContain('  authors ||--o| books : "author_id"');
+  });
+
+  it('uses the foreign key COMMENT as the edge label when present', async () => {
+    const raw = makeRaw();
+    raw.tables[1]!.foreignKeys[0]!.comment = 'written by';
+    const md = emitMarkdown(await buildSchemaContext({ raw }));
+    expect(md).toContain('  authors ||--o{ books : "written by"');
+  });
+
+  it('draws a composite foreign key as a single edge naming every member column', async () => {
+    const raw: RawIntrospection = {
+      serverVersion: '16.2',
+      introspectedAt: '2026-01-01T00:00:00.000Z',
+      schemas: ['public'],
+      enums: [],
+      functions: [],
+      tables: [
+        {
+          schema: 'public',
+          name: 'orders',
+          comment: null,
+          primaryKey: ['id', 'region'],
+          foreignKeys: [],
+          checks: [],
+          indexes: [],
+          rowCountEstimate: null,
+          columns: [
+            col('id', 'uuid', { nullable: false }),
+            col('region', 'text', { nullable: false }),
+          ],
+        },
+        {
+          schema: 'public',
+          name: 'shipments',
+          comment: null,
+          primaryKey: ['id'],
+          foreignKeys: [
+            {
+              name: 'shipments_order_fkey',
+              columns: ['order_id', 'order_region'],
+              referencedSchema: 'public',
+              referencedTable: 'orders',
+              referencedColumns: ['id', 'region'],
+              onDelete: 'NO ACTION',
+              onUpdate: 'NO ACTION',
+              comment: null,
+            },
+          ],
+          checks: [],
+          indexes: [],
+          rowCountEstimate: null,
+          columns: [
+            col('id', 'uuid', { nullable: false }),
+            col('order_id', 'uuid', { nullable: false }),
+            col('order_region', 'text', { nullable: false }),
+          ],
+        },
+      ],
+      views: [],
+    };
+    const md = emitMarkdown(await buildSchemaContext({ raw }));
+    expect(md).toContain('  orders ||--o{ shipments : "order_id + order_region"');
+  });
+
+  it('draws a dotted "derives from" edge from a view to its underlying tables', async () => {
+    const md = emitMarkdown(await buildSchemaContext({ raw: makeRaw() }));
+    expect(md).toContain('  authors }o..o{ vw_active : "derives from"');
+  });
+
+  it('co-locates a legend and the entity @ai / @policy notes under the diagram', async () => {
+    const md = emitMarkdown(await buildSchemaContext({ raw: makeRaw() }));
+    const er = md.slice(
+      md.indexOf('## Entity-relationship diagram'),
+      md.indexOf('## Tables'),
+    );
+    expect(er).toContain('**Legend.**');
+    expect(er).toContain('Dotted lines show which tables a view derives from');
+    expect(er).toContain('**Where the meaning lives**');
+    expect(er).toContain('`public.authors` (table) — *AI:* prefer vw_active for active authors.');
+    expect(er).toContain('*Policy:* never hard-delete an author.');
+  });
+
+  it('surfaces a source-of-truth view through its @ai note in the diagram notes', async () => {
+    const raw = makeRaw();
+    raw.views[0]!.comment =
+      'Active authors.\n@ai: This is the source of truth for active authors; start here.';
+    const md = emitMarkdown(await buildSchemaContext({ raw }));
+    expect(md).toContain(
+      '`public.vw_active` (view) — *AI:* This is the source of truth for active authors; start here.',
+    );
+  });
+
+  it('marks a column that is both a primary and a foreign key as "PK, FK"', async () => {
+    const raw: RawIntrospection = {
+      serverVersion: '16.2',
+      introspectedAt: '2026-01-01T00:00:00.000Z',
+      schemas: ['public'],
+      enums: [],
+      functions: [],
+      tables: [
+        {
+          schema: 'public',
+          name: 'users',
+          comment: null,
+          primaryKey: ['id'],
+          foreignKeys: [],
+          checks: [],
+          indexes: [],
+          rowCountEstimate: null,
+          columns: [col('id', 'uuid', { nullable: false })],
+        },
+        {
+          schema: 'public',
+          name: 'profiles',
+          comment: null,
+          primaryKey: ['user_id'],
+          foreignKeys: [
+            {
+              name: 'profiles_user_fkey',
+              columns: ['user_id'],
+              referencedSchema: 'public',
+              referencedTable: 'users',
+              referencedColumns: ['id'],
+              onDelete: 'NO ACTION',
+              onUpdate: 'NO ACTION',
+              comment: null,
+            },
+          ],
+          checks: [],
+          indexes: [],
+          rowCountEstimate: null,
+          columns: [col('user_id', 'uuid', { nullable: false })],
+        },
+      ],
+      views: [],
+    };
+    const md = emitMarkdown(await buildSchemaContext({ raw }));
+    expect(md).toContain('    uuid user_id PK, FK');
+  });
+
+  it('prefixes attribute tokens that would not start with a letter (Mermaid-safe)', async () => {
+    const raw = makeRaw();
+    raw.tables[0]!.columns.push(col('2fa_enabled', 'boolean'));
+    raw.tables[0]!.columns.push(col('weird', '128bit'));
+    const md = emitMarkdown(await buildSchemaContext({ raw }));
+    // A name starting with a digit gets an `x` prefix; a type that would start
+    // with a digit gets a `t_` prefix. The precise values stay in the table.
+    expect(md).toContain('boolean x2fa_enabled');
+    expect(md).toContain('t_128bit weird');
+  });
+
+  it('disambiguates entities that collide only after id sanitization', async () => {
+    const raw: RawIntrospection = {
+      serverVersion: '16.2',
+      introspectedAt: '2026-01-01T00:00:00.000Z',
+      schemas: ['public'],
+      enums: [],
+      functions: [],
+      tables: [
+        {
+          schema: 'public',
+          name: 'order-item',
+          comment: null,
+          primaryKey: ['id'],
+          foreignKeys: [],
+          checks: [],
+          indexes: [],
+          rowCountEstimate: null,
+          columns: [col('id', 'uuid', { nullable: false })],
+        },
+        {
+          schema: 'public',
+          name: 'order_item',
+          comment: null,
+          primaryKey: ['id'],
+          foreignKeys: [],
+          checks: [],
+          indexes: [],
+          rowCountEstimate: null,
+          columns: [col('id', 'uuid', { nullable: false })],
+        },
+      ],
+      views: [],
+    };
+    const md = emitMarkdown(await buildSchemaContext({ raw }));
+    // Both bare names fold to "order_item"; the second is suffixed so the two
+    // distinct tables never share one node.
+    expect(md).toContain('  order_item {');
+    expect(md).toContain('  order_item_2 {');
+  });
+
+  it('draws a foreign key to a table outside the introspected set without merging nodes', async () => {
+    const raw: RawIntrospection = {
+      serverVersion: '16.2',
+      introspectedAt: '2026-01-01T00:00:00.000Z',
+      schemas: ['public'],
+      enums: [],
+      functions: [],
+      tables: [
+        {
+          schema: 'public',
+          name: 'books',
+          comment: null,
+          primaryKey: ['id'],
+          foreignKeys: [
+            {
+              name: 'books_author_fkey',
+              columns: ['author_id'],
+              referencedSchema: 'other',
+              referencedTable: 'authors',
+              referencedColumns: ['id'],
+              onDelete: 'NO ACTION',
+              onUpdate: 'NO ACTION',
+              comment: null,
+            },
+          ],
+          checks: [],
+          indexes: [],
+          rowCountEstimate: null,
+          columns: [
+            col('id', 'uuid', { nullable: false }),
+            col('author_id', 'uuid', { nullable: false }),
+          ],
+        },
+      ],
+      views: [],
+    };
+    const md = emitMarkdown(await buildSchemaContext({ raw }));
+    // The edge is drawn (no silent drop) but the external target has no entity
+    // block of its own.
+    expect(md).toContain('authors ||--o{ books : "author_id"');
+    expect(md).not.toContain('  authors {');
+  });
+
+  it('omits the diagram for an empty schema', async () => {
+    const empty: RawIntrospection = {
+      serverVersion: '16.2',
+      introspectedAt: '2026-01-01T00:00:00.000Z',
+      schemas: ['public'],
+      tables: [],
+      views: [],
+      enums: [],
+      functions: [],
+    };
+    const md = emitMarkdown(await buildSchemaContext({ raw: empty }));
+    expect(md).not.toContain('## Entity-relationship diagram');
+  });
+});
+
 describe('docsCommand', () => {
   const originalEnv = process.env.DATABASE_URL;
 

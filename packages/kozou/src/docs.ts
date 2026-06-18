@@ -35,6 +35,9 @@ export function emitMarkdown(schema: SchemaContext): string {
 
   sections.push(renderContents(schema));
 
+  const er = renderErDiagram(schema);
+  if (er) sections.push(er);
+
   if (schema.tables.length > 0) {
     sections.push('## Tables');
     for (const t of schema.tables) sections.push(renderTable(t));
@@ -77,6 +80,168 @@ function renderContents(schema: SchemaContext): string {
     schema.enums.map((e) => ({ label: `${e.schema}.${e.name}`, anchor: enumAnchor(e) })),
   );
   return lines.join('\n');
+}
+
+/** An entity-relationship diagram of the schema, emitted as a Mermaid
+ *  `erDiagram` fenced block (GitHub, many Markdown editors, and static-site
+ *  generators render Mermaid natively). This is "another faithful form": the
+ *  same SchemaContext the other surfaces read, drawn.
+ *
+ *  It is meaning-laden, not a bare foreign-key graph: views — Kozou's named
+ *  business concepts — are entities too, linked by a dotted edge to the tables
+ *  they derive from, and a legend points at the entities carrying `@ai` /
+ *  `@policy` guidance so the diagram and its meaning sit on the same page.
+ *  Read-only / stateless / no new introspection — built entirely from the
+ *  existing SchemaContext. Returns null for an empty schema. */
+function renderErDiagram(schema: SchemaContext): string | null {
+  if (schema.tables.length === 0 && schema.views.length === 0) return null;
+
+  // Entity-id scheme: bare names read best, but two relations in different
+  // schemas can share a name — fall back to schema-qualified ids for everyone
+  // so the diagram is readable. Sanitization can still collide ("order-item"
+  // and "order_item" both fold to "order_item"), so ids are allocated through
+  // a collision-safe map keyed by qualified name: the same relation always
+  // resolves to one id, and two distinct relations never share a node.
+  const nameCounts = new Map<string, number>();
+  for (const t of schema.tables) nameCounts.set(t.name, (nameCounts.get(t.name) ?? 0) + 1);
+  for (const v of schema.views) nameCounts.set(v.name, (nameCounts.get(v.name) ?? 0) + 1);
+  const qualify = [...nameCounts.values()].some((n) => n > 1);
+  const idByQualified = new Map<string, string>();
+  const usedIds = new Set<string>();
+  const entityId = (sch: string, name: string): string => {
+    // Key on a NUL separator, which cannot appear in a PostgreSQL identifier,
+    // so distinct (schema, name) pairs never collide on the key itself (a "."
+    // could, since a quoted identifier may legally contain one).
+    const qualified = `${sch}\u0000${name}`;
+    const existing = idByQualified.get(qualified);
+    if (existing) return existing;
+    const base = mermaidIdent(qualify ? `${sch}_${name}` : name);
+    let id = base;
+    for (let n = 2; usedIds.has(id); n += 1) id = `${base}_${n}`;
+    usedIds.add(id);
+    idByQualified.set(qualified, id);
+    return id;
+  };
+  // Allocate ids for the emitted entities first, so a foreign key to a table
+  // outside the introspected set gets a fresh (non-colliding) node rather than
+  // silently merging into an emitted one.
+  for (const t of schema.tables) entityId(t.schema, t.name);
+  for (const v of schema.views) entityId(v.schema, v.name);
+
+  const diagram: string[] = ['erDiagram'];
+
+  // Entities — tables then views. Attributes are the columns (a Mermaid-safe
+  // type token + name + a single key marker); the precise type and full PK/FK
+  // detail stay in the per-entity table below the diagram.
+  for (const t of schema.tables) diagram.push(...entityBlock(entityId(t.schema, t.name), t.columns));
+  for (const v of schema.views) diagram.push(...entityBlock(entityId(v.schema, v.name), v.columns));
+
+  // Foreign-key edges — parent (referenced) to child (holder), crow's-foot
+  // cardinality, labelled with the FK COMMENT meaning or the FK column(s). A
+  // composite FK is one edge (every member column in the label), matching the
+  // relation metadata the API / MCP surface.
+  for (const t of schema.tables) {
+    for (const rel of t.relations) {
+      const fields = rel.fields ?? [rel.field];
+      // Required when every member column is NOT NULL: each child then has
+      // exactly one parent (`||`); a nullable member makes it zero-or-one
+      // (`|o`).
+      const required = fields.every((f) => {
+        const col = t.columns.find((c) => c.name === f);
+        return col ? !col.nullable : false;
+      });
+      const parentCard = required ? '||' : '|o';
+      const childCard = rel.cardinality === 'one-to-one' ? 'o|' : 'o{';
+      const parent = entityId(rel.references.schema, rel.references.table);
+      const child = entityId(t.schema, t.name);
+      diagram.push(`  ${parent} ${parentCard}--${childCard} ${child} : ${relationLabel(rel, fields)}`);
+    }
+  }
+
+  // View derive edges (dotted, non-identifying) — which tables a view is built
+  // from, the part a plain foreign-key-graph tool omits.
+  for (const v of schema.views) {
+    const viewId = entityId(v.schema, v.name);
+    for (const u of v.underlyingTables) {
+      const src = entityId(u.schema, u.name);
+      if (src === viewId) continue; // a view selecting from itself: skip the self-edge
+      diagram.push(`  ${src} }o..o{ ${viewId} : "derives from"`);
+    }
+  }
+
+  const out: string[] = [
+    '## Entity-relationship diagram',
+    ['```mermaid', ...diagram, '```'].join('\n'),
+    erLegend(schema),
+  ];
+  const meaning = erMeaningNotes(schema);
+  if (meaning) out.push(meaning);
+  return out.join('\n\n');
+}
+
+/** One entity block: the id, then a line per column. An entity with no columns
+ *  is declared bare (an empty `{}` block is rejected by some Mermaid versions). */
+function entityBlock(id: string, columns: ColumnContext[]): string[] {
+  if (columns.length === 0) return [`  ${id}`];
+  const lines = [`  ${id} {`];
+  for (const c of columns) {
+    const type = mermaidType(c.effectiveType ?? c.dataType);
+    // A column can be both a primary and a foreign key (e.g. a join table);
+    // Mermaid takes comma-separated key markers, so surface both.
+    const markers: string[] = [];
+    if (c.isPrimaryKey) markers.push('PK');
+    if (c.isForeignKey) markers.push('FK');
+    const key = markers.length > 0 ? ` ${markers.join(', ')}` : '';
+    lines.push(`    ${type} ${mermaidIdent(c.name)}${key}`);
+  }
+  lines.push('  }');
+  return lines;
+}
+
+/** A quoted relationship label: the FK's COMMENT meaning when present,
+ *  otherwise the foreign-key column(s). Always quoted (so spaces are safe),
+ *  truncated, with any embedded double-quote neutralised. */
+function relationLabel(rel: RelationContext, fields: string[]): string {
+  const text = rel.meaning ? oneLine(rel.meaning) : fields.join(' + ');
+  return `"${truncate(text, 60).replace(/"/g, "'")}"`;
+}
+
+function erLegend(schema: SchemaContext): string {
+  let prose =
+    "**Legend.** Solid lines are foreign keys — crow's-foot cardinality, " +
+    "labelled with the foreign key's COMMENT when set, otherwise its column(s).";
+  if (schema.views.length > 0) {
+    prose +=
+      ' Dotted lines show which tables a view derives from. Views are Kozou’s ' +
+      'named business concepts — prefer them over re-deriving rules from base tables.';
+  }
+  return prose;
+}
+
+/** Entity-level `@ai` / `@policy` notes, co-located right under the diagram so
+ *  the structure and its meaning sit together. One line per table/view that
+ *  carries guidance (a source-of-truth view surfaces here via its `@ai` note);
+ *  the full notes live in the sections below. Column-level notes stay in each
+ *  entity's "Column notes". */
+function erMeaningNotes(schema: SchemaContext): string | null {
+  const items: string[] = [];
+  const add = (
+    qualifiedName: string,
+    kind: 'table' | 'view',
+    ai: string | null,
+    policy: string[] | undefined,
+  ): void => {
+    const parts: string[] = [];
+    if (ai) parts.push(`*AI:* ${escapeInline(truncate(oneLine(ai)))}`);
+    if (policy && policy.length > 0) {
+      parts.push(`*Policy:* ${escapeInline(truncate(oneLine(policy.join(' '))))}`);
+    }
+    if (parts.length > 0) items.push(`- ${code(qualifiedName)} (${kind}) — ${parts.join(' ')}`);
+  };
+  for (const t of schema.tables) add(t.qualifiedName, 'table', t.aiDescription, t.policy);
+  for (const v of schema.views) add(v.qualifiedName, 'view', v.aiDescription, v.policy);
+  if (items.length === 0) return null;
+  return `**Where the meaning lives** (full notes in the sections below):\n\n${items.join('\n')}`;
 }
 
 function renderTable(t: TableContext): string {
@@ -293,6 +458,37 @@ function escapeCell(value: string): string {
     .trim()
     .replace(/\\/g, '\\\\')
     .replace(/\|/g, '\\|');
+}
+
+/** Collapse a value to a Mermaid identifier (entity id / attribute name):
+ *  keep `[A-Za-z0-9_]`, replace every other run with `_`. Mermaid expects a
+ *  token to begin with a letter, so a value that would start with a digit or
+ *  underscore (or sanitize to empty) is prefixed with `x`. The precise name
+ *  stays verbatim in the columns table below the diagram. Single, linear
+ *  regexes — no ReDoS. */
+function mermaidIdent(value: string): string {
+  const v = value.replace(/[^A-Za-z0-9_]+/g, '_');
+  return /^[A-Za-z]/.test(v) ? v : `x${v}`;
+}
+
+/** A Mermaid-safe attribute type token. A Mermaid attribute type must be a
+ *  single word that begins with a letter, so a SQL type with spaces or
+ *  punctuation ("timestamp with time zone", "numeric(12,2)") is folded to
+ *  underscores and prefixed if it would not start with a letter. The precise
+ *  type is kept verbatim in the columns table below the diagram. */
+function mermaidType(dataType: string): string {
+  const t = dataType
+    .trim()
+    .replace(/[^A-Za-z0-9]+/g, '_')
+    .replace(/^_+/, '')
+    .replace(/_+$/, '');
+  if (t === '') return 'unknown';
+  return /^[A-Za-z]/.test(t) ? t : `t_${t}`;
+}
+
+/** Trim to a single-line excerpt, with an ellipsis when truncated. */
+function truncate(text: string, max = 160): string {
+  return text.length <= max ? text : `${text.slice(0, max - 1).trimEnd()}…`;
 }
 
 function tableAnchor(t: TableContext): string {
