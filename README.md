@@ -70,7 +70,9 @@ and its AI need from it. The `COMMENT ON` conventions (`@ai`, `@policy`,
 - **MCP context** for AI agents (`@kozou/mcp`) — the differentiator above.
 - A reference **Admin UI** (`@kozou/svelte-ui`).
 - **REST + OpenAPI** (`@kozou/api`, the default `kozou dev` backend).
-- **Markdown docs** (`kozou docs`) and **TypeScript types** (`@kozou/codegen`).
+- **Markdown docs** (`kozou docs`) — including a Mermaid entity-relationship
+  diagram that draws the views and the `@ai` / `@policy` meaning, not just a
+  foreign-key graph — and **TypeScript types** (`@kozou/codegen`).
 
 One source, no duplicate definitions, no drift. The CLI, the MCP server (stdio +
 HTTP, with an opt-in `call` tool that *executes* `@expose: rpc` actions, not just
