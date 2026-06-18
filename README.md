@@ -60,6 +60,13 @@ docker compose up
 Add your tables and `COMMENT ON ...` text to `migrations/`, and the same context
 flows to your agent.
 
+**Kozou is migration-tool-agnostic.** Kozou never runs DDL or owns migration
+state — it reads the schema your migrations *produce* and compiles it into
+faithful forms. Manage schema change (including zero-downtime rollouts) with a
+dedicated tool — [pgroll](https://github.com/xataio/pgroll), graphile-migrate,
+Atlas, Sqitch, Flyway, or plain SQL files — and Kozou compiles the result. The
+two are complementary, not competing.
+
 ## How it works
 
 Kozou reads a PostgreSQL schema **once** and produces every form a modern team
