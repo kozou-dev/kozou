@@ -8,18 +8,44 @@
 -- (@ai / @widget / @policy / @example tags), VIEW-as-domain-concept,
 -- and the recommended layout for migrations.
 
--- Example (delete and replace with your own schema):
+-- Example (delete and replace with your own schema). It shows the COMMENT
+-- conventions that turn a raw schema into meaning an agent can act on:
 --
--- CREATE TABLE users (
---   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
---   email text NOT NULL UNIQUE,
---   full_name text,
---   created_at timestamptz NOT NULL DEFAULT now(),
---   deleted_at timestamptz
+--   @ai       a note written straight to the AI agent -- a rule or gotcha the
+--             column types don't reveal. One point per line; repeat @ai for more.
+--   @widget   how the Admin UI renders a column (boolean, currency,
+--             enum-select, ...).
+--   @policy   an advisory note about access (enforcement stays in your RLS).
+--   @example  a recommended query for a view-backed concept. Unlike the others
+--             it spans several lines: the SQL follows, indented.
+--
+-- A VIEW is a first-class "domain concept" -- the one correct way to ask a
+-- question, so the agent stops re-deriving business rules and getting them
+-- wrong. Inside a COMMENT string, single quotes are doubled ('').
+--
+-- CREATE TABLE orders (
+--   id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+--   status      text NOT NULL DEFAULT 'cart'
+--                 CHECK (status IN ('cart', 'pending', 'paid', 'refunded')),
+--   is_test     boolean NOT NULL DEFAULT false,
+--   placed_at   timestamptz NOT NULL DEFAULT now(),
+--   deleted_at  timestamptz
 -- );
+-- COMMENT ON TABLE orders IS 'Customer orders.
+-- @ai: An order is recognized revenue only when status = ''paid'' AND is_test = false AND deleted_at IS NULL.
+-- @ai: The vw_recognized_revenue view already applies these rules -- start there for any revenue question.
+-- @policy: ''refunded'' orders reverse a sale; never count them as revenue.';
+-- COMMENT ON COLUMN orders.status IS 'Lifecycle state of the order.
+-- @widget: enum-select';
+-- COMMENT ON COLUMN orders.is_test IS 'Internal QA / test-order flag.
+-- @ai: ALWAYS exclude is_test = true from revenue, order counts, and dashboards.';
 --
--- COMMENT ON TABLE users IS
---   'Application users.
---    @ai: rows with deleted_at IS NOT NULL must be excluded from queries.';
---
--- COMMENT ON COLUMN users.email IS 'Login email (unique).';
+-- CREATE VIEW vw_recognized_revenue AS
+--   SELECT date_trunc('month', placed_at) AS month, count(*) AS paid_orders
+--   FROM orders
+--   WHERE status = 'paid' AND is_test = false AND deleted_at IS NULL
+--   GROUP BY 1;
+-- COMMENT ON VIEW vw_recognized_revenue IS 'Authoritative recognized revenue.
+-- @ai: Source of truth for revenue -- it already excludes test, soft-deleted, and non-paid orders. Do not re-derive from the orders table.
+-- @example: Paid orders by month.
+--   SELECT * FROM vw_recognized_revenue ORDER BY month DESC;';
