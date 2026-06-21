@@ -92,10 +92,18 @@ function buildColumn(input: {
    *  eligible. A composite-FK column is in `foreignKeyColumns` but not here. */
   singleColumnForeignKeyColumns: Set<string>;
   enumValues: string[] | null;
+  nativeEnum: boolean;
   hints: ColumnHints | undefined;
 }): ColumnContext {
-  const { column, primaryKey, foreignKeyColumns, singleColumnForeignKeyColumns, enumValues, hints } =
-    input;
+  const {
+    column,
+    primaryKey,
+    foreignKeyColumns,
+    singleColumnForeignKeyColumns,
+    enumValues,
+    nativeEnum,
+    hints,
+  } = input;
   const parsed = parseCommentTags(column.comment);
   const isPrimaryKey = primaryKey.includes(column.name);
   const isForeignKey = foreignKeyColumns.has(column.name);
@@ -140,6 +148,7 @@ function buildColumn(input: {
     policy: parsed.policy,
     widget,
     enumValues,
+    nativeEnum,
     readonly: hints?.readonly ?? false,
     ...(insertable === undefined ? {} : { insertable }),
     ...(updatable === undefined ? {} : { updatable }),
@@ -225,19 +234,25 @@ function buildTableContext(input: {
     if (fk.columns.length === 1) singleFkColumns.add(fk.columns[0]!);
   }
 
-  const columns = table.columns.map((c) =>
-    buildColumn({
+  const columns = table.columns.map((c) => {
+    // A CHECK-constraint pseudo-enum takes precedence (it can narrow further);
+    // otherwise fall back to a native ENUM type resolved by udtName, the same
+    // way function arguments resolve theirs. Only a native ENUM has an
+    // exhaustive label set, so record which source won: value pre-flight must
+    // not treat a non-exhaustive CHECK set as a whitelist.
+    const checkEnum = enumMap.get(c.name);
+    const nativeEnumValues =
+      checkEnum === undefined ? (findEnumValues(enums, c.udtName, table.schema) ?? null) : null;
+    return buildColumn({
       column: c,
       primaryKey: table.primaryKey,
       foreignKeyColumns: fkColumns,
       singleColumnForeignKeyColumns: singleFkColumns,
-      // A CHECK-constraint pseudo-enum takes precedence (it can narrow further);
-      // otherwise fall back to a native ENUM type resolved by udtName, the same
-      // way function arguments resolve theirs.
-      enumValues: enumMap.get(c.name) ?? findEnumValues(enums, c.udtName, table.schema) ?? null,
+      enumValues: checkEnum ?? nativeEnumValues,
+      nativeEnum: checkEnum === undefined && nativeEnumValues !== null,
       hints: hints?.columns?.[c.name],
-    }),
-  );
+    });
+  });
 
   const declaredColumnNames = new Set(table.columns.map((c) => c.name));
   if (hints?.columns) {
@@ -348,6 +363,9 @@ function buildViewContext(input: {
       policy: colParsed.policy,
       widget,
       enumValues,
+      // A view column has no CHECK constraints, so a non-null enumValues here is
+      // always a native ENUM resolved by udtName.
+      nativeEnum: enumValues !== null,
       readonly: colHints?.readonly ?? true,
     };
   });

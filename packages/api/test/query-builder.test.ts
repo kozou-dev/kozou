@@ -224,6 +224,31 @@ describe('buildListQuery', () => {
     ).toThrow(/is not valid for column "id"/);
   });
 
+  it('rejects a forged cursor whose boundary value is outside a native ENUM (400)', () => {
+    // A native-enum sort/PK boundary in a forged cursor used to bypass the
+    // scalar-only cursor pre-flight and reach PostgreSQL as a 22P02 (a 500).
+    const e = tableResource(
+      'e',
+      [
+        col('status', 'enum-select', {
+          dataType: 'order_status',
+          enumValues: ['pending', 'paid'],
+          nativeEnum: true,
+          isPrimaryKey: true,
+          nullable: false,
+        }),
+      ],
+      ['status'],
+    );
+    expect(() =>
+      buildListQuery(e, { after: cursorFor([{ field: 'status', order: 'asc' }], ['bogus']) }),
+    ).toThrow(/is not valid for column "status"/);
+    // a valid enum label in the cursor passes pre-flight.
+    expect(() =>
+      buildListQuery(e, { after: cursorFor([{ field: 'status', order: 'asc' }], ['paid']) }),
+    ).not.toThrow();
+  });
+
   it('cursor key aliases never collide with a real column of the same name (#185)', () => {
     // A (pathological) column literally named like the private cursor alias: the
     // alias namespace is lengthened so the real column is still selected and is
@@ -421,6 +446,90 @@ describe('buildListQuery', () => {
     } catch (err) {
       expect((err as KozouApiError).status).toBe(400);
     }
+  });
+
+  it('rejects an out-of-enum filter value before execution (400, native enum)', () => {
+    const t = tableResource('orders', [
+      col('id', 'number', { isPrimaryKey: true, nullable: false, dataType: 'integer' }),
+      col('status', 'enum-select', {
+        dataType: 'order_status',
+        enumValues: ['pending', 'paid', 'refunded'],
+        nativeEnum: true,
+        nullable: false,
+      }),
+    ]);
+    // An out-of-enum value used to reach PostgreSQL as a 22P02 (a 500); it is
+    // now pre-flighted to a 400, like the other scalar families.
+    expect(() =>
+      buildListQuery(t, { filters: [{ column: 'status', op: 'eq', value: 'bogus' }] }),
+    ).toThrow(/is not valid for column "status"/);
+    // A bad label inside in.() is caught too.
+    expect(() =>
+      buildListQuery(t, { filters: [{ column: 'status', op: 'in', values: ['paid', 'bogus'] }] }),
+    ).toThrow(/is not valid for column "status"/);
+    // A valid enum label passes.
+    expect(() =>
+      buildListQuery(t, { filters: [{ column: 'status', op: 'eq', value: 'paid' }] }),
+    ).not.toThrow();
+    // The check carries the 400 status.
+    try {
+      buildListQuery(t, { filters: [{ column: 'status', op: 'eq', value: 'bogus' }] });
+      expect.unreachable('expected a 400');
+    } catch (err) {
+      expect((err as KozouApiError).status).toBe(400);
+    }
+  });
+
+  it('leaves an enum-array column to PostgreSQL (not value-checked as a scalar enum)', () => {
+    const t = tableResource('t', [
+      col('id', 'number', { isPrimaryKey: true, nullable: false, dataType: 'integer' }),
+      // An array column has a null base type, so an array literal is never
+      // mistaken for a scalar enum label.
+      col('tags', 'text', { dataType: 'order_status[]', enumValues: ['pending', 'paid'] }),
+    ]);
+    expect(() =>
+      buildListQuery(t, { filters: [{ column: 'tags', op: 'eq', value: '{paid}' }] }),
+    ).not.toThrow();
+  });
+
+  it('does not reject an empty-string filter on a text column (filter pre-flight gap)', () => {
+    const t = tableResource('t', [
+      col('id', 'uuid', { isPrimaryKey: true, nullable: false }),
+      col('note', 'text', { dataType: 'text' }),
+    ]);
+    // An empty string is a valid text value (it matches rows with note = '').
+    // The filter pre-flight used to 400 it because `valueFitsType` returns false
+    // for an empty string; it must fall through to PostgreSQL instead.
+    expect(() =>
+      buildListQuery(t, { filters: [{ column: 'note', op: 'eq', value: '' }] }),
+    ).not.toThrow();
+  });
+
+  it('does not whitelist a CHECK-derived enum set (non-exhaustive, not a native ENUM)', () => {
+    // A CHECK constraint populates enumValues + an enum-select widget on a column
+    // whose underlying type is text/date/etc. Unlike a native ENUM the set is NOT
+    // exhaustive (nativeEnum is false), so a valid predicate outside it — and a
+    // range/pattern operator — must still run rather than 400.
+    const t = tableResource('orders', [
+      col('id', 'number', { isPrimaryKey: true, nullable: false, dataType: 'integer' }),
+      col('status', 'enum-select', { dataType: 'text', enumValues: ['cart', 'paid'] }),
+      col('due', 'enum-select', { dataType: 'date', enumValues: ['2026-01-01', '2026-02-01'] }),
+    ]);
+    // eq with an out-of-list value is a valid query (matches no rows), not a 400.
+    expect(() =>
+      buildListQuery(t, { filters: [{ column: 'status', op: 'eq', value: 'legacy' }] }),
+    ).not.toThrow();
+    // like / gt are valid text predicates regardless of the CHECK list.
+    expect(() =>
+      buildListQuery(t, { filters: [{ column: 'status', op: 'like', value: 'ca*' }] }),
+    ).not.toThrow();
+    expect(() =>
+      buildListQuery(t, { filters: [{ column: 'status', op: 'gt', value: 'm' }] }),
+    ).not.toThrow();
+    // a date range outside the CHECK set is valid too.
+    expect(() =>
+      buildListQuery(t, { filters: [{ column: 'due', op: 'gt', value: '2026-06-01' }] }),
+    ).not.toThrow();
   });
 
   it('accepts well-formed values for numeric / integer / boolean / uuid columns', () => {
@@ -981,6 +1090,47 @@ describe('write-body value pre-flight (#110)', () => {
     expect(() => buildInsertQuery(t, { amount: 'not-money' })).toThrow(/column "amount"/);
     expect(() => buildInsertQuery(t, { active: 'maybe' })).toThrow(/column "active" \(boolean\)/);
     expect(() => buildUpdateQuery(t, SAMPLE_UUID, { ref: 'zzz' })).toThrow(/column "ref" \(uuid\)/);
+  });
+
+  it('rejects an out-of-enum write value before execution (400, native enum)', () => {
+    const e = tableResource('orders', [
+      col('id', 'number', { isPrimaryKey: true, nullable: false, dataType: 'integer' }),
+      col('status', 'enum-select', {
+        dataType: 'order_status',
+        enumValues: ['pending', 'paid', 'refunded'],
+        nativeEnum: true,
+        nullable: false,
+      }),
+    ]);
+    // An out-of-enum write value used to reach PostgreSQL as a 22P02 (a 500).
+    expect(() => buildInsertQuery(e, { id: 1, status: 'bogus' })).toThrow(
+      /is not valid for column "status"/,
+    );
+    expect(() => buildUpdateQuery(e, '1', { status: 'bogus' })).toThrow(
+      /is not valid for column "status"/,
+    );
+    // A valid enum label passes.
+    expect(() => buildInsertQuery(e, { id: 1, status: 'paid' })).not.toThrow();
+  });
+
+  it('rejects an out-of-enum item-id component (400, enum primary key)', () => {
+    const e = tableResource(
+      'e',
+      [
+        col('status', 'enum-select', {
+          dataType: 'order_status',
+          enumValues: ['pending', 'paid'],
+          nativeEnum: true,
+          isPrimaryKey: true,
+          nullable: false,
+        }),
+        col('note', 'text', { dataType: 'text' }),
+      ],
+      ['status'],
+    );
+    expect(() => buildUpdateQuery(e, 'bogus', { note: 'x' })).toThrow(
+      /Item id component "bogus" is not valid for primary-key column "status"/,
+    );
   });
 
   it('accepts well-formed string scalars', () => {
