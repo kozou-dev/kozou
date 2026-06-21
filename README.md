@@ -97,8 +97,8 @@ Advisory only: enforcement stays in PostgreSQL (GRANTs + your RLS). See
 Use the runtime image directly:
 
 ```bash
-docker pull ghcr.io/kozou-dev/kozou:v1.12.1
-docker run --rm ghcr.io/kozou-dev/kozou:v1.12.1 mcp --help
+docker pull ghcr.io/kozou-dev/kozou:v1.12.2
+docker run --rm ghcr.io/kozou-dev/kozou:v1.12.2 mcp --help
 ```
 
 Or install the packages for library / embedded use:
@@ -133,7 +133,7 @@ via JWKS, or a minimal self-hosted issuer. See
 
 ## Requirements
 
-Runtime requirements for v1.12.1:
+Runtime requirements for v1.12.2:
 
 - **PostgreSQL 16 or later** — the canonical source of truth
 - **Docker 24 or later** (optional) — recommended for the `docker compose up` stack, which brings up PostgreSQL and a `kozou` service running `kozou dev` (the bundled Admin UI + MCP HTTP server, plus Kozou's in-house REST backend served in-process) from `ghcr.io/kozou-dev/kozou` (a multi-arch image, native on linux/amd64 and linux/arm64). The default stack needs **no separate REST container**; to opt out and use an external PostgREST instead, set `adapter.type: postgrest` and add the (commented) service in the scaffold's `docker-compose.yml`.
@@ -167,6 +167,7 @@ Contributors additionally need **pnpm 9 or later**. See [CONTRIBUTING.md](CONTRI
 - v1.11.0 (shipped): an authorization-aware addition to the AI context, additive. **MCP `describe_table` and `kozou docs` now surface a row-level-security signal.** A table protected by row-level security is reported with whether RLS is `enabled`, whether it is `forced` (applies to the table owner too), and whether any policy exists, plus an advisory note telling the agent the rows it sees may be filtered and a write may be rejected — a table with RLS enabled but no policy is flagged default-deny. The signal is **on by default** (a role-independent structural fact about the table, not the opt-in per-role privilege mode) and reported on **tables only** (a view carries no RLS flag of its own, and whether it masks its underlying tables depends on `security_invoker`). Kozou reads only the booleans — never the policy expressions (`USING` / `WITH CHECK`) — so your authorization logic stays in the database and out of the agent's context; knowing a table is row-filtered never bypasses the filter, which PostgreSQL enforces regardless.
 - v1.12.0 (shipped): `kozou docs` now emits a **Mermaid entity-relationship diagram** as a schema overview, built entirely from the existing schema context (read-only, stateless, no new introspection). It is meaning-laden, not a bare foreign-key graph: tables *and* views are entities (views are Kozou's named business concepts, linked by a dotted "derives from" edge to the tables they are built on), columns are attributes with `PK` / `FK` markers, foreign keys are crow's-foot edges whose cardinality reflects NOT NULL / uniqueness, and a legend plus an entity-level `@ai` / `@policy` notes block sits under the diagram, so a source-of-truth view and the schema's meaning are co-located with the structure. The README and docs also now state that **Kozou is migration-tool-agnostic** — it compiles the schema your migrations produce and never runs DDL or owns migration state.
 - v1.12.1 (shipped): documentation and dependency hygiene. The scaffolded `migrations/0001_init.sql` now ships a worked example of the COMMENT conventions — an `orders` table and a `vw_recognized_revenue` view exercising `@ai` / `@widget` / `@policy` / `@example` and the view-as-domain-concept pattern — instead of a single-line stub, so a freshly scaffolded project shows how to encode schema meaning from the start. Also pins a transitive dev/test-only dependency (`undici`) to a patched line for a published security advisory; no runtime dependency of any published package changes.
+- v1.12.2 (shipped): a patch release of input-validation hardening, all back-compatible. `@kozou/api` pre-flights two more client-mistake classes to a `400` up front instead of letting them reach PostgreSQL as a data exception (a `500`): a value outside a **native `ENUM`** column's labels — on every path (list filter, `in.(...)`, write body, item-id segment, and a forged pagination cursor) — and an **out-of-range pagination offset** (a `page` so large the computed `OFFSET` overflows). CHECK-constraint columns (text / date / …) are deliberately left to PostgreSQL: their value set is not exhaustive, so a predicate outside it (`status=eq.legacy`, `like.…`, a date range) stays a valid query, not a 400. The same change also stops an **empty-string text filter** (`?col=eq.`) being wrongly 400'd, since `''` is a valid value. Plus dependency hygiene: a transitive build-only dependency (`ts-deepmerge`) is pinned for an OSV-Scanner advisory; no runtime dependency of any published package changes.
 - Beyond v1.12: React UI exploration — optional write-path parity (a second UI driving create / edit / delete across both adapters)
 
 ## Name
