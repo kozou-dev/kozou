@@ -513,11 +513,53 @@ function isPreflightableScalar(base: string): boolean {
 }
 
 /**
+ * Shared scalar value pre-flight (Kozou v1.0 issues #76 / #85 / #110, plus the
+ * native-enum and empty-string gaps closed here): reject a value that cannot
+ * parse as the column's type with a 400 *before* the query runs, so a client
+ * mistake never reaches PostgreSQL as a class-22 data exception (which the error
+ * classifier deliberately leaves as a 500). The value is bound, not
+ * interpolated, so a 400 here is unambiguously client-caused. Cases:
+ *   1. Array (incl. enum arrays): `baseScalarType` is null — left to PostgreSQL.
+ *   2. Preflightable scalars (integer / decimal / boolean / uuid): range/format
+ *      checked via `valueFitsType`. A CHECK-derived `enumValues` may also sit on
+ *      such a column; it is NOT treated as a whitelist — `valueFitsType` governs.
+ *   3. Native ENUM (`column.nativeEnum`): `enumValues` is the type's exhaustive
+ *      label set, so an out-of-enum value (which would reach PostgreSQL as a
+ *      22P02, a 500) is rejected as a 400.
+ *   4. Everything else (text / date-time / json, incl. a non-exhaustive
+ *      CHECK-constraint pseudo-enum): NOT pre-checked. A valid predicate outside
+ *      a CHECK set (`eq.legacy`, `like.x`, `gt.m`) and an empty string (`''` is
+ *      a valid text value, so `?col=eq.` must not 400) are left to PostgreSQL.
+ */
+function assertScalarValueParsable(
+  column: ColumnContext,
+  value: string,
+  makeMessage: () => string,
+): void {
+  const type = preflightType(column);
+  const base = baseScalarType(type);
+  if (base === null) return; // array etc. (incl. enum arrays) — left to PostgreSQL
+  if (isPreflightableScalar(base)) {
+    // integer / decimal / boolean / uuid: range/format checked. Any enumValues
+    // here is a (non-exhaustive) CHECK set, so it is not a whitelist.
+    if (!valueFitsType(base, type, value)) throw badRequest(makeMessage());
+    return;
+  }
+  // Native ENUM only: its enumValues is the exhaustive label set. A CHECK-derived
+  // enumValues (which can sit on a text/date column) is not exhaustive and is
+  // left to PostgreSQL, like every other text / date-time / json value.
+  const enumValues = column.enumValues;
+  if (column.nativeEnum === true && enumValues !== null && enumValues.length > 0) {
+    if (!enumValues.includes(value)) throw badRequest(makeMessage());
+  }
+}
+
+/**
  * Reject a filter value that cannot parse as the column's type *before* the
- * query runs (Kozou v1.0 issue #76). Limited to numeric-family and boolean
- * columns — the common cases that otherwise raise a PostgreSQL data error
- * (a 500) at execution. The check is tied to the bound filter value, so a
- * 400 here is unambiguously client-caused (no server/view error is masked).
+ * query runs (Kozou v1.0 issue #76). Delegates to {@link
+ * assertScalarValueParsable}, which also closes the native-enum gap (an
+ * out-of-enum value used to 500) and the empty-string gap (a `?col=eq.` filter
+ * on a text column used to 400, even though an empty string is a valid value).
  */
 function assertFilterValueParsable(
   filter: Filter,
@@ -525,17 +567,15 @@ function assertFilterValueParsable(
   resource: Resource,
 ): void {
   if (filter.op === 'is') return; // fixed keyword clause, no bound value
-  const type = preflightType(column);
-  const base = baseScalarType(type);
-  if (base === null) return; // array etc. — not value-checked here
   const values = filter.op === 'in' ? filter.values : [filter.value];
   for (const value of values) {
-    if (!valueFitsType(base, type, value)) {
-      throw badRequest(
+    assertScalarValueParsable(
+      column,
+      value,
+      () =>
         `Filter value "${value}" is not valid for column "${filter.column}" (${column.dataType}) ` +
-          `on resource "${resource.name}".`,
-      );
-    }
+        `on resource "${resource.name}".`,
+    );
   }
 }
 
@@ -591,15 +631,13 @@ function assertKeyValuesParsable(
   for (let i = 0; i < keyColumns.length; i++) {
     const column = columnsByName.get(keyColumns[i]);
     if (column === undefined) continue; // key column absent from the exposed column set
-    const type = preflightType(column);
-    const base = baseScalarType(type);
-    if (base === null || !isPreflightableScalar(base)) continue;
-    if (!valueFitsType(base, type, keyValues[i])) {
-      throw badRequest(
+    assertScalarValueParsable(
+      column,
+      keyValues[i],
+      () =>
         `Item id component "${keyValues[i]}" is not valid for primary-key column ` +
-          `"${keyColumns[i]}" (${column.dataType}) on resource "${resource.name}".`,
-      );
-    }
+        `"${keyColumns[i]}" (${column.dataType}) on resource "${resource.name}".`,
+    );
   }
 }
 
@@ -621,15 +659,13 @@ function assertWriteValuesParsable(resource: Resource, data: Record<string, unkn
     if (typeof value !== 'string') continue;
     const column = columnsByName.get(key);
     if (column === undefined) continue; // unknown columns already rejected upstream
-    const type = preflightType(column);
-    const base = baseScalarType(type);
-    if (base === null || !isPreflightableScalar(base)) continue;
-    if (!valueFitsType(base, type, value)) {
-      throw badRequest(
+    assertScalarValueParsable(
+      column,
+      value,
+      () =>
         `Value "${value}" is not valid for column "${key}" (${column.dataType}) ` +
-          `on resource "${resource.name}".`,
-      );
-    }
+        `on resource "${resource.name}".`,
+    );
   }
 }
 
@@ -950,10 +986,11 @@ function assertCursorMatchesOrder(
 
 /** Reject a (forged/tampered) cursor whose boundary value cannot parse as its
  *  column's type *before* it reaches PostgreSQL — a 400, not a 500 — mirroring
- *  the id / filter / write-body pre-flight. Only the pre-flightable scalar
- *  families are checked (others fall through to PostgreSQL, as elsewhere); a
- *  NULL boundary is always allowed (it is valid for a nullable column). The
- *  order signature is already confirmed to match `columnsByName`'s columns. */
+ *  the id / filter / write-body pre-flight via {@link assertScalarValueParsable}
+ *  (pre-flightable scalars and native ENUMs are checked; text / CHECK-set /
+ *  date-time / json fall through to PostgreSQL, as elsewhere). A NULL boundary is
+ *  always allowed (valid for a nullable column). The order signature already
+ *  matches `columnsByName`'s columns. */
 function assertCursorValuesParsable(
   cursor: DecodedCursor,
   columnsByName: Map<string, ColumnContext>,
@@ -964,15 +1001,13 @@ function assertCursorValuesParsable(
     if (value === null) return;
     const column = columnsByName.get(key.field);
     if (column === undefined) return;
-    const type = preflightType(column);
-    const base = baseScalarType(type);
-    if (base === null || !isPreflightableScalar(base)) return;
-    if (!valueFitsType(base, type, String(value))) {
-      throw badRequest(
+    assertScalarValueParsable(
+      column,
+      String(value),
+      () =>
         `Pagination cursor value "${String(value)}" is not valid for column "${key.field}" ` +
-          `(${column.dataType}) on resource "${resource.name}".`,
-      );
-    }
+        `(${column.dataType}) on resource "${resource.name}".`,
+    );
   });
 }
 

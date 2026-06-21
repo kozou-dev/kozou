@@ -126,6 +126,13 @@ export type ColumnContext = {
   widget: WidgetType;
   /** Values extracted from CHECK constraints, or PostgreSQL ENUM members */
   enumValues: string[] | null;
+  /** True when `enumValues` is the exhaustive label set of a native PostgreSQL
+   *  ENUM type (resolved by udtName), not a non-exhaustive set extracted from a
+   *  CHECK constraint. `@kozou/api` value pre-flight rejects an out-of-set value
+   *  with a 400 only for a native ENUM (any other value is a 22P02 data error);
+   *  a CHECK set is not exhaustive (a text/date predicate outside it is still a
+   *  valid query), so it is left to PostgreSQL. Optional for back-compat. */
+  nativeEnum?: boolean;
   /** Read-only in the Admin UI, sourced from UI Hints. Drives form rendering
    *  and payload exclusion. Privilege-aware mode (issue #99) does NOT fold into
    *  this flag: read-only is mode-dependent there, so the Admin UI derives a

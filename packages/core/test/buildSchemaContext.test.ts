@@ -165,6 +165,7 @@ describe('buildSchemaContext', () => {
     const status = ctx.tables[0]!.columns.find((c) => c.name === 'status')!;
     // Same resolution as a function argument of the same type: by udtName.
     expect(status.enumValues).toEqual(['open', 'paid', 'shipped']);
+    expect(status.nativeEnum).toBe(true);
     expect(status.widget).toBe('enum-select');
   });
 
@@ -185,6 +186,7 @@ describe('buildSchemaContext', () => {
     const ctx = await buildSchemaContext({ raw });
     const status = ctx.views[0]!.columns.find((c) => c.name === 'status')!;
     expect(status.enumValues).toEqual(['open', 'paid']);
+    expect(status.nativeEnum).toBe(true);
     expect(status.widget).toBe('enum-select');
   });
 
@@ -203,6 +205,8 @@ describe('buildSchemaContext', () => {
     const ctx = await buildSchemaContext({ raw });
     const status = ctx.tables[0]!.columns.find((c) => c.name === 'status')!;
     expect(status.enumValues).toEqual(['open', 'paid']);
+    // CHECK-derived: not exhaustive, so not flagged as a native ENUM.
+    expect(status.nativeEnum).toBe(false);
   });
 
   it('displayField inference (UIHints > heuristic)', async () => {
@@ -489,6 +493,8 @@ describe('buildSchemaContext', () => {
     const ctx = await buildSchemaContext({ raw });
     const status = ctx.tables[0]!.columns[0]!;
     expect(status.enumValues).toEqual(['for_sale', 'reserved']);
+    // CHECK-derived enumValues is not a native ENUM (not an exhaustive domain).
+    expect(status.nativeEnum).toBe(false);
     expect(status.widget).toBe('enum-select');
   });
 
