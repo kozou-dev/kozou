@@ -911,8 +911,19 @@ export function buildListQuery(
     dataValues = [...whereValues, fetchLimit];
     dataText = `SELECT ${cols}${cursorKeySql}${embedSql} FROM ${table}${whereClause}${orderClause} LIMIT ${limitParam}`;
   } else {
+    // `clampPage` floors `page` but leaves it otherwise unbounded, so a very
+    // large finite page (e.g. page=1e308) makes the computed offset non-finite
+    // or pushes it past PostgreSQL's bigint OFFSET range. Bound straight in, it
+    // would reach the database as a class-22 data error (a 500). Reject it as a
+    // 400 up front, mirroring the value pre-flights.
+    const offset = (page - 1) * pageSize;
+    if (!Number.isSafeInteger(offset)) {
+      throw badRequest(
+        `Pagination "page" (${params.page}) is too large; the computed offset is out of range.`,
+      );
+    }
     const offsetParam = `$${whereValues.length + 2}`;
-    dataValues = [...whereValues, fetchLimit, (page - 1) * pageSize];
+    dataValues = [...whereValues, fetchLimit, offset];
     dataText = `SELECT ${cols}${cursorKeySql}${embedSql} FROM ${table}${whereClause}${orderClause} LIMIT ${limitParam} OFFSET ${offsetParam}`;
   }
 

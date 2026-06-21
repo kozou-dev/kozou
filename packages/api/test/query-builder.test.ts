@@ -76,6 +76,22 @@ describe('buildListQuery', () => {
     );
   });
 
+  it('rejects a page so large the computed offset overflows the safe-integer range (400)', () => {
+    // page=1e308 is finite (so clampPage passes it through) but (page-1)*pageSize
+    // becomes Infinity; binding it into OFFSET used to reach PostgreSQL as a
+    // 22P02 (a 500). It is now pre-flighted to a 400.
+    expect(() => buildListQuery(authors, { page: 1e308 })).toThrow(/too large|out of range/);
+    // a normal page is fine.
+    expect(() => buildListQuery(authors, { page: 5 })).not.toThrow();
+    // the check carries the 400 status.
+    try {
+      buildListQuery(authors, { page: 1e308 });
+      expect.unreachable('expected a 400');
+    } catch (err) {
+      expect((err as KozouApiError).status).toBe(400);
+    }
+  });
+
   // ---- Keyset (cursor) pagination (#185) ----
   const cursorFor = (
     order: { field: string; order: 'asc' | 'desc' }[],
