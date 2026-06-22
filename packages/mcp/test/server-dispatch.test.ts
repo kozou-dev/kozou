@@ -96,4 +96,43 @@ describe('MCP request dispatch error posture (#180)', () => {
     expect(res.isError).toBe(true);
     expect(text(res)).toBe('The "list_tables" tool failed.');
   });
+
+  it('describe_table: a missing required argument is actionable, not generic', async () => {
+    const res = await client.callTool({ name: 'describe_table', arguments: {} });
+    expect(res.isError).toBe(true);
+    // Names the argument and gives an example so an agent can self-correct,
+    // instead of the unhelpful "The describe_table tool failed."
+    expect(text(res)).toBe(
+      'describe_table: missing required argument "qualifiedName" (a non-empty string, e.g. "public.orders").',
+    );
+    expect(text(res)).not.toContain('tool failed');
+  });
+
+  it('describe_view: a missing required argument is actionable, not generic', async () => {
+    const res = await client.callTool({ name: 'describe_view', arguments: {} });
+    expect(res.isError).toBe(true);
+    expect(text(res)).toBe(
+      'describe_view: missing required argument "qualifiedName" (a non-empty string, e.g. "public.vw_active_users").',
+    );
+  });
+
+  it('describe_table: an empty-string argument is treated as missing', async () => {
+    const res = await client.callTool({
+      name: 'describe_table',
+      arguments: { qualifiedName: '' },
+    });
+    expect(res.isError).toBe(true);
+    expect(text(res)).toBe(
+      'describe_table: missing required argument "qualifiedName" (a non-empty string, e.g. "public.orders").',
+    );
+  });
+
+  it('describe_table: accepts `name` as an alias for `qualifiedName`', async () => {
+    const res = await client.callTool({
+      name: 'describe_table',
+      arguments: { name: 'public.widgets' },
+    });
+    expect(res.isError).toBeFalsy();
+    expect(text(res)).toContain('public.widgets');
+  });
 });

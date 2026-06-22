@@ -1,16 +1,16 @@
 import type { SchemaContext } from '@kozou/core';
 import { McpToolError } from '../errors.js';
-import {
-  describeViewInputSchema,
-  type DescribeViewInput,
-  type DescribeViewOutput,
-} from '../schemas/describe_view.js';
+import { requireQualifiedName } from './qualifiedName.js';
+import { type DescribeViewOutput } from '../schemas/describe_view.js';
 
-export function describeView(input: DescribeViewInput, ctx: SchemaContext): DescribeViewOutput {
-  const parsed = describeViewInputSchema.parse(input);
-  const view = ctx.views.find((v) => v.qualifiedName === parsed.qualifiedName);
+export function describeView(
+  input: Record<string, unknown>,
+  ctx: SchemaContext,
+): DescribeViewOutput {
+  const qualifiedName = requireQualifiedName('describe_view', input, 'public.vw_active_users');
+  const view = ctx.views.find((v) => v.qualifiedName === qualifiedName);
   if (!view) {
-    throw new McpToolError(`View not found: ${parsed.qualifiedName}`);
+    throw new McpToolError(`View not found: ${qualifiedName}`);
   }
   return {
     qualifiedName: view.qualifiedName,

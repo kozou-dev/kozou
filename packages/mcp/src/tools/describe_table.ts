@@ -1,8 +1,7 @@
 import type { RowSecurity, SchemaContext } from '@kozou/core';
 import { McpToolError } from '../errors.js';
+import { requireQualifiedName } from './qualifiedName.js';
 import {
-  describeTableInputSchema,
-  type DescribeTableInput,
   type DescribeTableOutput,
   type DescribeTableColumn,
 } from '../schemas/describe_table.js';
@@ -25,11 +24,14 @@ function rowSecurityNote(rls: RowSecurity): { note: string } | Record<string, ne
   };
 }
 
-export function describeTable(input: DescribeTableInput, ctx: SchemaContext): DescribeTableOutput {
-  const parsed = describeTableInputSchema.parse(input);
-  const table = ctx.tables.find((t) => t.qualifiedName === parsed.qualifiedName);
+export function describeTable(
+  input: Record<string, unknown>,
+  ctx: SchemaContext,
+): DescribeTableOutput {
+  const qualifiedName = requireQualifiedName('describe_table', input, 'public.orders');
+  const table = ctx.tables.find((t) => t.qualifiedName === qualifiedName);
   if (!table) {
-    throw new McpToolError(`Table not found: ${parsed.qualifiedName}`);
+    throw new McpToolError(`Table not found: ${qualifiedName}`);
   }
 
   // Annotate every FK column with its referenced column. For a composite FK
