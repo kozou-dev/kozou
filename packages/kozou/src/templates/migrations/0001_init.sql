@@ -28,6 +28,7 @@
 --   status      text NOT NULL DEFAULT 'cart'
 --                 CHECK (status IN ('cart', 'pending', 'paid', 'refunded')),
 --   is_test     boolean NOT NULL DEFAULT false,
+--   net_amount  numeric(12,2) NOT NULL DEFAULT 0,
 --   placed_at   timestamptz NOT NULL DEFAULT now(),
 --   deleted_at  timestamptz
 -- );
@@ -41,11 +42,11 @@
 -- @ai: ALWAYS exclude is_test = true from revenue, order counts, and dashboards.';
 --
 -- CREATE VIEW vw_recognized_revenue AS
---   SELECT date_trunc('month', placed_at) AS month, count(*) AS paid_orders
+--   SELECT date_trunc('month', placed_at) AS month, sum(net_amount) AS revenue
 --   FROM orders
 --   WHERE status = 'paid' AND is_test = false AND deleted_at IS NULL
 --   GROUP BY 1;
 -- COMMENT ON VIEW vw_recognized_revenue IS 'Authoritative recognized revenue.
 -- @ai: Source of truth for revenue -- it already excludes test, soft-deleted, and non-paid orders. Do not re-derive from the orders table.
--- @example: Paid orders by month.
+-- @example: Revenue by month.
 --   SELECT * FROM vw_recognized_revenue ORDER BY month DESC;';

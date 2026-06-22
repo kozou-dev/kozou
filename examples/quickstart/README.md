@@ -59,7 +59,7 @@ the MCP server, then ask it about revenue, active products, or customer value.
 - **stdio transport** (no stack needed — the client launches Kozou itself):
 
   ```bash
-  DATABASE_URL=postgres://kozou:kozou@localhost:5432/kozou npx -p kozou kozou mcp --stdio
+  DATABASE_URL=postgres://kozou:kozou@localhost:5432/kozou npx -y kozou mcp --stdio
   ```
 
 See <https://kozou.org> for client-specific MCP setup.

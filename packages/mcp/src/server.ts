@@ -176,11 +176,11 @@ export function createMcpServer(cache: SchemaCache, execution?: McpExecution): S
         case 'list_tables':
           return successResult(listTables(args, ctx));
         case 'describe_table':
-          return successResult(describeTable(args as { qualifiedName: string }, ctx));
+          return successResult(describeTable(args, ctx));
         case 'list_views':
           return successResult(listViews(args, ctx));
         case 'describe_view':
-          return successResult(describeView(args as { qualifiedName: string }, ctx));
+          return successResult(describeView(args, ctx));
         case 'list_concepts':
           return successResult(listConcepts(args, ctx));
         case 'get_concept_context':
