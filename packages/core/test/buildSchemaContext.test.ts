@@ -697,6 +697,43 @@ describe('buildSchemaContext', () => {
     });
     expect(ctx.views[0]!.label).toBe('X view');
   });
+
+  it('TABLE.label is the table name, never the COMMENT (kept symmetric with views)', async () => {
+    // Regression: a commented table used to derive its label from the COMMENT's
+    // first line, so the dashboard rendered the comment twice (title +
+    // description) and hid the table name. The label must be the bare name; the
+    // COMMENT only surfaces as description — exactly how the VIEW path behaves.
+    const raw = makeRaw({
+      tables: [
+        makeTable('example_table', {
+          comment: 'A short description of the table.',
+          columns: [makeCol('id', 'uuid')],
+          primaryKey: ['id'],
+        }),
+      ],
+      views: [
+        {
+          schema: 'public',
+          name: 'example_view',
+          comment: 'A short description of the view.',
+          columns: [],
+          underlyingTables: [],
+          definition: 'SELECT 1',
+        },
+      ],
+    });
+    const ctx = await buildSchemaContext({ raw });
+
+    const table = ctx.tables[0]!;
+    expect(table.label).toBe('example_table');
+    expect(table.description).toBe('A short description of the table.');
+    expect(table.label).not.toBe(table.description);
+
+    // The view path has always behaved this way; assert both stay symmetric.
+    const view = ctx.views[0]!;
+    expect(view.label).toBe('example_view');
+    expect(view.description).toBe('A short description of the view.');
+  });
 });
 
 describe('buildSchemaContext privilege-aware (#99)', () => {
