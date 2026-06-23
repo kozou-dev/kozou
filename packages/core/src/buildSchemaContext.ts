@@ -292,8 +292,12 @@ function buildTableContext(input: {
     });
   }
 
-  const commentFirstLine = parsed.body !== '' ? parsed.body.split('\n')[0]!.trim() : null;
-  const label = hints?.label ?? commentFirstLine ?? table.name;
+  // Title shown in the UI: an explicit UI Hint wins, otherwise the bare object
+  // name. The COMMENT is surfaced separately as `description`, so deriving the
+  // label from it would render the comment twice (title + description) and hide
+  // the table name. This mirrors the VIEW path (see buildViewContext) and keeps
+  // the dashboard's Tables and Views lists consistent.
+  const label = hints?.label ?? table.name;
 
   return {
     schema: table.schema,
@@ -370,6 +374,9 @@ function buildViewContext(input: {
     };
   });
 
+  // Title shown in the UI: UI Hint, otherwise the bare view name. The COMMENT is
+  // surfaced as `description`, never as the title (kept symmetric with the TABLE
+  // path in buildTableContext so the dashboard lists stay consistent).
   const label = hints?.label ?? view.name;
 
   return {

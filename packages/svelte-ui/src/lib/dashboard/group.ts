@@ -13,7 +13,8 @@ import type {
 export interface DashboardItem {
   /** Fully-qualified `<schema>.<name>` identifier used as the URL slug. */
   qualifiedName: string;
-  /** Human-facing title (UI Hints > COMMENT first line > name). */
+  /** Human-facing title: the object name (or its UI Hint label). RPC functions
+   *  are the exception — their label is the COMMENT's first line (the verb). */
   label: string;
   /** Full COMMENT body, or null when the table/view has no comment. */
   description: string | null;
