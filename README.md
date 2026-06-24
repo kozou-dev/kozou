@@ -97,8 +97,8 @@ Advisory only: enforcement stays in PostgreSQL (GRANTs + your RLS). See
 Use the runtime image directly:
 
 ```bash
-docker pull ghcr.io/kozou-dev/kozou:v1.12.3
-docker run --rm ghcr.io/kozou-dev/kozou:v1.12.3 mcp --help
+docker pull ghcr.io/kozou-dev/kozou:v1.12.4
+docker run --rm ghcr.io/kozou-dev/kozou:v1.12.4 mcp --help
 ```
 
 Or install the packages for library / embedded use:
@@ -133,7 +133,7 @@ via JWKS, or a minimal self-hosted issuer. See
 
 ## Requirements
 
-Runtime requirements for v1.12.3:
+Runtime requirements for v1.12.4:
 
 - **PostgreSQL 16 or later** — the canonical source of truth
 - **Docker 24 or later** (optional) — recommended for the `docker compose up` stack, which brings up PostgreSQL and a `kozou` service running `kozou dev` (the bundled Admin UI + MCP HTTP server, plus Kozou's in-house REST backend served in-process) from `ghcr.io/kozou-dev/kozou` (a multi-arch image, native on linux/amd64 and linux/arm64). The default stack needs **no separate REST container**; to opt out and use an external PostgREST instead, set `adapter.type: postgrest` and add the (commented) service in the scaffold's `docker-compose.yml`.
@@ -169,6 +169,7 @@ Contributors additionally need **pnpm 9 or later**. See [CONTRIBUTING.md](CONTRI
 - v1.12.1 (shipped): documentation and dependency hygiene. The scaffolded `migrations/0001_init.sql` now ships a worked example of the COMMENT conventions — an `orders` table and a `vw_recognized_revenue` view exercising `@ai` / `@widget` / `@policy` / `@example` and the view-as-domain-concept pattern — instead of a single-line stub, so a freshly scaffolded project shows how to encode schema meaning from the start. Also pins a transitive dev/test-only dependency (`undici`) to a patched line for a published security advisory; no runtime dependency of any published package changes.
 - v1.12.2 (shipped): a patch release of input-validation hardening, all back-compatible. `@kozou/api` pre-flights two more client-mistake classes to a `400` up front instead of letting them reach PostgreSQL as a data exception (a `500`): a value outside a **native `ENUM`** column's labels — on every path (list filter, `in.(...)`, write body, item-id segment, and a forged pagination cursor) — and an **out-of-range pagination offset** (a `page` so large the computed `OFFSET` overflows). CHECK-constraint columns (text / date / …) are deliberately left to PostgreSQL: their value set is not exhaustive, so a predicate outside it (`status=eq.legacy`, `like.…`, a date range) stays a valid query, not a 400. The same change also stops an **empty-string text filter** (`?col=eq.`) being wrongly 400'd, since `''` is a valid value. Plus dependency hygiene: a transitive build-only dependency (`ts-deepmerge`) is pinned for an OSV-Scanner advisory; no runtime dependency of any published package changes.
 - v1.12.3 (shipped): a patch release of reference Admin UI and cold-start fixes, all back-compatible. The Dashboard's **Tables** list now shows the table name as the title and its `COMMENT` as the description — a commented table previously rendered the comment in both slots and never showed the name, while the **Views** list already did the right thing; the table detail / list / new / edit headings shared the same label and are fixed too (`@kozou/core`). Plus onramp papercuts found running the scaffold end to end: the scaffolded `.env.example` no longer carries a redundant `DATABASE_URL` line that silently desynced from `POSTGRES_PASSWORD` (a first-run auth failure), and a bad or missing argument to the MCP `describe_table` / `describe_view` tools now returns an actionable message naming the argument instead of a generic tool-failed error.
+- v1.12.4 (shipped): reference Admin UI improvements from operator feedback, all additive. A new **"Connect an AI agent" page** turns the Admin UI into an on-ramp to the MCP layer: it shows the live MCP Streamable HTTP endpoint `kozou dev` already serves and copy-paste client config for Claude Desktop / Cursor (an `mcpServers` HTTP entry — no `DATABASE_URL` or any secret) and Claude Code (`claude mcp add --transport http`), reachable from a dashboard card and a header link. So an operator who lives in the Admin UI finds their way to the AI context layer — kozou's actual value — instead of hunting through docs. Plus navigation papercuts: a top-of-page back link on the table detail / new / edit pages (the way back to the list no longer requires scrolling to the bottom), and a full-width desktop layout so wide list tables use the viewport instead of a centered column.
 - Beyond v1.12: React UI exploration — optional write-path parity (a second UI driving create / edit / delete across both adapters)
 
 ## Name
