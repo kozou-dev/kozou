@@ -4,6 +4,17 @@
 
 <h1 class="mb-6 text-2xl font-semibold">Dashboard</h1>
 
+<a
+  href="/connect"
+  class="mb-10 block rounded-md border border-border p-4 transition hover:bg-muted"
+>
+  <div class="font-medium">Connect an AI agent →</div>
+  <div class="text-sm text-muted-foreground">
+    Let Claude or Cursor read this schema's meaning over MCP (read-only). Copy a
+    config, paste it into your client — no setup beyond that.
+  </div>
+</a>
+
 <section class="mb-10">
   <h2 class="mb-3 text-lg font-semibold">Tables</h2>
   {#if data.dashboard.tables.length === 0}

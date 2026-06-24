@@ -70,7 +70,22 @@ describe('buildAdminUiEnv', () => {
       HOST: '127.0.0.1',
       ORIGIN: 'http://localhost:3333',
       NODE_ENV: 'production',
+      // The co-located MCP HTTP server's port, for the "Connect an AI agent" page.
+      KOZOU_MCP_HTTP_PORT: '3334',
     });
+  });
+
+  it('forwards a custom MCP HTTP port to the UI child', async () => {
+    const config = await makeConfig();
+    const custom: KozouConfig = {
+      ...config,
+      server: {
+        ...config.server,
+        mcp: { ...config.server.mcp, http: { port: 9999, host: '127.0.0.1' } },
+      },
+    };
+    const env = buildAdminUiEnv(custom, 'http://localhost:3333', {});
+    expect(env.KOZOU_MCP_HTTP_PORT).toBe('9999');
   });
 
   it('carries the configured adapter url and UI host/port', async () => {
