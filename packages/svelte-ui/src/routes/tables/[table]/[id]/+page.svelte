@@ -8,6 +8,13 @@
   let { data, form } = $props();
 </script>
 
+<a
+  href={`/tables/${data.table.qualifiedName}`}
+  class="mb-4 inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
+>
+  <span aria-hidden="true">←</span> {data.table.label}
+</a>
+
 <h1 class="mb-1 text-2xl font-semibold">{data.table.label}</h1>
 <p class="mb-6 text-sm text-muted-foreground">
   {data.table.qualifiedName} / {data.id}
