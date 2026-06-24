@@ -12,6 +12,8 @@
         <span>{data.tableCount} tables</span>
         <span aria-hidden="true">/</span>
         <span>{data.viewCount} views</span>
+        <span aria-hidden="true">/</span>
+        <a href="/connect" class="text-primary hover:underline">Connect an AI agent</a>
       </nav>
     </div>
   </header>

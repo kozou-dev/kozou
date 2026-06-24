@@ -84,6 +84,12 @@ export function buildAdminUiEnv(
       delete env[key];
     }
   }
+  // The MCP Streamable HTTP server (commands/dev.ts) always comes up alongside
+  // the UI. Pass its port so the Admin UI's "Connect an AI agent" page can show
+  // a copy-paste config pointing at the live endpoint — the host comes from the
+  // UI's request URL (ORIGIN-bound), never a secret. Authoritative from config
+  // so a stray inherited value can't misstate the port.
+  env.KOZOU_MCP_HTTP_PORT = String(config.server.mcp.http.port);
   // Privilege-aware introspection (issue #99): pass the resolved role through to
   // the UI child so its introspection reflects what that role may do (hide
   // unreadable tables, lock non-updatable columns). Set it authoritatively from
