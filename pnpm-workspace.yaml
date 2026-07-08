@@ -4,3 +4,6 @@ packages:
   # Members of the workspace so they resolve workspace:* deps and join
   # `pnpm -r typecheck`, but each is marked `private` and is never published.
   - 'examples/*'
+  # Reproducible agent-accuracy comparison benchmark (private, never
+  # published; run manually — see benchmarks/README.md).
+  - 'benchmarks'

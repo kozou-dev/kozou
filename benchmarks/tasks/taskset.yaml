@@ -1,0 +1,207 @@
+# Pre-registered benchmark task set (Phase 1 MVP).
+#
+# ANTI-RIGGING RULES (see README.md):
+#   - This file is frozen BEFORE any benchmark run. Tasks are never added,
+#     removed, or reworded after results have been collected for a phase.
+#   - Every task is reported in the results, including tasks where the
+#     Kozou-context arm loses or ties.
+#   - `trap` documents the pre-registered expectation so that post-hoc
+#     rationalization is impossible. Control tasks expect NO delta.
+#
+# Fixture: examples/quickstart/schema.sql (synthetic online-store domain).
+# Ground truth values are derived deterministically from the seed data and
+# verified in CI by test/groundtruth.test.ts, which executes `canonical_sql`
+# against the live fixture and asserts `scoring.expected`.
+#
+# Categories (from the benchmark design):
+#   source-of-truth  — deprecated cache columns vs the authoritative view
+#   soft-delete      — deleted_at / is_active filters
+#   status-enum      — which lifecycle states count as sales
+#   control          — no-trap tasks; all arms should succeed equally
+
+tasks:
+  - id: bench-01
+    category: source-of-truth
+    question: >-
+      What is our total recognized revenue across all time? Give a single
+      number in dollars.
+    result_shape: exactly one row with a single numeric column
+    scoring:
+      kind: numeric
+      expected: 120.00
+    canonical_sql: SELECT sum(net_revenue) FROM vw_recognized_revenue
+    trap: >-
+      Flagship task. The obvious column, orders.amount_total, is a deprecated
+      stale cache that includes test orders; summing it over paid orders gives
+      575.00 (4.8x the true 120.00). Expect A0 to overstate.
+
+  - id: bench-02
+    category: source-of-truth
+    question: >-
+      How much recognized revenue came in through the web sales channel?
+      Give a single number in dollars.
+    result_shape: exactly one row with a single numeric column
+    scoring:
+      kind: numeric
+      expected: 75.00
+    canonical_sql: >-
+      SELECT sum(net_revenue) FROM vw_recognized_revenue WHERE channel = 'web'
+    trap: >-
+      Summing amount_total over paid web orders gives 530.00 (includes the
+      400.00 test order, a soft-deleted order, and a deleted customer's
+      order). Expect A0 to overstate.
+
+  - id: bench-03
+    category: source-of-truth
+    question: >-
+      Which customer has generated the most revenue for us? Give their full
+      name.
+    result_shape: exactly one row with a single text column (the customer's full name)
+    scoring:
+      kind: text
+      expected: Carol Diaz
+      aliases:
+        - carol
+        - carol diaz
+    canonical_sql: >-
+      SELECT full_name FROM vw_customer_lifetime_value
+      ORDER BY lifetime_revenue DESC LIMIT 1
+    trap: >-
+      Using amount_total including the 400.00 test order makes Bob Nguyen
+      look like the top customer; the true answer is Carol Diaz (45.00 vs
+      Alice 40.00 and Bob 35.00). Expect A0 to name Bob.
+
+  - id: bench-04
+    category: source-of-truth
+    question: >-
+      What is the average revenue per completed sale? Give a single number
+      in dollars.
+    result_shape: exactly one row with a single numeric column
+    scoring:
+      kind: numeric
+      expected: 40.00
+    canonical_sql: SELECT avg(net_revenue) FROM vw_recognized_revenue
+    trap: >-
+      avg(amount_total) over paid orders gives about 95.83 (575/6). The true
+      average over recognized sales is 40.00 (120/3). Expect A0 to overstate.
+
+  - id: bench-05
+    category: soft-delete
+    question: How many customers do we currently have? Give a single number.
+    result_shape: exactly one row with a single numeric column
+    scoring:
+      kind: numeric
+      expected: 3
+    canonical_sql: SELECT count(*) FROM customers WHERE deleted_at IS NULL
+    trap: >-
+      A bare count(*) gives 4; one customer is soft-deleted (deleted_at set)
+      and must be excluded. Expect A0 to answer 4.
+
+  - id: bench-06
+    category: soft-delete
+    question: >-
+      How many products can customers currently buy? Give a single number.
+    result_shape: exactly one row with a single numeric column
+    scoring:
+      kind: numeric
+      expected: 2
+    canonical_sql: SELECT count(*) FROM vw_active_products
+    trap: >-
+      A bare count gives 4. Filtering only is_active gives 3 (one active
+      product is soft-deleted). The true answer is 2 (is_active AND not
+      soft-deleted). Expect A0 to answer 3 or 4.
+
+  - id: bench-07
+    category: soft-delete
+    question: >-
+      List the SKUs of the products customers can currently buy.
+    result_shape: one row per SKU with a single text column
+    scoring:
+      kind: string_set
+      expected:
+        - WID-001
+        - GAD-001
+    canonical_sql: SELECT sku FROM vw_active_products
+    trap: >-
+      Same trap as bench-06 in set form; the naive answer includes GIZ-001
+      (delisted) and/or DOO-001 (soft-deleted).
+
+  - id: bench-08
+    category: status-enum
+    question: >-
+      How many real customer sales have we made? Give a single number.
+    result_shape: exactly one row with a single numeric column
+    scoring:
+      kind: numeric
+      expected: 3
+    canonical_sql: SELECT count(*) FROM vw_recognized_revenue
+    trap: >-
+      Counting status = 'paid' gives 6 (includes a test order, a soft-deleted
+      order, and a deleted customer's order); counting all orders gives 10.
+      The true answer is 3. Expect A0 to overcount.
+
+  - id: bench-09
+    category: status-enum
+    question: >-
+      How many orders are sitting in the pipeline — placed in the system but
+      not yet paid? Give a single number.
+    result_shape: exactly one row with a single numeric column
+    scoring:
+      kind: numeric
+      expected: 2
+    canonical_sql: >-
+      SELECT count(*) FROM orders WHERE status IN ('cart', 'pending')
+    trap: >-
+      Requires knowing which lifecycle states are "not a sale yet" (cart,
+      pending) as opposed to reversals (refunded, chargeback). A naive
+      reading of "not paid" as status <> 'paid' gives 4.
+
+  - id: bench-10
+    category: status-enum
+    question: >-
+      How much sales value have we lost to refunds and chargebacks, valued at
+      the prices captured on the order lines? Give a single number in dollars.
+    result_shape: exactly one row with a single numeric column
+    scoring:
+      kind: numeric
+      expected: 65.00
+    canonical_sql: >-
+      SELECT sum(oi.quantity * oi.unit_price - oi.discount)
+      FROM orders o JOIN order_items oi ON oi.order_id = o.id
+      WHERE o.status IN ('refunded', 'chargeback')
+    trap: >-
+      Weak trap, pre-registered as such: amount_total happens to agree with
+      the line items for the two reversal orders, so both arms may succeed.
+      The task still probes whether the agent treats BOTH refunded and
+      chargeback as reversals.
+
+  - id: bench-11
+    category: control
+    question: >-
+      How many customer records exist in the database in total, including any
+      inactive or deleted ones? Give a single number.
+    result_shape: exactly one row with a single numeric column
+    scoring:
+      kind: numeric
+      expected: 4
+    canonical_sql: SELECT count(*) FROM customers
+    trap: >-
+      NO-TRAP CONTROL. The question explicitly asks for all records. All arms
+      should answer 4. This detects the Kozou-context arm over-applying the
+      soft-delete guidance (answering 3 would be a context-induced error).
+
+  - id: bench-12
+    category: control
+    question: >-
+      How many order line item records are in the database in total? Give a
+      single number.
+    result_shape: exactly one row with a single numeric column
+    scoring:
+      kind: numeric
+      expected: 10
+    canonical_sql: SELECT count(*) FROM order_items
+    trap: >-
+      NO-TRAP CONTROL. A bare count over order_items is correct (10); line
+      items carry no soft-delete or test flag. This detects the Kozou-context
+      arm over-applying order-level guidance (joining to orders and excluding
+      test or deleted orders would undercount).
