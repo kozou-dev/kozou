@@ -48,4 +48,14 @@ describe('scoreRows', () => {
       scoreRows(scoring, [['WID-001'], ['GAD-001'], ['GIZ-001']]).correct,
     ).toBe(false);
   });
+
+  it('rejects join fan-out duplicates in string sets', () => {
+    const scoring: Scoring = {
+      kind: 'string_set',
+      expected: ['WID-001', 'GAD-001'],
+    };
+    expect(
+      scoreRows(scoring, [['WID-001'], ['GAD-001'], ['GAD-001']]).correct,
+    ).toBe(false);
+  });
 });

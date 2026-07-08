@@ -15,12 +15,15 @@ const CREATE_ROLE_STMT = 'CREATE ROLE analyst NOLOGIN;';
 
 /** Roles are cluster-global, so creating `analyst` must be idempotent when
  *  the fixture is loaded into a shared test server (CI reuses one Postgres
- *  via KOZOU_TEST_DATABASE_URL). */
+ *  via KOZOU_TEST_DATABASE_URL). Catching duplicate_object (rather than
+ *  check-then-create) stays correct when two test files load the fixture
+ *  concurrently. */
 const IDEMPOTENT_ROLE_STMT = `DO $$
 BEGIN
-  IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'analyst') THEN
-    CREATE ROLE analyst NOLOGIN;
-  END IF;
+  CREATE ROLE analyst NOLOGIN;
+EXCEPTION
+  WHEN duplicate_object THEN
+    NULL;
 END
 $$;`;
 

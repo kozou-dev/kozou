@@ -100,6 +100,29 @@ Tests (no API calls, CI-safe):
 pnpm --filter @kozou/benchmarks test
 ```
 
+## Known asymmetries and review notes
+
+These were raised in adversarial review and are kept **by design**; they are
+documented here so readers can weigh them instead of discovering them:
+
+- **`results/` is tracked on purpose.** Publishing raw transcripts in-repo is
+  part of the falsifiability design, so results are not gitignored. Commit
+  official runs only; delete scratch runs before staging.
+- **A0 sees view names** (for example `vw_recognized_revenue`), because a
+  naive agent connected to the database sees them too — hiding them would
+  make A0 artificially weak. If A0 answers correctly by guessing from a view
+  name, that is an honest result that weakens the measured delta.
+- **A2 may include `rowCountEstimate`** (planner statistics) because A2 is
+  the product's verbatim output; editing it would mean no longer measuring
+  the product. Answers are scored by executing the agent's SQL, so a leaked
+  estimate cannot directly produce a correct score.
+- **`effort` is pinned to `high`**, which is the model's API default; it is
+  recorded in each run's `meta.json`.
+- **Scoring semantics**: numeric compare uses an absolute tolerance
+  (default 0.005) plus an observed/expected ratio; string-set compare
+  requires the exact row count (join fan-out duplicates are wrong answers);
+  text compare is case-insensitive.
+
 ## Phases
 
 | Phase | Scope | Status |

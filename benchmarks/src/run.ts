@@ -166,7 +166,7 @@ interface ArmSummary {
   byCategory: Record<string, { total: number; correct: number }>;
   byTask: Record<
     string,
-    { total: number; correct: number; errorRatios: number[] }
+    { total: number; correct: number; failures: number; errorRatios: number[] }
   >;
 }
 
@@ -194,10 +194,12 @@ function summarize(records: RunRecord[], arms: ArmId[]): ArmSummary[] {
       const task = (summary.byTask[record.taskId] ??= {
         total: 0,
         correct: 0,
+        failures: 0,
         errorRatios: [],
       });
       task.total += 1;
       if (record.correct) task.correct += 1;
+      if (!record.agent.ok || !record.execution.ok) task.failures += 1;
       if (record.score?.errorRatio !== undefined) {
         task.errorRatios.push(record.score.errorRatio);
       }
@@ -219,17 +221,21 @@ function printSummary(tasks: BenchTask[], summaries: ArmSummary[]): void {
       console.log(`  ${category}: ${stats.correct}/${stats.total}`);
     }
   }
-  console.log('\nPer task (correct/runs, mean observed/expected ratio):');
+  console.log(
+    '\nPer task (correct/runs, mean observed/expected ratio over scored runs, failures):',
+  );
   for (const task of tasks) {
     const cells = summaries.map((summary) => {
       const stats = summary.byTask[task.id];
       if (!stats) return `${summary.arm} -`;
       const ratios = stats.errorRatios;
+      // The mean ratio only covers runs whose SQL executed; always print the
+      // failure count next to it so a failure-heavy cell cannot look benign.
       const meanRatio =
         ratios.length > 0
           ? (ratios.reduce((a, b) => a + b, 0) / ratios.length).toFixed(2)
           : 'n/a';
-      return `${summary.arm} ${stats.correct}/${stats.total} (ratio ${meanRatio})`;
+      return `${summary.arm} ${stats.correct}/${stats.total} (ratio ${meanRatio}, fail ${stats.failures})`;
     });
     console.log(`  ${task.id} [${task.category}]  ${cells.join('  |  ')}`);
   }
@@ -254,10 +260,10 @@ async function main(): Promise<void> {
   const container = await new PostgreSqlContainer('postgres:16').start();
   const databaseUrl = container.getConnectionUri();
   const db = new pg.Client({ connectionString: databaseUrl });
-  await db.connect();
 
   let mcpProcess: ChildProcess | null = null;
   try {
+    await db.connect();
     console.log('loading quickstart fixture...');
     await db.query(loadFixtureSql(SCHEMA));
 

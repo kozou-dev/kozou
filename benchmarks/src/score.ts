@@ -119,6 +119,15 @@ export function scoreRows(scoring: Scoring, rows: unknown[][]): Score {
           detail: 'expected a single column per row',
         };
       }
+      // Exact row count first: a Set comparison alone would credit SQL whose
+      // join fan-out duplicates a value (review finding).
+      if (rows.length !== scoring.expected.length) {
+        return {
+          correct: false,
+          observed,
+          detail: `expected ${scoring.expected.length} row(s), got ${rows.length}`,
+        };
+      }
       const got = new Set(rows.map((row) => String(row[0]).trim().toLowerCase()));
       const expected = new Set(
         scoring.expected.map((s) => s.trim().toLowerCase()),
