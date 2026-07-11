@@ -95,9 +95,6 @@ importers:
       '@kozou/core':
         specifier: workspace:*
         version: link:../core
-      jose:
-        specifier: ^6.2.3
-        version: 6.2.3
       pg:
         specifier: ^8.13.0
         version: 8.21.0
@@ -111,6 +108,9 @@ importers:
       '@types/pg':
         specifier: ^8.11.0
         version: 8.20.0
+      jose:
+        specifier: ^6.2.3
+        version: 6.2.3
 
   packages/codegen:
     dependencies:
@@ -221,7 +221,7 @@ importers:
         specifier: workspace:*
         version: link:../introspect
       '@modelcontextprotocol/sdk':
-        specifier: ^1.0.0
+        specifier: ^1.29.0
         version: 1.29.0(zod@4.4.3)
       pg:
         specifier: ^8.13.0
@@ -5570,7 +5570,7 @@ snapshots:
       get-proto: 1.0.1
       gopd: 1.2.0
       has-symbols: 1.1.0
-      hasown: 2.0.3
+      hasown: 2.0.4
       math-intrinsics: 1.1.0
 
   get-port@7.2.0: {}

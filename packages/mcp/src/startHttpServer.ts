@@ -12,14 +12,21 @@
 //   - Cache invalidation is exposed over HTTP via `POST /admin/refresh`,
 //     the HTTP-mode counterpart to the stdio
 //     server's SIGHUP handler.
-//   - MCP HTTP ships with **no authentication**, so the
-//     server binds to localhost by default and prints a loud warning when
-//     bound to a non-loopback host. By default the tools only expose schema
-//     metadata (no SQL execution, no data access), which bounds the blast
-//     radius. When the operator enables the `call` execution tool the blast
-//     radius is no longer bounded to metadata — the warning escalates
-//     accordingly — so execution + a non-loopback bind must be avoided unless
-//     an external auth/proxy layer is in front.
+//   - Without the `auth` option the MCP HTTP endpoint has **no
+//     authentication**, so the server binds to localhost by default and
+//     prints a loud warning when bound to a non-loopback host. By default the
+//     tools only expose schema metadata (no SQL execution, no data access),
+//     which bounds the blast radius. When the operator enables the `call`
+//     execution tool the blast radius is no longer bounded to metadata — the
+//     warning escalates accordingly — so execution + a non-loopback bind must
+//     be avoided unless an external auth/proxy layer is in front.
+//   - With the `auth` option the server is an OAuth 2.1 resource server
+//     (MCP authorization spec): it advertises the operator's authorization
+//     server via RFC 9728 protected-resource metadata, challenges
+//     tokenless requests with 401 + WWW-Authenticate, verifies each
+//     request's bearer token (signature / issuer / audience / role), and
+//     gates the describe and execute tool facets on the token's scopes.
+//     This is the sanctioned posture for a non-loopback bind.
 
 import { randomUUID } from 'node:crypto';
 import { createServer, type IncomingMessage, type Server as HttpServer, type ServerResponse } from 'node:http';
@@ -27,10 +34,19 @@ import type { AddressInfo } from 'node:net';
 
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
+import type { AuthInfo } from '@modelcontextprotocol/sdk/server/auth/types.js';
+import { KozouAuthError } from '@kozou/core/auth';
 
 import { createMcpServer } from './server.js';
 import type { SchemaCache } from './schemaCache.js';
-import type { McpExecution } from './execution.js';
+import { fixedIdentity, type McpExecution } from './execution.js';
+import {
+  authenticateRequest,
+  resolveMcpHttpAuth,
+  type McpAuthContext,
+  type McpHttpAuth,
+  type McpHttpAuthOptions,
+} from './httpAuth.js';
 
 export type StartHttpServerOptions = {
   /** TCP port to listen on. Default: 3334. */
@@ -63,6 +79,12 @@ export type StartHttpServerOptions = {
    *  whose `Content-Length` exceeds this, or that streams past it, is rejected
    *  with 413. */
   maxBodyBytes?: number;
+  /** Run as an OAuth 2.1 resource server (MCP authorization spec): serve
+   *  RFC 9728 protected-resource metadata, require a verified bearer token
+   *  on the MCP endpoint, and gate the tool facets on the token's scopes.
+   *  The resource URI's hostname is added to the DNS-rebinding guard. Omit
+   *  = the historical no-auth loopback mode. */
+  auth?: McpHttpAuthOptions;
 };
 
 /** The DNS-rebinding guard: the hostnames this server accepts in the `Host`
@@ -222,7 +244,23 @@ export async function startHttpServer(
   const port = opts.port ?? DEFAULT_PORT;
   const mcpPath = opts.mcpPath ?? DEFAULT_MCP_PATH;
 
-  if (!isLoopbackHost(host)) {
+  // Resolve the OAuth resource-server state up front so misconfiguration is
+  // a startup error, never a per-request one.
+  const auth = opts.auth === undefined ? undefined : resolveMcpHttpAuth(opts.auth, mcpPath);
+
+  if (opts.execution !== undefined) {
+    if (auth === undefined) {
+      // Fail fast: a no-auth server with execution needs its fixed identity.
+      fixedIdentity(opts.execution, prefix);
+    } else if (opts.execution.role !== undefined) {
+      process.stderr.write(
+        `${prefix} NOTE: execution.role ("${opts.execution.role}") is ignored in OAuth mode — ` +
+          `the \`call\` tool runs as each verified token's role.\n`,
+      );
+    }
+  }
+
+  if (!isLoopbackHost(host) && auth === undefined) {
     process.stderr.write(nonLoopbackWarning(host, prefix, opts.execution?.role));
   }
 
@@ -230,13 +268,22 @@ export async function startHttpServer(
   const transports = new Map<string, StreamableHTTPServerTransport>();
 
   // The DNS-rebinding guard is hostname-based and known up front; build it here
-  // so the request handler (which only runs after listen()) closes over it.
-  const guard = buildRebindingGuard(host, opts);
+  // so the request handler (which only runs after listen()) closes over it. In
+  // OAuth mode the canonical resource hostname is allowed automatically — it
+  // is config-declared (never derived from a header), and it is exactly the
+  // name a tunnel / reverse proxy forwards.
+  const guard = buildRebindingGuard(host, {
+    allowedHosts: [
+      ...(opts.allowedHosts ?? []),
+      ...(auth === undefined ? [] : [auth.resource.hostname]),
+    ],
+    ...(opts.allowedOrigins === undefined ? {} : { allowedOrigins: opts.allowedOrigins }),
+  });
 
   const maxBodyBytes = opts.maxBodyBytes ?? DEFAULT_MAX_BODY_BYTES;
 
   const httpServer = createServer((req, res) => {
-    handleRequest(req, res, cache, mcpPath, transports, opts.execution, guard, maxBodyBytes).catch(
+    handleRequest(req, res, cache, mcpPath, transports, opts.execution, guard, maxBodyBytes, auth).catch(
       (err) => {
         // Never echo the raw error to the client (it can carry stack/database
         // detail); log it server-side and return a generic message.
@@ -258,10 +305,23 @@ export async function startHttpServer(
   });
 
   const boundPort = (httpServer.address() as AddressInfo).port;
+  const refreshNote =
+    auth === undefined
+      ? `refresh: POST ${REFRESH_PATH}`
+      : auth.adminRefresh
+        ? `refresh: POST ${REFRESH_PATH} ("${auth.scopes.admin}" scope)`
+        : 'refresh: disabled';
   process.stderr.write(
     `${prefix} MCP HTTP listening on http://${host}:${boundPort}` +
-      ` (MCP: ${mcpPath}, refresh: POST ${REFRESH_PATH})\n`,
+      ` (MCP: ${mcpPath}, ${refreshNote})\n`,
   );
+  if (auth !== undefined) {
+    process.stderr.write(
+      `${prefix} OAuth 2.1 resource server mode: resource=${auth.resource.href}, ` +
+        `authorization servers=[${opts.auth?.authorizationServers.join(', ') ?? ''}], ` +
+        `scopes: describe="${auth.scopes.describe}" execute="${auth.scopes.execute}"\n`,
+    );
+  }
   process.stderr.write(
     `${prefix} DNS-rebinding guard: accepting Host names ${[...guard.hostnames].join(', ')}` +
       ` (set allowedHosts to add more)\n`,
@@ -289,6 +349,7 @@ async function handleRequest(
   execution: McpExecution | undefined,
   guard: RebindingGuard,
   maxBodyBytes: number,
+  auth: McpHttpAuth | undefined,
 ): Promise<void> {
   // DNS-rebinding guard: reject requests whose Host/Origin is not allowed
   // before doing any work, covering every route (the MCP endpoint and
@@ -310,10 +371,38 @@ async function handleRequest(
 
   const url = new URL(req.url ?? '/', 'http://localhost');
 
+  // RFC 9728 protected-resource metadata: public by design (it exists so an
+  // unauthenticated client can discover the authorization server), and free
+  // of any schema information. Served on the root well-known path and the
+  // path-insertion forms — real clients derive either from the endpoint URL.
+  if (auth !== undefined && auth.prmPaths.has(url.pathname)) {
+    if (req.method !== 'GET') {
+      respondError(res, 405, 'Method Not Allowed: metadata is GET-only.');
+      return;
+    }
+    res.writeHead(200, { 'content-type': 'application/json' });
+    res.end(auth.prmBody);
+    return;
+  }
+
   if (url.pathname === REFRESH_PATH) {
+    if (auth !== undefined && !auth.adminRefresh) {
+      // Disabled in auth mode unless the operator opted in; indistinguishable
+      // from an unknown path so the surface does not advertise itself.
+      respondError(res, 404, `Not Found: ${url.pathname}`);
+      return;
+    }
     if (req.method !== 'POST') {
       respondError(res, 405, 'Method Not Allowed: use POST /admin/refresh');
       return;
+    }
+    if (auth !== undefined) {
+      const ctx = await authenticate(auth, req, res);
+      if (ctx === undefined) return; // response already written
+      if (!ctx.scopes.has(auth.scopes.admin)) {
+        respondInsufficientScope(res, auth, auth.scopes.admin);
+        return;
+      }
     }
     cache.invalidate();
     res.writeHead(200, { 'content-type': 'application/json' });
@@ -322,11 +411,101 @@ async function handleRequest(
   }
 
   if (url.pathname === mcpPath) {
-    await handleMcp(req, res, cache, transports, execution, maxBodyBytes);
+    let authCtx: McpAuthContext | undefined;
+    if (auth !== undefined) {
+      authCtx = await authenticate(auth, req, res);
+      if (authCtx === undefined) return; // response already written
+      // A token carrying neither MCP facet scope can do nothing here; refuse
+      // up front with the challenge a scope-upgrade-capable client expects.
+      if (!authCtx.scopes.has(auth.scopes.describe) && !authCtx.scopes.has(auth.scopes.execute)) {
+        respondInsufficientScope(res, auth, auth.scopes.describe);
+        return;
+      }
+      // Hand the verified identity to the SDK transport, which surfaces it to
+      // the request handlers as `extra.authInfo` (tool filtering + per-token
+      // execution identity).
+      (req as IncomingMessage & { auth?: AuthInfo }).auth = {
+        token: authCtx.token,
+        clientId: clientIdOf(authCtx.claims),
+        scopes: [...authCtx.scopes],
+        ...(typeof authCtx.claims.exp === 'number' ? { expiresAt: authCtx.claims.exp } : {}),
+        extra: { role: authCtx.role, claims: authCtx.claims },
+      };
+    }
+    await handleMcp(req, res, cache, transports, execution, maxBodyBytes, auth, authCtx);
     return;
   }
 
   respondError(res, 404, `Not Found: ${url.pathname}`);
+}
+
+/** Verify the request's bearer token. On failure the 401/403 response —
+ *  including the RFC 9728 WWW-Authenticate challenge pointing at the
+ *  protected-resource metadata — is written here and `undefined` is
+ *  returned. Messages come from KozouAuthError and are safe by contract
+ *  (they never say which verification check failed). */
+async function authenticate(
+  auth: McpHttpAuth,
+  req: IncomingMessage,
+  res: ServerResponse,
+): Promise<McpAuthContext | undefined> {
+  try {
+    return await authenticateRequest(auth, req);
+  } catch (err) {
+    if (err instanceof KozouAuthError) {
+      if (err.kind === 'unauthorized') {
+        // RFC 6750: no error attribute when the request had no credentials.
+        const hadToken = req.headers.authorization !== undefined;
+        respondChallenge(res, 401, err.message, challengeHeader(auth, hadToken ? 'invalid_token' : undefined));
+        return undefined;
+      }
+      // A role problem (missing claim / not allowed) is forbidden, not a
+      // scope-upgrade situation — no insufficient_scope challenge.
+      respondError(res, 403, err.message);
+      return undefined;
+    }
+    throw err;
+  }
+}
+
+function challengeHeader(auth: McpHttpAuth, error?: string, scope?: string): string {
+  const attrs: string[] = [];
+  if (error !== undefined) attrs.push(`error="${error}"`);
+  if (scope !== undefined) attrs.push(`scope="${scope}"`);
+  attrs.push(`resource_metadata="${auth.resourceMetadataUrl}"`);
+  return `Bearer ${attrs.join(', ')}`;
+}
+
+function respondChallenge(res: ServerResponse, status: number, message: string, challenge: string): void {
+  if (res.headersSent) {
+    res.end();
+    return;
+  }
+  res.writeHead(status, {
+    'content-type': 'application/json',
+    'www-authenticate': challenge,
+  });
+  res.end(JSON.stringify({ error: message }));
+}
+
+function respondInsufficientScope(res: ServerResponse, auth: McpHttpAuth, requiredScope: string): void {
+  respondChallenge(
+    res,
+    403,
+    `This operation requires the "${requiredScope}" scope.`,
+    challengeHeader(auth, 'insufficient_scope', requiredScope),
+  );
+}
+
+/** The client identifier for the SDK's AuthInfo: OAuth `client_id` when the
+ *  AS includes it, else `azp` (Keycloak / OIDC), else the subject. Purely
+ *  informational on this server. */
+function clientIdOf(claims: Record<string, unknown>): string {
+  for (const key of ['client_id', 'azp', 'sub']) {
+    const value = claims[key];
+    if (typeof value === 'string' && value.length > 0) return value;
+  }
+  return '';
 }
 
 async function handleMcp(
@@ -336,10 +515,14 @@ async function handleMcp(
   transports: Map<string, StreamableHTTPServerTransport>,
   execution: McpExecution | undefined,
   maxBodyBytes: number,
+  auth: McpHttpAuth | undefined,
+  authCtx: McpAuthContext | undefined,
 ): Promise<void> {
   const sessionId = headerValue(req.headers['mcp-session-id']);
 
   // Existing session: reuse its transport (and the MCP server bound to it).
+  // Note the caller has already authenticated this request (auth mode): a
+  // session id never substitutes for a token — every request is verified.
   if (sessionId !== undefined) {
     const existing = transports.get(sessionId);
     if (existing === undefined) {
@@ -366,6 +549,13 @@ async function handleMcp(
       if (body === undefined) {
         respondError(res, 400, 'Bad Request: empty or invalid JSON body.');
         return;
+      }
+      if (auth !== undefined && authCtx !== undefined) {
+        const missing = missingToolScope(body, auth, authCtx);
+        if (missing !== undefined) {
+          respondInsufficientScope(res, auth, missing);
+          return;
+        }
       }
       await existing.handleRequest(req, res, body);
       return;
@@ -409,9 +599,29 @@ async function handleMcp(
     }
   };
 
-  const server = createMcpServer(cache, execution);
+  const server = createMcpServer(
+    cache,
+    execution,
+    auth === undefined ? undefined : { describe: auth.scopes.describe, execute: auth.scopes.execute },
+  );
   await server.connect(transport);
   await transport.handleRequest(req, res, body);
+}
+
+/** The scope a `tools/call` message requires but the token lacks, or
+ *  undefined when the message may proceed. Scope failures answer with an
+ *  HTTP 403 `insufficient_scope` challenge (RFC 6750) so a client capable
+ *  of scope upgrade can re-authorize; the dispatch layer inside the MCP
+ *  server double-checks independently. Only `tools/call` is gated here:
+ *  initialize / tools/list must work with any accepted token (the list is
+ *  filtered per scope instead). */
+function missingToolScope(body: unknown, auth: McpHttpAuth, ctx: McpAuthContext): string | undefined {
+  if (typeof body !== 'object' || body === null) return undefined;
+  const message = body as { method?: unknown; params?: { name?: unknown } };
+  if (message.method !== 'tools/call') return undefined;
+  const required =
+    message.params?.name === 'call' ? auth.scopes.execute : auth.scopes.describe;
+  return ctx.scopes.has(required) ? undefined : required;
 }
 
 function headerValue(value: string | string[] | undefined): string | undefined {

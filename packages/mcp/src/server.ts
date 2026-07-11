@@ -15,7 +15,7 @@ import { getConceptContext } from './tools/get_concept_context.js';
 import { describeFunctions } from './tools/describe_functions.js';
 import { callTool } from './tools/call.js';
 import type { SchemaCache } from './schemaCache.js';
-import type { McpExecution } from './execution.js';
+import { fixedIdentity, type CallIdentity, type McpExecution } from './execution.js';
 import { successResult, errorResult } from './result.js';
 import { McpToolError } from './errors.js';
 import type { SchemaContext } from '@kozou/core';
@@ -130,30 +130,63 @@ const CALL_TOOL_DEFINITION = {
 
 type ToolName = (typeof TOOL_DEFINITIONS)[number]['name'] | (typeof CALL_TOOL_DEFINITION)['name'];
 
+/** Scope names gating the two tool facets when the server sits behind the
+ *  OAuth resource-server layer: describe tools require `describe`, the `call`
+ *  tool requires `execute`. Tools whose scope the token does not carry are
+ *  not advertised (and a direct call is refused). Absent = no scope gate
+ *  (the no-auth loopback mode). */
+export type McpToolScopes = { describe: string; execute: string };
+
 /**
  * Build the MCP server bound to a read-only schema cache, and — when an
  * `execution` capability is supplied — the `call` tool that runs exposed
- * functions under the operator's single execution role. Without `execution`
- * the server is describe-only (the default): `call` is neither listed nor
- * runnable.
+ * functions. Without `execution` the server is describe-only (the default):
+ * `call` is neither listed nor runnable.
+ *
+ * With `scopes` set (the OAuth resource-server mode), tool advertising and
+ * dispatch are gated on the verified token's scopes, and `call` runs as the
+ * token's role/claims instead of the fixed execution role. A request that
+ * reaches the handlers without auth info is treated as having no scopes
+ * (fail closed).
  */
-export function createMcpServer(cache: SchemaCache, execution?: McpExecution): Server {
+export function createMcpServer(
+  cache: SchemaCache,
+  execution?: McpExecution,
+  scopes?: McpToolScopes,
+): Server {
   const server = new Server(
     { name: 'kozou', version: SERVER_VERSION },
     { capabilities: { tools: {} } },
   );
 
-  const tools = execution
-    ? [...TOOL_DEFINITIONS, CALL_TOOL_DEFINITION]
-    : [...TOOL_DEFINITIONS];
+  server.setRequestHandler(ListToolsRequestSchema, (_request, extra) => {
+    const tools = [];
+    if (scopes === undefined) {
+      tools.push(...TOOL_DEFINITIONS);
+      if (execution !== undefined) tools.push(CALL_TOOL_DEFINITION);
+    } else {
+      const granted = new Set(extra.authInfo?.scopes ?? []);
+      if (granted.has(scopes.describe)) tools.push(...TOOL_DEFINITIONS);
+      if (execution !== undefined && granted.has(scopes.execute)) tools.push(CALL_TOOL_DEFINITION);
+    }
+    return Promise.resolve({ tools: tools.map((t) => ({ ...t })) });
+  });
 
-  server.setRequestHandler(ListToolsRequestSchema, () =>
-    Promise.resolve({ tools: tools.map((t) => ({ ...t })) }),
-  );
-
-  server.setRequestHandler(CallToolRequestSchema, async (request) => {
+  server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
     const name = request.params.name as ToolName;
     const args = (request.params.arguments ?? {}) as Record<string, unknown>;
+
+    // Scope gate (OAuth mode): the transport layer already refuses
+    // out-of-scope calls with a proper HTTP 403 challenge; this dispatch-level
+    // check is defense in depth for any other transport wiring. The message
+    // names only the required scope (part of the advertised surface).
+    if (scopes !== undefined) {
+      const granted = new Set(extra.authInfo?.scopes ?? []);
+      const required = name === 'call' ? scopes.execute : scopes.describe;
+      if (!granted.has(required)) {
+        return errorResult(`This operation requires the "${required}" scope.`);
+      }
+    }
 
     // Schema introspection runs first and is shared by every tool. If it fails
     // (connection / auth / catalog error) the raw message can carry connection
@@ -187,14 +220,28 @@ export function createMcpServer(cache: SchemaCache, execution?: McpExecution): S
           return successResult(getConceptContext(args as { name: string }, ctx));
         case 'describe_functions':
           return successResult(describeFunctions(args, ctx));
-        case 'call':
+        case 'call': {
           // Defense in depth: the tool is not listed without execution, but a
           // client could still send the name. callTool owns its own success /
           // error shaping (and never leaks raw database text).
           if (execution === undefined) {
             return errorResult('The "call" tool is not enabled on this server.');
           }
-          return await callTool(args, ctx, execution);
+          // OAuth mode: the call runs as the verified token's role with the
+          // token's claims. A gated server never falls back to the fixed
+          // execution role — a missing verified role is a refusal.
+          let identity: CallIdentity;
+          if (scopes !== undefined) {
+            const who = extra.authInfo?.extra as { role?: unknown; claims?: unknown } | undefined;
+            if (typeof who?.role !== 'string' || who.role.length === 0) {
+              return errorResult('No authenticated role is available for this call.');
+            }
+            identity = { role: who.role, claims: who.claims ?? {} };
+          } else {
+            identity = fixedIdentity(execution, '[kozou mcp]');
+          }
+          return await callTool(args, ctx, execution, identity);
+        }
         default:
           return errorResult(`Unknown tool: ${name as string}`);
       }

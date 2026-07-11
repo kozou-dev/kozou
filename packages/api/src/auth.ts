@@ -11,13 +11,20 @@ import {
   KozouAuthError,
   type AuthConfig,
   type AuthContext,
-  type Authenticator,
+  type Authenticator as CoreAuthenticator,
   type JwtAlgorithm,
   type ServiceTokenOptions,
 } from '@kozou/core/auth';
 import { unauthorized, forbidden } from './errors.js';
 
-export type { AuthConfig, AuthContext, Authenticator, JwtAlgorithm, ServiceTokenOptions };
+export type { AuthConfig, AuthContext, JwtAlgorithm, ServiceTokenOptions };
+
+/** Same shape as `@kozou/core/auth`'s Authenticator, re-declared so the doc
+ *  matches this package's behaviour: an authenticator built by *this*
+ *  module's createAuthenticator maps the core KozouAuthError onto the REST
+ *  error contract — `authenticate` throws a 401 KozouApiError for any token
+ *  problem and a 403 for a role one. */
+export type Authenticator = CoreAuthenticator;
 
 /** Validate config (throws a plain Error at startup on misconfiguration)
  *  and return a verifier whose `authenticate` throws a 401 KozouApiError

@@ -24,7 +24,13 @@ import { existsSync } from 'node:fs';
 
 import { SchemaCache, startHttpServer, isLoopbackHost } from '@kozou/mcp';
 
-import { loadConfig, type KozouConfig, ADAPTER_KINDS, type AdapterKind } from '../config.js';
+import {
+  loadConfig,
+  resolveMcpAuthOptions,
+  type KozouConfig,
+  ADAPTER_KINDS,
+  type AdapterKind,
+} from '../config.js';
 import { PACKAGE_VERSION } from '../version.js';
 import {
   buildAdminUiEnv,
@@ -218,11 +224,16 @@ export async function devCommand(opts: DevOptions = {}): Promise<void> {
   }
 
   // 1. MCP HTTP, in-process. startHttpServer already warns on a
-  //    non-loopback bind, so we do not double-warn for it.
+  //    non-loopback bind, so we do not double-warn for it. A configured
+  //    server.mcp.http.auth block is honoured here too — the config
+  //    declaring OAuth and `kozou dev` serving the endpoint open would be a
+  //    silent posture downgrade.
+  const mcpAuth = resolveMcpAuthOptions(config);
   const mcp = await startHttpServer(cache, {
     port: config.server.mcp.http.port,
     host: config.server.mcp.http.host,
     logPrefix: `${PREFIX} mcp`,
+    ...(mcpAuth === undefined ? {} : { auth: mcpAuth }),
   });
 
   // 2. Admin UI, as a child process.

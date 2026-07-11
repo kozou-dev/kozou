@@ -9,7 +9,7 @@ import {
 } from '@kozou/core';
 
 import { callInputSchema } from '../schemas/call.js';
-import type { McpExecution } from '../execution.js';
+import { fixedIdentity, type CallIdentity, type McpExecution } from '../execution.js';
 import { successResult, errorResult, type McpToolResult } from '../result.js';
 
 const LOG_PREFIX = '[kozou mcp call]';
@@ -21,9 +21,12 @@ function isAllowed(qualifiedName: string, allow: string[] | undefined): boolean 
 }
 
 /**
- * The `call` execution tool: run an exposed RPC function under the operator's
- * single execution role and map the result — or a SAFE error — to an MCP
- * result.
+ * The `call` execution tool: run an exposed RPC function under the resolved
+ * identity and map the result — or a SAFE error — to an MCP result.
+ *
+ * `identity` is the role/claims the call runs as: the verified token's on an
+ * OAuth-authenticated server, or (when omitted) the operator's fixed
+ * execution role — the no-auth default.
  *
  * Enforcement is entirely PostgreSQL's. The call runs inside the shared
  * role-transaction envelope (SET LOCAL ROLE + published claims), so the
@@ -37,7 +40,9 @@ export async function callTool(
   input: Record<string, unknown>,
   ctx: SchemaContext,
   execution: McpExecution,
+  identity?: CallIdentity,
 ): Promise<McpToolResult> {
+  const who = identity ?? fixedIdentity(execution, LOG_PREFIX);
   const parsed = callInputSchema.safeParse(input);
   if (!parsed.success) {
     return errorResult(
@@ -72,7 +77,7 @@ export async function callTool(
   try {
     rows = await runInRoleTransaction(
       execution.pool,
-      { role: execution.role, claimsGuc: execution.claimsGuc, claims: execution.claims },
+      { role: who.role, claimsGuc: execution.claimsGuc, claims: who.claims },
       (db) => db.query<Record<string, unknown>>(built.text, built.values).then((r) => r.rows),
     );
   } catch (err) {

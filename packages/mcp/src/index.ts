@@ -2,9 +2,9 @@
 // Provides the MCP server. Stdio mode
 // (via the CLI) lives in src/cli.ts.
 
-export { createMcpServer } from './server.js';
+export { createMcpServer, type McpToolScopes } from './server.js';
 export { SchemaCache, type SchemaCacheOptions } from './schemaCache.js';
-export type { McpExecution } from './execution.js';
+export type { McpExecution, CallIdentity } from './execution.js';
 export { successResult, errorResult, type McpToolResult } from './result.js';
 export { McpToolError } from './errors.js';
 export { callTool } from './tools/call.js';
@@ -15,6 +15,12 @@ export {
   type StartHttpServerOptions,
   type HttpServerHandle,
 } from './startHttpServer.js';
+export {
+  DEFAULT_DESCRIBE_SCOPE,
+  DEFAULT_EXECUTE_SCOPE,
+  DEFAULT_ADMIN_SCOPE,
+  type McpHttpAuthOptions,
+} from './httpAuth.js';
 export { listTables } from './tools/list_tables.js';
 export { describeTable } from './tools/describe_table.js';
 export { listViews } from './tools/list_views.js';
