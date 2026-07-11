@@ -44,7 +44,13 @@ async function buildExecution(config: KozouConfig, authOn: boolean): Promise<Mcp
   const exec = config.server.mcp.execution;
   if (!exec.enabled) return undefined;
   if (exec.role === undefined && !authOn) {
-    throw new Error('server.mcp.execution.role is required when execution is enabled.');
+    // No OAuth per-token identity here (stdio mode, or --http without an auth
+    // block), so a fixed role is the only identity execution can run as.
+    throw new Error(
+      'server.mcp.execution.role is required when execution is enabled without OAuth ' +
+        'per-token identity (stdio mode, or --http without server.mcp.http.auth). ' +
+        'Add server.mcp.execution.role, or run --http with an auth block.',
+    );
   }
   const { default: pg } = await import('pg');
   // Write-capable pool, distinct from the SchemaCache's read-only introspection
@@ -118,8 +124,15 @@ export function resolveMcpAnnotationRole(
 export async function mcpCommand(opts: McpOptions = {}): Promise<void> {
   const config = await loadConfig({ path: opts.config });
 
+  // OAuth applies to the HTTP transport only, so the per-token identity (which
+  // lets execution.role be omitted) exists only in --http mode. In stdio mode
+  // the auth block is ignored, so execution still needs its fixed role — base
+  // the relaxation on the *selected* transport, not merely on the block's
+  // presence, or a stdio run of an HTTP-auth config would reach startStdioServer
+  // with no identity and fail late.
+  const httpMode = opts.http === true;
   const mcpAuth = resolveMcpAuthOptions(config);
-  const execution = await buildExecution(config, mcpAuth !== undefined);
+  const execution = await buildExecution(config, mcpAuth !== undefined && httpMode);
   const privilegeRole = resolveMcpAnnotationRole(config, execution?.role, process.env);
 
   const cache = new SchemaCache({

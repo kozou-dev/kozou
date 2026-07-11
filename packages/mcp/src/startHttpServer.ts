@@ -609,19 +609,28 @@ async function handleMcp(
 }
 
 /** The scope a `tools/call` message requires but the token lacks, or
- *  undefined when the message may proceed. Scope failures answer with an
+ *  undefined when the request may proceed. Scope failures answer with an
  *  HTTP 403 `insufficient_scope` challenge (RFC 6750) so a client capable
  *  of scope upgrade can re-authorize; the dispatch layer inside the MCP
  *  server double-checks independently. Only `tools/call` is gated here:
  *  initialize / tools/list must work with any accepted token (the list is
- *  filtered per scope instead). */
+ *  filtered per scope instead).
+ *
+ *  The body may be a JSON-RPC batch (an array) — the SDK transport still
+ *  accepts them — so every message is scanned and the first `tools/call`
+ *  the token cannot satisfy wins. Scanning the batch here (not just the
+ *  single-object shape) keeps a batched execute call from slipping past the
+ *  HTTP challenge. */
 function missingToolScope(body: unknown, auth: McpHttpAuth, ctx: McpAuthContext): string | undefined {
-  if (typeof body !== 'object' || body === null) return undefined;
-  const message = body as { method?: unknown; params?: { name?: unknown } };
-  if (message.method !== 'tools/call') return undefined;
-  const required =
-    message.params?.name === 'call' ? auth.scopes.execute : auth.scopes.describe;
-  return ctx.scopes.has(required) ? undefined : required;
+  const messages = Array.isArray(body) ? body : [body];
+  for (const message of messages) {
+    if (typeof message !== 'object' || message === null) continue;
+    const m = message as { method?: unknown; params?: { name?: unknown } };
+    if (m.method !== 'tools/call') continue;
+    const required = m.params?.name === 'call' ? auth.scopes.execute : auth.scopes.describe;
+    if (!ctx.scopes.has(required)) return required;
+  }
+  return undefined;
 }
 
 function headerValue(value: string | string[] | undefined): string | undefined {

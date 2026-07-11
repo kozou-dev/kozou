@@ -239,4 +239,25 @@ server:
     await mcpCommand({ http: true, config: file });
     expect((lastHttpOpts() as { auth?: unknown }).auth).toBeUndefined();
   });
+
+  it('stdio with an HTTP-auth config + execution but no role fails early (clear error, not a late crash)', async () => {
+    // The auth block relaxes execution.role only for --http (per-token
+    // identity); a stdio run of the same config must not reach startStdioServer
+    // with no identity — it errors up front instead.
+    const file = await writeConfig(`database:
+  url: postgres://u:p@db:5432/app
+server:
+  mcp:
+    http:
+      auth:
+        resource: https://mcp.example.com/mcp
+        authorizationServers:
+          - https://as.example.com
+        jwt:
+          jwksUri: https://as.example.com/jwks
+    execution:
+      enabled: true
+`);
+    await expect(mcpCommand({ stdio: true, config: file })).rejects.toThrow(/execution\.role is required/);
+  });
 });

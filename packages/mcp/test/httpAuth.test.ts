@@ -35,11 +35,18 @@ const RESOURCE = 'https://mcp.example.com/mcp';
 const ISSUERS = ['https://as.example.com/realms/kozou'];
 
 /** Mint an HS256 token the server under test accepts (audience defaults to
- *  the canonical resource; role/scope as given). */
-function mint(opts: { role?: string; scope?: string; audience?: string }): Promise<string> {
+ *  the canonical resource, issuer to the advertised AS — the server binds
+ *  `iss` to it; role/scope as given). */
+function mint(opts: {
+  role?: string;
+  scope?: string;
+  audience?: string;
+  issuer?: string;
+}): Promise<string> {
   return signServiceToken({
     secret: SECRET,
     audience: opts.audience ?? RESOURCE,
+    issuer: opts.issuer ?? ISSUERS[0],
     ...(opts.role === undefined ? {} : { role: opts.role }),
     ...(opts.scope === undefined ? {} : { claims: { scope: opts.scope } }),
   });
@@ -253,6 +260,40 @@ describe('OAuth RS mode: metadata + challenges (no database)', () => {
     expect(JSON.stringify(res.json)).not.toMatch(/aud/i);
   });
 
+  it('rejects a token whose iss is not an advertised authorization server (401)', async () => {
+    // The server binds accepted iss to the advertised authorizationServers even
+    // when the config sets no explicit jwt.issuer — a token from a different
+    // realm signed with the same key material must not be accepted.
+    const token = await mint({
+      role: 'mcp_rs_viewer',
+      scope: 'mcp:describe',
+      issuer: 'https://other-realm.example.com',
+    });
+    const res = await raw(port, {
+      method: 'POST',
+      path: '/mcp',
+      headers: { authorization: `Bearer ${token}` },
+    });
+    expect(res.status).toBe(401);
+    expect(JSON.stringify(res.json)).not.toMatch(/iss/i);
+  });
+
+  it('rejects a token with no iss claim when the issuer is bound (401)', async () => {
+    const token = await signServiceToken({
+      secret: SECRET,
+      audience: RESOURCE,
+      role: 'mcp_rs_viewer',
+      claims: { scope: 'mcp:describe' },
+      // deliberately no issuer
+    });
+    const res = await raw(port, {
+      method: 'POST',
+      path: '/mcp',
+      headers: { authorization: `Bearer ${token}` },
+    });
+    expect(res.status).toBe(401);
+  });
+
   it('rejects a token without a role claim (403 — no default role on this surface)', async () => {
     const token = await mint({ scope: 'mcp:describe' });
     const res = await raw(port, {
@@ -350,6 +391,25 @@ describe('OAuth RS mode: metadata + challenges (no database)', () => {
     expect(describeCall.headers['www-authenticate']).toMatch(
       /error="insufficient_scope", scope="mcp:describe"/,
     );
+
+    // A JSON-RPC batch must not smuggle an execute call past the HTTP gate:
+    // the transport still accepts batch arrays, so the scope scan covers them.
+    const batch = await raw(port, {
+      method: 'POST',
+      path: '/mcp',
+      headers: jsonHeaders(describeOnly, sessionId),
+      body: JSON.stringify([
+        { jsonrpc: '2.0', id: 4, method: 'tools/list', params: {} },
+        {
+          jsonrpc: '2.0',
+          id: 5,
+          method: 'tools/call',
+          params: { name: 'call', arguments: { function: 'public.whatever' } },
+        },
+      ]),
+    });
+    expect(batch.status).toBe(403);
+    expect(batch.headers['www-authenticate']).toMatch(/error="insufficient_scope", scope="mcp:execute"/);
   });
 
   it('disables POST /admin/refresh by default in auth mode (404, like an unknown path)', async () => {

@@ -134,6 +134,21 @@ export function resolveMcpHttpAuth(opts: McpHttpAuthOptions, mcpPath: string): M
   // rejects tokens without a role claim and requests without a token.
   const jwt: AuthConfig['jwt'] = { ...opts.jwt };
   if (jwt.audience === undefined) jwt.audience = opts.resource;
+  // Bind the accepted token issuer to the advertised authorization server(s):
+  // we publish `authorizationServers` in the protected-resource metadata, so a
+  // token must actually come from one of them. Without this, a config that
+  // omits `jwt.issuer` would accept any token signed by the configured key /
+  // JWKS regardless of `iss` — an issuer-confusion path when key material is
+  // shared across realms. An explicit `jwt.issuer` still wins (an operator who
+  // sets it means it); otherwise the advertised servers become the expected
+  // issuer (jose accepts a string[] and matches any). Either way `iss` is
+  // always verified.
+  if (jwt.issuer === undefined) {
+    jwt.issuer =
+      opts.authorizationServers.length === 1
+        ? opts.authorizationServers[0]
+        : opts.authorizationServers;
+  }
   const authenticator = createAuthenticator(
     {
       jwt,
