@@ -20,6 +20,10 @@
       "import": "./dist/index.js",
       "types": "./dist/index.d.ts"
     },
+    "./auth": {
+      "import": "./dist/auth.js",
+      "types": "./dist/auth.d.ts"
+    },
     "./package.json": "./package.json"
   },
   "files": [
@@ -36,6 +40,7 @@
     "test": "vitest run --coverage"
   },
   "dependencies": {
+    "jose": "^6.2.3",
     "yaml": "^2.6.0",
     "zod": "^4.4.3"
   },

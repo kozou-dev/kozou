@@ -127,6 +127,9 @@ importers:
 
   packages/core:
     dependencies:
+      jose:
+        specifier: ^6.2.3
+        version: 6.2.3
       yaml:
         specifier: ^2.6.0
         version: 2.9.0
