@@ -527,7 +527,12 @@ describe('OAuth RS mode: scope-gated tool advertising', () => {
       port: 0,
       host: '127.0.0.1',
       execution: { pool: deadPool, claimsGuc: 'request.jwt.claims' },
-      auth: { resource: RESOURCE, authorizationServers: ISSUERS, jwt: { secret: SECRET } },
+      auth: {
+        resource: RESOURCE,
+        authorizationServers: ISSUERS,
+        jwt: { secret: SECRET },
+        allowedRoles: ['mcp_rs_viewer'],
+      },
     });
   });
 
@@ -565,6 +570,102 @@ describe('OAuth RS mode: scope-gated tool advertising', () => {
 
   it('a token with both scopes sees everything', async () => {
     expect(await listToolNames('mcp:describe mcp:execute')).toHaveLength(8);
+  });
+});
+
+// B1 enforced at this layer too: a direct embedder never passes through the
+// kozou CLI config validation, so OAuth + execution without an explicit role
+// allowlist must be a startup error here as well — on both public entry
+// points (startHttpServer and createMcpServer), with a dispatch-level check
+// backing the declared allowlist for any foreign transport wiring.
+describe('OAuth RS mode: execution requires a role allowlist', () => {
+  const deadPool = {
+    connect: () => Promise.reject(new Error('the pool must never be dialed')),
+  } as unknown as ConnectionPool;
+  const SCOPES = { describe: 'mcp:describe', execute: 'mcp:execute' };
+  const RAW: RawIntrospection = {
+    serverVersion: '16.2',
+    introspectedAt: '2026-01-01T00:00:00.000Z',
+    schemas: ['public'],
+    enums: [],
+    functions: [],
+    tables: [],
+    views: [],
+  };
+
+  it('startHttpServer rejects OAuth + execution without a non-empty allowedRoles', async () => {
+    const cache = new SchemaCache({ connection: 'postgres://invalid:5432/none' });
+    for (const allowedRoles of [undefined, [] as string[]]) {
+      await expect(
+        startHttpServer(cache, {
+          port: 0,
+          host: '127.0.0.1',
+          execution: { pool: deadPool, claimsGuc: 'request.jwt.claims' },
+          auth: {
+            resource: RESOURCE,
+            authorizationServers: ISSUERS,
+            jwt: { secret: SECRET },
+            ...(allowedRoles === undefined ? {} : { allowedRoles }),
+          },
+        }),
+      ).rejects.toThrow(/non-empty auth\.allowedRoles/);
+    }
+  });
+
+  it('createMcpServer rejects a scope gate + execution without a non-empty allowedRoles', () => {
+    const cache = new SchemaCache({ connection: 'postgres://invalid:5432/none' });
+    const execution = { pool: deadPool, claimsGuc: 'request.jwt.claims' };
+    for (const allowedRoles of [undefined, [] as string[]]) {
+      expect(() => createMcpServer(cache, execution, SCOPES, allowedRoles)).toThrow(
+        /non-empty allowedRoles/,
+      );
+    }
+    // Describe-only (no execution) and no-auth (no scopes) stay unaffected.
+    expect(() => createMcpServer(cache, undefined, SCOPES)).not.toThrow();
+    expect(() => createMcpServer(cache, execution)).not.toThrow();
+  });
+
+  it('a verified role outside the allowlist is refused at dispatch', async () => {
+    const ctx = await buildSchemaContext({ raw: RAW });
+    const cache = { get: () => Promise.resolve(ctx), invalidate: () => {} } as unknown as SchemaCache;
+    const server = createMcpServer(
+      cache,
+      { pool: deadPool, claimsGuc: 'request.jwt.claims' },
+      SCOPES,
+      ['app_viewer'],
+    );
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    await server.connect(serverTransport);
+    try {
+      const response = new Promise<unknown>((resolve) => {
+        clientTransport.onmessage = (m) => resolve(m);
+      });
+      // Raw JSON-RPC send: only a transport can attach auth info, and this is
+      // exactly the foreign-wiring shape the dispatch check exists to cover.
+      await clientTransport.send(
+        {
+          jsonrpc: '2.0',
+          id: 1,
+          method: 'tools/call',
+          params: { name: 'call', arguments: { function: 'public.rs_whoami' } },
+        },
+        {
+          authInfo: {
+            token: 'opaque-not-used',
+            clientId: 'test-client',
+            scopes: ['mcp:execute'],
+            extra: { role: 'not_on_the_list', claims: {} },
+          },
+        },
+      );
+      const msg = (await response) as {
+        result?: { isError?: boolean; content: { text: string }[] };
+      };
+      expect(msg.result?.isError).toBe(true);
+      expect(msg.result?.content[0]?.text).toMatch(/role is not allowed/);
+    } finally {
+      await clientTransport.close();
+    }
   });
 });
 

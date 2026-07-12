@@ -13,7 +13,7 @@ import { describeView } from './tools/describe_view.js';
 import { listConcepts } from './tools/list_concepts.js';
 import { getConceptContext } from './tools/get_concept_context.js';
 import { describeFunctions } from './tools/describe_functions.js';
-import { callTool } from './tools/call.js';
+import { callToolAs } from './tools/call.js';
 import type { SchemaCache } from './schemaCache.js';
 import { fixedIdentity, type CallIdentity, type McpExecution } from './execution.js';
 import { successResult, errorResult } from './result.js';
@@ -147,13 +147,27 @@ export type McpToolScopes = { describe: string; execute: string };
  * dispatch are gated on the verified token's scopes, and `call` runs as the
  * token's role/claims instead of the fixed execution role. A request that
  * reaches the handlers without auth info is treated as having no scopes
- * (fail closed).
+ * (fail closed). That mode with `execution` requires a non-empty
+ * `allowedRoles`: the token's role claim selects the execution role, and
+ * this layer cannot see how the embedder's transport verified it, so the
+ * assumable roles must be an explicit allowlist — enforced again at
+ * dispatch for each call.
  */
 export function createMcpServer(
   cache: SchemaCache,
   execution?: McpExecution,
   scopes?: McpToolScopes,
+  allowedRoles?: string[],
 ): Server {
+  if (scopes !== undefined && execution !== undefined && (allowedRoles?.length ?? 0) === 0) {
+    throw new Error(
+      '@kozou/mcp: execution with a scope gate (OAuth resource-server mode) requires a ' +
+        "non-empty allowedRoles — the token's role claim selects the execution role, so " +
+        'the assumable roles must be an explicit allowlist.',
+    );
+  }
+  const allowedRoleSet = allowedRoles === undefined ? undefined : new Set(allowedRoles);
+
   const server = new Server(
     { name: 'kozou', version: SERVER_VERSION },
     { capabilities: { tools: {} } },
@@ -192,8 +206,8 @@ export function createMcpServer(
     // (connection / auth / catalog error) the raw message can carry connection
     // detail, so it is logged server-side and reported generically — never
     // echoed. This keeps the `call` tool's no-leak contract intact end to end:
-    // its own database errors are classified in callTool, and this covers the
-    // one shared step that runs before it.
+    // its own database errors are classified in callToolAs, and this covers
+    // the one shared step that runs before it.
     let ctx: SchemaContext;
     try {
       ctx = await cache.get();
@@ -222,8 +236,8 @@ export function createMcpServer(
           return successResult(describeFunctions(args, ctx));
         case 'call': {
           // Defense in depth: the tool is not listed without execution, but a
-          // client could still send the name. callTool owns its own success /
-          // error shaping (and never leaks raw database text).
+          // client could still send the name. callToolAs owns its own success
+          // / error shaping (and never leaks raw database text).
           if (execution === undefined) {
             return errorResult('The "call" tool is not enabled on this server.');
           }
@@ -236,11 +250,17 @@ export function createMcpServer(
             if (typeof who?.role !== 'string' || who.role.length === 0) {
               return errorResult('No authenticated role is available for this call.');
             }
+            // Dispatch-level allowlist check (defense in depth: the HTTP
+            // authenticator already refused out-of-list roles; this covers
+            // any other transport wiring that attaches auth info).
+            if (allowedRoleSet !== undefined && !allowedRoleSet.has(who.role)) {
+              return errorResult('The authenticated role is not allowed on this server.');
+            }
             identity = { role: who.role, claims: who.claims ?? {} };
           } else {
             identity = fixedIdentity(execution, '[kozou mcp]');
           }
-          return await callTool(args, ctx, execution, identity);
+          return await callToolAs(args, ctx, execution, identity);
         }
         default:
           return errorResult(`Unknown tool: ${name as string}`);

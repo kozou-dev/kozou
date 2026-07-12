@@ -21,12 +21,15 @@ function isAllowed(qualifiedName: string, allow: string[] | undefined): boolean 
 }
 
 /**
- * The `call` execution tool: run an exposed RPC function under the resolved
- * identity and map the result — or a SAFE error — to an MCP result.
+ * The `call` execution tool: run an exposed RPC function under the operator's
+ * fixed execution role and map the result — or a SAFE error — to an MCP
+ * result.
  *
- * `identity` is the role/claims the call runs as: the verified token's on an
- * OAuth-authenticated server, or (when omitted) the operator's fixed
- * execution role — the no-auth default.
+ * This public form deliberately has no identity parameter: per-token
+ * execution (the OAuth resource-server mode) is reachable only through
+ * `createMcpServer` / `startHttpServer`, which require an explicit role
+ * allowlist before a token's role claim may select the execution role.
+ * A public "run as this role" entry point would bypass that requirement.
  *
  * Enforcement is entirely PostgreSQL's. The call runs inside the shared
  * role-transaction envelope (SET LOCAL ROLE + published claims), so the
@@ -40,9 +43,21 @@ export async function callTool(
   input: Record<string, unknown>,
   ctx: SchemaContext,
   execution: McpExecution,
-  identity?: CallIdentity,
 ): Promise<McpToolResult> {
-  const who = identity ?? fixedIdentity(execution, LOG_PREFIX);
+  return callToolAs(input, ctx, execution, fixedIdentity(execution, LOG_PREFIX));
+}
+
+/** The identity-parameterized implementation behind `callTool`. NOT part of
+ *  the package's public API (`index.ts` does not re-export it): the only
+ *  callers are the server dispatchers, which enforce the role allowlist
+ *  before an OAuth token's identity gets here. */
+export async function callToolAs(
+  input: Record<string, unknown>,
+  ctx: SchemaContext,
+  execution: McpExecution,
+  identity: CallIdentity,
+): Promise<McpToolResult> {
+  const who = identity;
   const parsed = callInputSchema.safeParse(input);
   if (!parsed.success) {
     return errorResult(

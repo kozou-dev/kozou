@@ -294,9 +294,17 @@ export const configSchema = z
     if (mcpAuth === undefined || !config.server.mcp.execution.enabled) return;
     const allowedRoles = mcpAuth.allowedRoles ?? config.auth?.allowedRoles;
     if (allowedRoles === undefined || allowedRoles.length === 0) {
+      // Point the issue at the block the failing value actually lives in:
+      // the top-level auth block when an inherited empty list is what
+      // failed, the nested block otherwise (declared empty, or missing
+      // everywhere — the natural place to add it).
+      const path =
+        mcpAuth.allowedRoles === undefined && config.auth?.allowedRoles !== undefined
+          ? ['auth', 'allowedRoles']
+          : ['server', 'mcp', 'http', 'auth', 'allowedRoles'];
       ctx.addIssue({
         code: 'custom',
-        path: ['server', 'mcp', 'http', 'auth', 'allowedRoles'],
+        path,
         message:
           'server.mcp.http.auth with server.mcp.execution.enabled requires a non-empty ' +
           'allowedRoles (set it on server.mcp.http.auth, or inherit it from the top-level ' +

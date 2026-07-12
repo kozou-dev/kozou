@@ -911,6 +911,44 @@ describe('server.mcp.http.auth (OAuth 2.1 resource-server block)', () => {
     }
   });
 
+  it('an inherited empty allowlist points the issue at the top-level auth block', async () => {
+    const dir = await makeTempDir();
+    const file = await writeYaml(
+      dir,
+      [
+        'database:',
+        '  url: postgres://u:p@db:5432/app',
+        'server:',
+        '  mcp:',
+        '    http:',
+        '      auth:',
+        '        resource: https://mcp.example.com/mcp',
+        '        authorizationServers:',
+        '          - https://as.example.com',
+        '    execution:',
+        '      enabled: true',
+        'auth:',
+        '  jwt:',
+        '    secret: s3cr3t',
+        '  allowedRoles: []',
+      ].join('\n'),
+    );
+    try {
+      await loadConfig({ path: file, env: {} });
+      expect.unreachable('loadConfig should have rejected');
+    } catch (err) {
+      const e = err as KozouConfigError;
+      expect(e).toBeInstanceOf(KozouConfigError);
+      // The failing value lives in the top-level auth block — the issue
+      // path must send the operator there, not to the nested MCP block.
+      expect(
+        e.issues.some(
+          (i) => i.path === 'auth.allowedRoles' && /non-empty allowedRoles/.test(i.message),
+        ),
+      ).toBe(true);
+    }
+  });
+
   it('the allowedRoles requirement is satisfied by top-level auth inheritance', async () => {
     const dir = await makeTempDir();
     const file = await writeYaml(

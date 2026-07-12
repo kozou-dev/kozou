@@ -259,11 +259,25 @@ export async function startHttpServer(
     if (auth === undefined) {
       // Fail fast: a no-auth server with execution needs its fixed identity.
       fixedIdentity(opts.execution, prefix);
-    } else if (opts.execution.role !== undefined) {
-      process.stderr.write(
-        `${prefix} NOTE: execution.role ("${opts.execution.role}") is ignored in OAuth mode — ` +
-          `the \`call\` tool runs as each verified token's role.\n`,
-      );
+    } else {
+      // The same allowlist requirement the kozou CLI enforces at the config
+      // level: the token's role claim selects the execution role, so OAuth
+      // mode with execution demands an explicit non-empty allowedRoles.
+      // Enforced here too — a direct embedder of this package never passes
+      // through that config validation.
+      if (opts.auth?.allowedRoles === undefined || opts.auth.allowedRoles.length === 0) {
+        throw new Error(
+          '@kozou/mcp auth: execution with OAuth resource-server auth requires a non-empty ' +
+            "auth.allowedRoles — the token's role claim selects the execution role, so the " +
+            'assumable roles must be an explicit allowlist.',
+        );
+      }
+      if (opts.execution.role !== undefined) {
+        process.stderr.write(
+          `${prefix} NOTE: execution.role ("${opts.execution.role}") is ignored in OAuth mode — ` +
+            `the \`call\` tool runs as each verified token's role.\n`,
+        );
+      }
     }
   }
 
@@ -610,6 +624,7 @@ async function handleMcp(
     cache,
     execution,
     auth === undefined ? undefined : { describe: auth.scopes.describe, execute: auth.scopes.execute },
+    auth?.allowedRoles,
   );
   await server.connect(transport);
   await transport.handleRequest(req, res, body);
