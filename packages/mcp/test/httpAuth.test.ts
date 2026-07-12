@@ -527,7 +527,12 @@ describe('OAuth RS mode: scope-gated tool advertising', () => {
       port: 0,
       host: '127.0.0.1',
       execution: { pool: deadPool, claimsGuc: 'request.jwt.claims' },
-      auth: { resource: RESOURCE, authorizationServers: ISSUERS, jwt: { secret: SECRET } },
+      auth: {
+        resource: RESOURCE,
+        authorizationServers: ISSUERS,
+        jwt: { secret: SECRET },
+        allowedRoles: ['mcp_rs_viewer'],
+      },
     });
   });
 
@@ -565,6 +570,34 @@ describe('OAuth RS mode: scope-gated tool advertising', () => {
 
   it('a token with both scopes sees everything', async () => {
     expect(await listToolNames('mcp:describe mcp:execute')).toHaveLength(8);
+  });
+});
+
+// B1 enforced at this layer too: a direct embedder never passes through the
+// kozou CLI config validation, so OAuth + execution without an explicit role
+// allowlist must be a startup error here as well.
+describe('OAuth RS mode: execution requires a role allowlist', () => {
+  const deadPool = {
+    connect: () => Promise.reject(new Error('the pool must never be dialed')),
+  } as unknown as ConnectionPool;
+
+  it('startHttpServer rejects OAuth + execution without a non-empty allowedRoles', async () => {
+    const cache = new SchemaCache({ connection: 'postgres://invalid:5432/none' });
+    for (const allowedRoles of [undefined, [] as string[]]) {
+      await expect(
+        startHttpServer(cache, {
+          port: 0,
+          host: '127.0.0.1',
+          execution: { pool: deadPool, claimsGuc: 'request.jwt.claims' },
+          auth: {
+            resource: RESOURCE,
+            authorizationServers: ISSUERS,
+            jwt: { secret: SECRET },
+            ...(allowedRoles === undefined ? {} : { allowedRoles }),
+          },
+        }),
+      ).rejects.toThrow(/non-empty auth\.allowedRoles/);
+    }
   });
 });
 
