@@ -10,6 +10,7 @@
 
 import { randomBytes } from 'node:crypto';
 import { PostgreSqlContainer } from '@testcontainers/postgresql';
+import { GenericContainer, Wait } from 'testcontainers';
 
 export type DatabaseHandle = {
   connectionString: string;
@@ -51,6 +52,56 @@ export async function setupDatabase(): Promise<DatabaseHandle> {
   return {
     connectionString: container.getConnectionUri(),
     schema,
+    cleanup: async () => {
+      await container.stop();
+    },
+  };
+}
+
+export type KeycloakHandle = {
+  /** Issuer URL of the imported realm — also what tokens carry as `iss`
+   *  (dev mode derives it from the request host, which is this URL). */
+  issuerUrl: string;
+  /** OAuth token endpoint of the realm. */
+  tokenUrl: string;
+  /** JWKS endpoint the resource server verifies signatures against. */
+  jwksUri: string;
+  cleanup: () => Promise<void>;
+};
+
+/**
+ * Spin up a throwaway Keycloak (dev mode) with a realm imported from the
+ * given JSON file, for real-IdP end-to-end suites. Ready when the realm's
+ * OIDC discovery document answers — which is only after the import ran.
+ *
+ * Unlike `setupDatabase` there is no shared-server env fallback: CI has no
+ * standing Keycloak, so the container always starts (the dominant cost is
+ * the one-time image pull). All URLs are loopback http — the transport
+ * carve-out the resource server explicitly allows for local development.
+ */
+export async function setupKeycloak(opts: {
+  /** Absolute path to the realm-export JSON to import. */
+  realmFile: string;
+  /** Realm name declared inside that file. */
+  realm: string;
+}): Promise<KeycloakHandle> {
+  const container = await new GenericContainer('quay.io/keycloak/keycloak:26.4')
+    .withCopyFilesToContainer([
+      { source: opts.realmFile, target: '/opt/keycloak/data/import/realm.json' },
+    ])
+    .withCommand(['start-dev', '--import-realm'])
+    .withExposedPorts(8080)
+    .withWaitStrategy(
+      Wait.forHttp(`/realms/${opts.realm}/.well-known/openid-configuration`, 8080),
+    )
+    .withStartupTimeout(180_000)
+    .start();
+
+  const issuerUrl = `http://${container.getHost()}:${container.getMappedPort(8080)}/realms/${opts.realm}`;
+  return {
+    issuerUrl,
+    tokenUrl: `${issuerUrl}/protocol/openid-connect/token`,
+    jwksUri: `${issuerUrl}/protocol/openid-connect/certs`,
     cleanup: async () => {
       await container.stop();
     },
