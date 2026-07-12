@@ -4,7 +4,10 @@
 
 export { createMcpServer, type McpToolScopes } from './server.js';
 export { SchemaCache, type SchemaCacheOptions } from './schemaCache.js';
-export type { McpExecution, CallIdentity } from './execution.js';
+// CallIdentity is deliberately NOT re-exported: the only public routes to
+// per-token execution are createMcpServer / startHttpServer, which enforce
+// the role allowlist (B1) before a token's role claim selects the role.
+export type { McpExecution } from './execution.js';
 export { successResult, errorResult, type McpToolResult } from './result.js';
 export { McpToolError } from './errors.js';
 export { callTool } from './tools/call.js';

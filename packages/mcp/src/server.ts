@@ -13,7 +13,7 @@ import { describeView } from './tools/describe_view.js';
 import { listConcepts } from './tools/list_concepts.js';
 import { getConceptContext } from './tools/get_concept_context.js';
 import { describeFunctions } from './tools/describe_functions.js';
-import { callTool } from './tools/call.js';
+import { callToolAs } from './tools/call.js';
 import type { SchemaCache } from './schemaCache.js';
 import { fixedIdentity, type CallIdentity, type McpExecution } from './execution.js';
 import { successResult, errorResult } from './result.js';
@@ -206,8 +206,8 @@ export function createMcpServer(
     // (connection / auth / catalog error) the raw message can carry connection
     // detail, so it is logged server-side and reported generically — never
     // echoed. This keeps the `call` tool's no-leak contract intact end to end:
-    // its own database errors are classified in callTool, and this covers the
-    // one shared step that runs before it.
+    // its own database errors are classified in callToolAs, and this covers
+    // the one shared step that runs before it.
     let ctx: SchemaContext;
     try {
       ctx = await cache.get();
@@ -236,8 +236,8 @@ export function createMcpServer(
           return successResult(describeFunctions(args, ctx));
         case 'call': {
           // Defense in depth: the tool is not listed without execution, but a
-          // client could still send the name. callTool owns its own success /
-          // error shaping (and never leaks raw database text).
+          // client could still send the name. callToolAs owns its own success
+          // / error shaping (and never leaks raw database text).
           if (execution === undefined) {
             return errorResult('The "call" tool is not enabled on this server.');
           }
@@ -260,7 +260,7 @@ export function createMcpServer(
           } else {
             identity = fixedIdentity(execution, '[kozou mcp]');
           }
-          return await callTool(args, ctx, execution, identity);
+          return await callToolAs(args, ctx, execution, identity);
         }
         default:
           return errorResult(`Unknown tool: ${name as string}`);
