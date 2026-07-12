@@ -151,6 +151,48 @@ describe('resolveMcpHttpAuth', () => {
     expect(() => resolveMcpHttpAuth({ ...base, authorizationServers: ['nope'] }, '/mcp')).toThrow(
       /not a valid URL/,
     );
+    expect(
+      () => resolveMcpHttpAuth({ ...base, authorizationServers: ['ftp://as.example.com'] }, '/mcp'),
+    ).toThrow(/http\(s\)/);
+  });
+
+  it('rejects a plaintext http resource or authorization server on a non-loopback host', () => {
+    expect(() => resolveMcpHttpAuth({ ...base, resource: 'http://mcp.example.com/mcp' }, '/mcp')).toThrow(
+      /plaintext http on a non-loopback host/,
+    );
+    expect(
+      () => resolveMcpHttpAuth({ ...base, authorizationServers: ['http://as.example.com'] }, '/mcp'),
+    ).toThrow(/plaintext http on a non-loopback host/);
+  });
+
+  it('always allows plaintext http on loopback (local development)', () => {
+    for (const host of ['127.0.0.1', '127.1.2.3', 'localhost', '[::1]']) {
+      const auth = resolveMcpHttpAuth(
+        {
+          ...base,
+          resource: `http://${host}:3334/mcp`,
+          authorizationServers: [`http://${host}:8080/realms/kozou`],
+        },
+        '/mcp',
+      );
+      expect(auth.insecureHttpUrls).toEqual([]);
+    }
+  });
+
+  it('allowInsecureHttp waves a non-loopback http URL through and surfaces it for the warning', () => {
+    const auth = resolveMcpHttpAuth(
+      {
+        ...base,
+        resource: 'http://mcp.internal:3334/mcp',
+        authorizationServers: ['http://keycloak.internal:8080/realms/kozou'],
+        allowInsecureHttp: true,
+      },
+      '/mcp',
+    );
+    expect(auth.insecureHttpUrls).toEqual([
+      'http://mcp.internal:3334/mcp',
+      'http://keycloak.internal:8080/realms/kozou',
+    ]);
   });
 });
 

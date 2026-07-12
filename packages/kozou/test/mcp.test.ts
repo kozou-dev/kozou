@@ -255,6 +255,7 @@ server:
           - https://as.example.com
         jwt:
           jwksUri: https://as.example.com/jwks
+        allowedRoles: [app_agent]
     execution:
       enabled: true
 `);

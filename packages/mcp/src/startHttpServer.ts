@@ -248,6 +248,13 @@ export async function startHttpServer(
   // a startup error, never a per-request one.
   const auth = opts.auth === undefined ? undefined : resolveMcpHttpAuth(opts.auth, mcpPath);
 
+  if (auth !== undefined && auth.insecureHttpUrls.length > 0) {
+    process.stderr.write(
+      `${prefix} WARNING: allowInsecureHttp is set — advertising plaintext http URL(s) ` +
+        `${auth.insecureHttpUrls.join(', ')}; bearer tokens cross the network unencrypted.\n`,
+    );
+  }
+
   if (opts.execution !== undefined) {
     if (auth === undefined) {
       // Fail fast: a no-auth server with execution needs its fixed identity.

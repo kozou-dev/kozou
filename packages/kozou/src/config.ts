@@ -88,6 +88,14 @@ const mcpAuthScopesSchema = z
 // it as "what to request from the AS" — add e.g. `offline_access` when the
 // AS needs it for refresh tokens). `adminRefresh` opts POST /admin/refresh
 // back in, gated on the admin scope (default: the route is disabled).
+//
+// `allowInsecureHttp` waves through plaintext http resource / AS URLs on
+// non-loopback hosts (loopback is always fine); default off = startup error,
+// because these URLs are advertised to clients and carry bearer tokens.
+// With `execution.enabled`, a non-empty effective `allowedRoles` is required
+// (validated at the config level, where the top-level inheritance is
+// visible) — the token's role claim selects the execution role, so the
+// assumable roles must be an explicit allowlist.
 const mcpAuthSchema = z.object({
   resource: z.string().min(1),
   authorizationServers: z.array(z.string().min(1)).min(1),
@@ -97,6 +105,7 @@ const mcpAuthSchema = z.object({
   scopes: mcpAuthScopesSchema,
   extraScopesSupported: z.array(z.string().min(1)).optional(),
   adminRefresh: z.boolean().default(false),
+  allowInsecureHttp: z.boolean().default(false),
 });
 
 const mcpHttpServerSchema = z
@@ -261,16 +270,41 @@ const authSchema = z.object({
  *  asserts every top-level block here is documented in the config reference, so
  *  a newly added block (like `introspection` was) cannot ship undocumented.
  *  `Object.keys(configSchema.shape)` yields the top-level block names. */
-export const configSchema = z.object({
-  database: databaseSchema,
-  server: serverSchema,
-  adapter: adapterSchema,
-  api: apiSchema,
-  uiHints: uiHintsSchema,
-  cache: cacheSchema,
-  introspection: introspectionSchema,
-  auth: authSchema.optional(),
-});
+export const configSchema = z
+  .object({
+    database: databaseSchema,
+    server: serverSchema,
+    adapter: adapterSchema,
+    api: apiSchema,
+    uiHints: uiHintsSchema,
+    cache: cacheSchema,
+    introspection: introspectionSchema,
+    auth: authSchema.optional(),
+  })
+  .superRefine((config, ctx) => {
+    // MCP OAuth mode with execution turns the token's role claim into the
+    // `SET LOCAL ROLE` target, so the assumable roles must be an explicit
+    // non-empty allowlist — a broad connection role must not let a
+    // mis-mapped IdP claim select whatever role the database happens to
+    // permit. Deliberately stricter than the REST surface (where
+    // allowedRoles stays optional), the same posture as rejecting tokens
+    // without a role claim. Cross-block: the allowlist may be inherited
+    // from the top-level `auth`, which a nested schema cannot see.
+    const mcpAuth = config.server.mcp.http.auth;
+    if (mcpAuth === undefined || !config.server.mcp.execution.enabled) return;
+    const allowedRoles = mcpAuth.allowedRoles ?? config.auth?.allowedRoles;
+    if (allowedRoles === undefined || allowedRoles.length === 0) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['server', 'mcp', 'http', 'auth', 'allowedRoles'],
+        message:
+          'server.mcp.http.auth with server.mcp.execution.enabled requires a non-empty ' +
+          'allowedRoles (set it on server.mcp.http.auth, or inherit it from the top-level ' +
+          "auth block): the token's role claim selects the execution role, so the assumable " +
+          'roles must be an explicit allowlist.',
+      });
+    }
+  });
 
 export type KozouConfig = z.infer<typeof configSchema>;
 
@@ -390,6 +424,7 @@ export function resolveMcpAuthOptions(config: KozouConfig): McpHttpAuthOptions |
       ? {}
       : { extraScopesSupported: mcpAuth.extraScopesSupported }),
     adminRefresh: mcpAuth.adminRefresh,
+    allowInsecureHttp: mcpAuth.allowInsecureHttp,
   };
 }
 

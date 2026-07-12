@@ -70,6 +70,14 @@ export type McpHttpAuthOptions = {
    *  token carrying the admin scope. Default false: the route is disabled
    *  (404, indistinguishable from an unknown path). */
   adminRefresh?: boolean;
+  /** Permit plaintext `http:` resource / authorization-server URLs on
+   *  non-loopback hosts. Default false: loopback (localhost, 127.0.0.0/8,
+   *  ::1) is always fine for local development, but any other plaintext
+   *  URL is a startup error — these URLs are advertised to clients and
+   *  carry bearer tokens, which must not cross a network unencrypted
+   *  (OAuth 2.1). Opting in logs a startup warning; it exists for isolated
+   *  test networks, never production. */
+  allowInsecureHttp?: boolean;
 };
 
 /** The verified per-request identity handed to the MCP layer. */
@@ -94,6 +102,9 @@ export type McpHttpAuth = {
   /** Absolute metadata URL used in WWW-Authenticate challenges. */
   resourceMetadataUrl: string;
   adminRefresh: boolean;
+  /** Non-loopback plaintext http URLs the operator explicitly waved through
+   *  with `allowInsecureHttp` — surfaced so the server logs a warning. */
+  insecureHttpUrls: string[];
 };
 
 /** Validate the auth options and build the resolved resource-server state.
@@ -116,17 +127,42 @@ export function resolveMcpHttpAuth(opts: McpHttpAuthOptions, mcpPath: string): M
     );
   }
 
+  // Both the resource and the advertised authorization servers carry bearer
+  // tokens (and are handed to third-party clients via the PRM document), so
+  // plaintext http is refused outside loopback unless the operator opts in.
+  const insecureHttpUrls: string[] = [];
+  const requireSecureTransport = (url: URL, what: string): void => {
+    if (url.protocol !== 'http:' || isLoopbackUrl(url)) return;
+    if (opts.allowInsecureHttp === true) {
+      insecureHttpUrls.push(url.href);
+      return;
+    }
+    throw new Error(
+      `${errorContext}: ${what} "${url.href}" is plaintext http on a non-loopback host — ` +
+        `bearer tokens would cross the network unencrypted. Use https, or set ` +
+        `auth.allowInsecureHttp: true for an isolated test network.`,
+    );
+  };
+  requireSecureTransport(resource, 'auth.resource');
+
   if (opts.authorizationServers.length === 0) {
     throw new Error(`${errorContext}: auth.authorizationServers must list at least one issuer URL.`);
   }
   for (const issuer of opts.authorizationServers) {
+    let issuerUrl: URL;
     try {
-      new URL(issuer);
+      issuerUrl = new URL(issuer);
     } catch {
       throw new Error(
         `${errorContext}: auth.authorizationServers entry "${issuer}" is not a valid URL.`,
       );
     }
+    if (issuerUrl.protocol !== 'https:' && issuerUrl.protocol !== 'http:') {
+      throw new Error(
+        `${errorContext}: auth.authorizationServers entry "${issuer}" must be an http(s) URL.`,
+      );
+    }
+    requireSecureTransport(issuerUrl, 'auth.authorizationServers entry');
   }
 
   // The default audience is the canonical resource URI. NOTE the deliberate
@@ -196,7 +232,19 @@ export function resolveMcpHttpAuth(opts: McpHttpAuthOptions, mcpPath: string): M
     prmPaths,
     resourceMetadataUrl,
     adminRefresh: opts.adminRefresh ?? false,
+    insecureHttpUrls,
   };
+}
+
+/** Loopback per the RFC 8252 native-app convention: `localhost`, any
+ *  127.0.0.0/8 address, and `::1` (a WHATWG URL keeps IPv6 brackets in
+ *  `hostname`, so they are stripped first). */
+function isLoopbackUrl(url: URL): boolean {
+  const host =
+    url.hostname.startsWith('[') && url.hostname.endsWith(']')
+      ? url.hostname.slice(1, -1)
+      : url.hostname;
+  return host === 'localhost' || host === '::1' || /^127(\.\d{1,3}){3}$/.test(host);
 }
 
 function trimTrailingSlash(path: string): string {

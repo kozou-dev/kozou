@@ -864,6 +864,7 @@ describe('server.mcp.http.auth (OAuth 2.1 resource-server block)', () => {
         '        resource: https://mcp.example.com/mcp',
         '        authorizationServers:',
         '          - https://as.example.com',
+        '        allowedRoles: [app_agent]',
         '    execution:',
         '      enabled: true',
       ].join('\n'),
@@ -871,6 +872,89 @@ describe('server.mcp.http.auth (OAuth 2.1 resource-server block)', () => {
     const config = await loadConfig({ path: file, env: {} });
     expect(config.server.mcp.execution.enabled).toBe(true);
     expect(config.server.mcp.execution.role).toBeUndefined();
+  });
+
+  it('execution with the auth block requires a non-empty allowedRoles allowlist', async () => {
+    const dir = await makeTempDir();
+    const yamlFor = (allowedRolesLine: string | null): string[] => [
+      'database:',
+      '  url: postgres://u:p@db:5432/app',
+      'server:',
+      '  mcp:',
+      '    http:',
+      '      auth:',
+      '        resource: https://mcp.example.com/mcp',
+      '        authorizationServers:',
+      '          - https://as.example.com',
+      ...(allowedRolesLine === null ? [] : [allowedRolesLine]),
+      '    execution:',
+      '      enabled: true',
+    ];
+    // Absent and explicitly empty are both rejected: the token's role claim
+    // selects the execution role, so the allowlist must be real.
+    for (const allowedRolesLine of [null, '        allowedRoles: []']) {
+      const file = await writeYaml(dir, yamlFor(allowedRolesLine).join('\n'));
+      try {
+        await loadConfig({ path: file, env: {} });
+        expect.unreachable('loadConfig should have rejected');
+      } catch (err) {
+        const e = err as KozouConfigError;
+        expect(e).toBeInstanceOf(KozouConfigError);
+        expect(
+          e.issues.some(
+            (i) =>
+              i.path === 'server.mcp.http.auth.allowedRoles' &&
+              /non-empty allowedRoles/.test(i.message),
+          ),
+        ).toBe(true);
+      }
+    }
+  });
+
+  it('the allowedRoles requirement is satisfied by top-level auth inheritance', async () => {
+    const dir = await makeTempDir();
+    const file = await writeYaml(
+      dir,
+      [
+        'database:',
+        '  url: postgres://u:p@db:5432/app',
+        'server:',
+        '  mcp:',
+        '    http:',
+        '      auth:',
+        '        resource: https://mcp.example.com/mcp',
+        '        authorizationServers:',
+        '          - https://as.example.com',
+        '    execution:',
+        '      enabled: true',
+        'auth:',
+        '  jwt:',
+        '    secret: s3cr3t',
+        '  allowedRoles: [app_viewer]',
+      ].join('\n'),
+    );
+    const config = await loadConfig({ path: file, env: {} });
+    expect(config.server.mcp.execution.enabled).toBe(true);
+  });
+
+  it('the allowedRoles requirement does not apply without execution', async () => {
+    const dir = await makeTempDir();
+    const file = await writeYaml(
+      dir,
+      [
+        'database:',
+        '  url: postgres://u:p@db:5432/app',
+        'server:',
+        '  mcp:',
+        '    http:',
+        '      auth:',
+        '        resource: https://mcp.example.com/mcp',
+        '        authorizationServers:',
+        '          - https://as.example.com',
+      ].join('\n'),
+    );
+    const config = await loadConfig({ path: file, env: {} });
+    expect(config.server.mcp.http.auth?.allowedRoles).toBeUndefined();
   });
 
   it('execution without a role still fails without the auth block (fixed role required)', async () => {
@@ -1000,5 +1084,25 @@ describe('resolveMcpAuthOptions (D2 inheritance)', () => {
       execute: 'mcp:execute',
       admin: 'mcp:admin',
     });
+    // The transport-security opt-out defaults off and is always passed down.
+    expect(opts?.allowInsecureHttp).toBe(false);
+  });
+
+  it('passes allowInsecureHttp through when set', async () => {
+    const config = await configFrom([
+      'database:',
+      '  url: postgres://u:p@db:5432/app',
+      'server:',
+      '  mcp:',
+      '    http:',
+      '      auth:',
+      '        resource: https://mcp.example.com/mcp',
+      '        authorizationServers:',
+      '          - https://as.example.com',
+      '        jwt:',
+      '          secret: s3cr3t',
+      '        allowInsecureHttp: true',
+    ]);
+    expect(resolveMcpAuthOptions(config)?.allowInsecureHttp).toBe(true);
   });
 });
