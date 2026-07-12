@@ -134,9 +134,9 @@ via JWKS, or a minimal self-hosted issuer. See
 The same posture extends to hosted AI clients: the MCP HTTP endpoint can run as
 an **OAuth 2.1 resource server** (`server.mcp.http.auth`) per the MCP
 authorization spec — Kozou advertises your IdP via RFC 9728 protected-resource
-metadata, verifies each request's bearer token, and runs every call as the
-token's role. Deliberately stricter than REST: no anonymous access, no default
-role. See the deployment guide on kozou.org —
+metadata, verifies each request's bearer token, gates the tools on the token's
+scopes, and runs execution (the `call` tool) as the token's role. Deliberately
+stricter than REST: no anonymous access, no default role. See the deployment guide on kozou.org —
 [Remote MCP with OAuth](https://kozou.org/guides/mcp-oauth/) — plus the
 [Keycloak](https://kozou.org/guides/mcp-oauth-keycloak/) and
 [Auth0](https://kozou.org/guides/mcp-oauth-auth0/) recipes.
