@@ -147,13 +147,27 @@ export type McpToolScopes = { describe: string; execute: string };
  * dispatch are gated on the verified token's scopes, and `call` runs as the
  * token's role/claims instead of the fixed execution role. A request that
  * reaches the handlers without auth info is treated as having no scopes
- * (fail closed).
+ * (fail closed). That mode with `execution` requires a non-empty
+ * `allowedRoles`: the token's role claim selects the execution role, and
+ * this layer cannot see how the embedder's transport verified it, so the
+ * assumable roles must be an explicit allowlist — enforced again at
+ * dispatch for each call.
  */
 export function createMcpServer(
   cache: SchemaCache,
   execution?: McpExecution,
   scopes?: McpToolScopes,
+  allowedRoles?: string[],
 ): Server {
+  if (scopes !== undefined && execution !== undefined && (allowedRoles?.length ?? 0) === 0) {
+    throw new Error(
+      '@kozou/mcp: execution with a scope gate (OAuth resource-server mode) requires a ' +
+        "non-empty allowedRoles — the token's role claim selects the execution role, so " +
+        'the assumable roles must be an explicit allowlist.',
+    );
+  }
+  const allowedRoleSet = allowedRoles === undefined ? undefined : new Set(allowedRoles);
+
   const server = new Server(
     { name: 'kozou', version: SERVER_VERSION },
     { capabilities: { tools: {} } },
@@ -235,6 +249,12 @@ export function createMcpServer(
             const who = extra.authInfo?.extra as { role?: unknown; claims?: unknown } | undefined;
             if (typeof who?.role !== 'string' || who.role.length === 0) {
               return errorResult('No authenticated role is available for this call.');
+            }
+            // Dispatch-level allowlist check (defense in depth: the HTTP
+            // authenticator already refused out-of-list roles; this covers
+            // any other transport wiring that attaches auth info).
+            if (allowedRoleSet !== undefined && !allowedRoleSet.has(who.role)) {
+              return errorResult('The authenticated role is not allowed on this server.');
             }
             identity = { role: who.role, claims: who.claims ?? {} };
           } else {

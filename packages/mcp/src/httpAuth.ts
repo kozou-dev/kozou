@@ -105,6 +105,9 @@ export type McpHttpAuth = {
   /** Non-loopback plaintext http URLs the operator explicitly waved through
    *  with `allowInsecureHttp` — surfaced so the server logs a warning. */
   insecureHttpUrls: string[];
+  /** The configured role allowlist, surfaced for the dispatch-level check in
+   *  `createMcpServer` (the authenticator already enforces it per request). */
+  allowedRoles?: string[];
 };
 
 /** Validate the auth options and build the resolved resource-server state.
@@ -233,6 +236,7 @@ export function resolveMcpHttpAuth(opts: McpHttpAuthOptions, mcpPath: string): M
     resourceMetadataUrl,
     adminRefresh: opts.adminRefresh ?? false,
     insecureHttpUrls,
+    ...(opts.allowedRoles === undefined ? {} : { allowedRoles: opts.allowedRoles }),
   };
 }
 

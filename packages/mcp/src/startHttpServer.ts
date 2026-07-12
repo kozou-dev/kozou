@@ -624,6 +624,7 @@ async function handleMcp(
     cache,
     execution,
     auth === undefined ? undefined : { describe: auth.scopes.describe, execute: auth.scopes.execute },
+    auth?.allowedRoles,
   );
   await server.connect(transport);
   await transport.handleRequest(req, res, body);
