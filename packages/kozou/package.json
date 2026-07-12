@@ -57,7 +57,7 @@
     "@kozou/codegen": "workspace:*",
     "@modelcontextprotocol/sdk": "^1.0.0",
     "@playwright/test": "^1.50.0",
-    "@testcontainers/postgresql": "^12.0.0",
+    "@testcontainers/postgresql": "^12.0.4",
     "@types/pg": "^8.11.10",
     "testcontainers": "^12.0.0",
     "tsx": "^4.19.0"
