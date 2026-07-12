@@ -1,0 +1,204 @@
+{
+  "realm": "kozou-e2e",
+  "enabled": true,
+  "sslRequired": "none",
+  "registrationAllowed": false,
+  "defaultDefaultClientScopes": ["basic"],
+  "defaultOptionalClientScopes": ["mcp:describe", "mcp:execute"],
+  "clientScopes": [
+    {
+      "name": "basic",
+      "description": "Keycloak-standard equivalent (sub/auth_time); a minimal imported realm does not create it automatically.",
+      "protocol": "openid-connect",
+      "attributes": {
+        "include.in.token.scope": "false",
+        "display.on.consent.screen": "false"
+      },
+      "protocolMappers": [
+        {
+          "name": "sub",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-sub-mapper",
+          "consentRequired": false,
+          "config": {
+            "access.token.claim": "true",
+            "introspection.token.claim": "true"
+          }
+        },
+        {
+          "name": "auth_time",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usersessionmodel-note-mapper",
+          "consentRequired": false,
+          "config": {
+            "user.session.note": "AUTH_TIME",
+            "claim.name": "auth_time",
+            "jsonType.label": "long",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "introspection.token.claim": "true"
+          }
+        }
+      ]
+    },
+    {
+      "name": "mcp:describe",
+      "description": "MCP describe surface. The audience/role/username mappers live on the mcp:* scopes themselves: a dynamically-registered client does not get realm-default scopes, so enforcement claims placed anywhere else never reach the token.",
+      "protocol": "openid-connect",
+      "attributes": {
+        "include.in.token.scope": "true",
+        "display.on.consent.screen": "true",
+        "consent.screen.text": "Read database structure via MCP (describe)"
+      },
+      "protocolMappers": [
+        {
+          "name": "mcp-audience-describe",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "consentRequired": false,
+          "config": {
+            "included.custom.audience": "http://127.0.0.1:3999/mcp",
+            "access.token.claim": "true",
+            "id.token.claim": "false"
+          }
+        },
+        {
+          "name": "app-role-claim",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "consentRequired": false,
+          "config": {
+            "user.attribute": "app_role",
+            "claim.name": "role",
+            "jsonType.label": "String",
+            "access.token.claim": "true",
+            "id.token.claim": "false",
+            "userinfo.token.claim": "false",
+            "multivalued": "false"
+          }
+        },
+        {
+          "name": "username-claim",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-property-mapper",
+          "consentRequired": false,
+          "config": {
+            "user.attribute": "username",
+            "claim.name": "preferred_username",
+            "jsonType.label": "String",
+            "access.token.claim": "true",
+            "id.token.claim": "false",
+            "userinfo.token.claim": "false"
+          }
+        }
+      ]
+    },
+    {
+      "name": "mcp:execute",
+      "description": "MCP execute surface. Mapper co-location: same reason as mcp:describe.",
+      "protocol": "openid-connect",
+      "attributes": {
+        "include.in.token.scope": "true",
+        "display.on.consent.screen": "true",
+        "consent.screen.text": "Execute exposed functions via MCP (execute)"
+      },
+      "protocolMappers": [
+        {
+          "name": "mcp-audience-execute",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "consentRequired": false,
+          "config": {
+            "included.custom.audience": "http://127.0.0.1:3999/mcp",
+            "access.token.claim": "true",
+            "id.token.claim": "false"
+          }
+        },
+        {
+          "name": "app-role-claim",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "consentRequired": false,
+          "config": {
+            "user.attribute": "app_role",
+            "claim.name": "role",
+            "jsonType.label": "String",
+            "access.token.claim": "true",
+            "id.token.claim": "false",
+            "userinfo.token.claim": "false",
+            "multivalued": "false"
+          }
+        },
+        {
+          "name": "username-claim",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-property-mapper",
+          "consentRequired": false,
+          "config": {
+            "user.attribute": "username",
+            "claim.name": "preferred_username",
+            "jsonType.label": "String",
+            "access.token.claim": "true",
+            "id.token.claim": "false",
+            "userinfo.token.claim": "false"
+          }
+        }
+      ]
+    }
+  ],
+  "clients": [
+    {
+      "clientId": "kozou-e2e-client",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "secret": "kozou-e2e-client-secret",
+      "directAccessGrantsEnabled": true,
+      "standardFlowEnabled": false,
+      "serviceAccountsEnabled": false,
+      "defaultClientScopes": ["basic"],
+      "optionalClientScopes": ["mcp:describe", "mcp:execute"]
+    }
+  ],
+  "users": [
+    {
+      "username": "e2e-viewer",
+      "enabled": true,
+      "email": "viewer@e2e.local",
+      "emailVerified": true,
+      "firstName": "Vera",
+      "lastName": "Viewer",
+      "credentials": [{ "type": "password", "value": "e2e-password", "temporary": false }],
+      "attributes": { "app_role": ["kozou_kc_viewer"] }
+    },
+    {
+      "username": "e2e-editor",
+      "enabled": true,
+      "email": "editor@e2e.local",
+      "emailVerified": true,
+      "firstName": "Eddie",
+      "lastName": "Editor",
+      "credentials": [{ "type": "password", "value": "e2e-password", "temporary": false }],
+      "attributes": { "app_role": ["kozou_kc_editor"] }
+    },
+    {
+      "username": "e2e-norole",
+      "enabled": true,
+      "email": "norole@e2e.local",
+      "emailVerified": true,
+      "firstName": "Nora",
+      "lastName": "Norole",
+      "credentials": [{ "type": "password", "value": "e2e-password", "temporary": false }]
+    },
+    {
+      "username": "e2e-outsider",
+      "enabled": true,
+      "email": "outsider@e2e.local",
+      "emailVerified": true,
+      "firstName": "Oscar",
+      "lastName": "Outsider",
+      "credentials": [{ "type": "password", "value": "e2e-password", "temporary": false }],
+      "attributes": { "app_role": ["kozou_kc_outsider"] }
+    }
+  ]
+}
