@@ -7,13 +7,14 @@
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { createMcpServer } from './server.js';
 import type { SchemaCache } from './schemaCache.js';
-import type { McpExecution } from './execution.js';
+import { fixedIdentity, type McpExecution } from './execution.js';
 
 export type StartStdioServerOptions = {
   /** Prefix used in stderr log lines. Default: '[@kozou/mcp]'. */
   logPrefix?: string;
   /** Opt-in execution capability for the `call` tool. Omit = describe-only.
-   *  stdio has no network exposure, so enabling it here is safe. */
+   *  stdio has no network exposure, so enabling it here is safe. stdio has
+   *  no OAuth layer, so `execution.role` is required (calls run as it). */
   execution?: McpExecution;
 };
 
@@ -29,6 +30,8 @@ export async function startStdioServer(
   opts: StartStdioServerOptions = {},
 ): Promise<void> {
   const prefix = opts.logPrefix ?? '[@kozou/mcp]';
+  // Fail fast: stdio always runs calls under the fixed execution role.
+  if (opts.execution !== undefined) fixedIdentity(opts.execution, prefix);
   const server = createMcpServer(cache, opts.execution);
   process.on('SIGHUP', () => {
     cache.invalidate();

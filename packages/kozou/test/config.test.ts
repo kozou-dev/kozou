@@ -7,6 +7,7 @@ import {
   loadConfig,
   resolvePrivilegeRole,
   hasReadyMadeToken,
+  resolveMcpAuthOptions,
   configSchema,
   KozouConfigError,
 } from '../src/config.js';
@@ -797,5 +798,311 @@ describe('configSchema (exported for docs coverage tooling)', () => {
 
   it('includes `introspection` so the coverage check can require it to be documented', () => {
     expect(Object.keys(configSchema.shape)).toContain('introspection');
+  });
+});
+
+describe('server.mcp.http.auth (OAuth 2.1 resource-server block)', () => {
+  it('parses the block with scope/adminRefresh defaults', async () => {
+    const dir = await makeTempDir();
+    const file = await writeYaml(
+      dir,
+      [
+        'database:',
+        '  url: postgres://u:p@db:5432/app',
+        'server:',
+        '  mcp:',
+        '    http:',
+        '      auth:',
+        '        resource: https://mcp.example.com/mcp',
+        '        authorizationServers:',
+        '          - https://as.example.com',
+        '        jwt:',
+        '          jwksUri: https://as.example.com/jwks',
+      ].join('\n'),
+    );
+    const config = await loadConfig({ path: file, env: {} });
+    const auth = config.server.mcp.http.auth;
+    expect(auth).toBeDefined();
+    expect(auth?.resource).toBe('https://mcp.example.com/mcp');
+    expect(auth?.scopes).toEqual({
+      describe: 'mcp:describe',
+      execute: 'mcp:execute',
+      admin: 'mcp:admin',
+    });
+    expect(auth?.adminRefresh).toBe(false);
+  });
+
+  it('requires resource and a non-empty authorizationServers list', async () => {
+    const dir = await makeTempDir();
+    const file = await writeYaml(
+      dir,
+      [
+        'database:',
+        '  url: postgres://u:p@db:5432/app',
+        'server:',
+        '  mcp:',
+        '    http:',
+        '      auth:',
+        '        resource: https://mcp.example.com/mcp',
+        '        authorizationServers: []',
+      ].join('\n'),
+    );
+    await expect(loadConfig({ path: file, env: {} })).rejects.toThrow(KozouConfigError);
+  });
+
+  it('execution without a role parses when the auth block is present (per-token role)', async () => {
+    const dir = await makeTempDir();
+    const file = await writeYaml(
+      dir,
+      [
+        'database:',
+        '  url: postgres://u:p@db:5432/app',
+        'server:',
+        '  mcp:',
+        '    http:',
+        '      auth:',
+        '        resource: https://mcp.example.com/mcp',
+        '        authorizationServers:',
+        '          - https://as.example.com',
+        '        allowedRoles: [app_agent]',
+        '    execution:',
+        '      enabled: true',
+      ].join('\n'),
+    );
+    const config = await loadConfig({ path: file, env: {} });
+    expect(config.server.mcp.execution.enabled).toBe(true);
+    expect(config.server.mcp.execution.role).toBeUndefined();
+  });
+
+  it('execution with the auth block requires a non-empty allowedRoles allowlist', async () => {
+    const dir = await makeTempDir();
+    const yamlFor = (allowedRolesLine: string | null): string[] => [
+      'database:',
+      '  url: postgres://u:p@db:5432/app',
+      'server:',
+      '  mcp:',
+      '    http:',
+      '      auth:',
+      '        resource: https://mcp.example.com/mcp',
+      '        authorizationServers:',
+      '          - https://as.example.com',
+      ...(allowedRolesLine === null ? [] : [allowedRolesLine]),
+      '    execution:',
+      '      enabled: true',
+    ];
+    // Absent and explicitly empty are both rejected: the token's role claim
+    // selects the execution role, so the allowlist must be real.
+    for (const allowedRolesLine of [null, '        allowedRoles: []']) {
+      const file = await writeYaml(dir, yamlFor(allowedRolesLine).join('\n'));
+      try {
+        await loadConfig({ path: file, env: {} });
+        expect.unreachable('loadConfig should have rejected');
+      } catch (err) {
+        const e = err as KozouConfigError;
+        expect(e).toBeInstanceOf(KozouConfigError);
+        expect(
+          e.issues.some(
+            (i) =>
+              i.path === 'server.mcp.http.auth.allowedRoles' &&
+              /non-empty allowedRoles/.test(i.message),
+          ),
+        ).toBe(true);
+      }
+    }
+  });
+
+  it('the allowedRoles requirement is satisfied by top-level auth inheritance', async () => {
+    const dir = await makeTempDir();
+    const file = await writeYaml(
+      dir,
+      [
+        'database:',
+        '  url: postgres://u:p@db:5432/app',
+        'server:',
+        '  mcp:',
+        '    http:',
+        '      auth:',
+        '        resource: https://mcp.example.com/mcp',
+        '        authorizationServers:',
+        '          - https://as.example.com',
+        '    execution:',
+        '      enabled: true',
+        'auth:',
+        '  jwt:',
+        '    secret: s3cr3t',
+        '  allowedRoles: [app_viewer]',
+      ].join('\n'),
+    );
+    const config = await loadConfig({ path: file, env: {} });
+    expect(config.server.mcp.execution.enabled).toBe(true);
+  });
+
+  it('the allowedRoles requirement does not apply without execution', async () => {
+    const dir = await makeTempDir();
+    const file = await writeYaml(
+      dir,
+      [
+        'database:',
+        '  url: postgres://u:p@db:5432/app',
+        'server:',
+        '  mcp:',
+        '    http:',
+        '      auth:',
+        '        resource: https://mcp.example.com/mcp',
+        '        authorizationServers:',
+        '          - https://as.example.com',
+      ].join('\n'),
+    );
+    const config = await loadConfig({ path: file, env: {} });
+    expect(config.server.mcp.http.auth?.allowedRoles).toBeUndefined();
+  });
+
+  it('execution without a role still fails without the auth block (fixed role required)', async () => {
+    const dir = await makeTempDir();
+    const file = await writeYaml(
+      dir,
+      [
+        'database:',
+        '  url: postgres://u:p@db:5432/app',
+        'server:',
+        '  mcp:',
+        '    execution:',
+        '      enabled: true',
+      ].join('\n'),
+    );
+    try {
+      await loadConfig({ path: file, env: {} });
+      expect.unreachable('loadConfig should have rejected');
+    } catch (err) {
+      const e = err as KozouConfigError;
+      expect(e).toBeInstanceOf(KozouConfigError);
+      expect(e.issues.some((i) => /execution\.role is required/.test(i.message))).toBe(true);
+    }
+  });
+});
+
+describe('resolveMcpAuthOptions (D2 inheritance)', () => {
+  async function configFrom(yaml: string[]): Promise<KozouConfig> {
+    const dir = await makeTempDir();
+    const file = await writeYaml(dir, yaml.join('\n'));
+    return loadConfig({ path: file, env: {} });
+  }
+
+  const authBlock = [
+    'server:',
+    '  mcp:',
+    '    http:',
+    '      auth:',
+    '        resource: https://mcp.example.com/mcp',
+    '        authorizationServers:',
+    '          - https://as.example.com',
+  ];
+
+  it('returns undefined when the block is absent', async () => {
+    const config = await configFrom(['database:', '  url: postgres://u:p@db:5432/app']);
+    expect(resolveMcpAuthOptions(config)).toBeUndefined();
+  });
+
+  it('inherits jwt / roleClaim / allowedRoles from the top-level auth block — audience excepted', async () => {
+    const config = await configFrom([
+      'database:',
+      '  url: postgres://u:p@db:5432/app',
+      ...authBlock,
+      'auth:',
+      '  jwt:',
+      '    jwksUri: https://as.example.com/jwks',
+      '    issuer: https://as.example.com',
+      '    audience: rest-client-id',
+      '  roleClaim: db_role',
+      '  allowedRoles: [app_viewer, app_admin]',
+    ]);
+    const opts = resolveMcpAuthOptions(config);
+    expect(opts?.jwt.jwksUri).toBe('https://as.example.com/jwks');
+    expect(opts?.jwt.issuer).toBe('https://as.example.com');
+    // The REST audience (a client id) must never carry over: the MCP token
+    // audience is the canonical resource URI (applied downstream by default).
+    expect(opts?.jwt.audience).toBeUndefined();
+    expect(opts?.roleClaim).toBe('db_role');
+    expect(opts?.allowedRoles).toEqual(['app_viewer', 'app_admin']);
+  });
+
+  it('the MCP block’s own jwt / roleClaim / allowedRoles win over inherited ones', async () => {
+    const config = await configFrom([
+      'database:',
+      '  url: postgres://u:p@db:5432/app',
+      'server:',
+      '  mcp:',
+      '    http:',
+      '      auth:',
+      '        resource: https://mcp.example.com/mcp',
+      '        authorizationServers:',
+      '          - https://as.example.com',
+      '        jwt:',
+      '          jwksUri: https://mcp-as.example.com/jwks',
+      '          audience: https://mcp.example.com/mcp',
+      '        roleClaim: mcp_role',
+      '        allowedRoles: [app_viewer]',
+      'auth:',
+      '  jwt:',
+      '    jwksUri: https://as.example.com/jwks',
+      '  roleClaim: db_role',
+      '  allowedRoles: [app_admin]',
+    ]);
+    const opts = resolveMcpAuthOptions(config);
+    expect(opts?.jwt.jwksUri).toBe('https://mcp-as.example.com/jwks');
+    expect(opts?.jwt.audience).toBe('https://mcp.example.com/mcp');
+    expect(opts?.roleClaim).toBe('mcp_role');
+    expect(opts?.allowedRoles).toEqual(['app_viewer']);
+  });
+
+  it('fails fast when no JWT verification material exists in either block', async () => {
+    const config = await configFrom(['database:', '  url: postgres://u:p@db:5432/app', ...authBlock]);
+    expect(() => resolveMcpAuthOptions(config)).toThrow(/JWT verification config/);
+  });
+
+  it('passes scopes / extraScopesSupported / adminRefresh through', async () => {
+    const config = await configFrom([
+      'database:',
+      '  url: postgres://u:p@db:5432/app',
+      'server:',
+      '  mcp:',
+      '    http:',
+      '      auth:',
+      '        resource: https://mcp.example.com/mcp',
+      '        authorizationServers:',
+      '          - https://as.example.com',
+      '        jwt:',
+      '          secret: s3cr3t',
+      '        extraScopesSupported: [offline_access]',
+      '        adminRefresh: true',
+    ]);
+    const opts = resolveMcpAuthOptions(config);
+    expect(opts?.extraScopesSupported).toEqual(['offline_access']);
+    expect(opts?.adminRefresh).toBe(true);
+    expect(opts?.scopes).toEqual({
+      describe: 'mcp:describe',
+      execute: 'mcp:execute',
+      admin: 'mcp:admin',
+    });
+    // The transport-security opt-out defaults off and is always passed down.
+    expect(opts?.allowInsecureHttp).toBe(false);
+  });
+
+  it('passes allowInsecureHttp through when set', async () => {
+    const config = await configFrom([
+      'database:',
+      '  url: postgres://u:p@db:5432/app',
+      'server:',
+      '  mcp:',
+      '    http:',
+      '      auth:',
+      '        resource: https://mcp.example.com/mcp',
+      '        authorizationServers:',
+      '          - https://as.example.com',
+      '        jwt:',
+      '          secret: s3cr3t',
+      '        allowInsecureHttp: true',
+    ]);
+    expect(resolveMcpAuthOptions(config)?.allowInsecureHttp).toBe(true);
   });
 });

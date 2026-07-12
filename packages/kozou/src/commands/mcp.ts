@@ -16,6 +16,7 @@ import { SchemaCache, startHttpServer, startStdioServer, type McpExecution } fro
 import {
   hasReadyMadeToken,
   loadConfig,
+  resolveMcpAuthOptions,
   resolvePrivilegeRole,
   type KozouConfig,
 } from '../config.js';
@@ -34,25 +35,33 @@ export type McpOptions = {
 const DEFAULT_CLAIMS_GUC = 'request.jwt.claims';
 
 /** Build the opt-in execution capability for the `call` tool, or undefined when
- *  execution is disabled (describe-only, the default). */
-async function buildExecution(config: KozouConfig): Promise<McpExecution | undefined> {
+ *  execution is disabled (describe-only, the default). Without the OAuth
+ *  resource-server block the fixed `role` is required (the config schema
+ *  guarantees it; kept explicit rather than asserted away). With the block,
+ *  calls run as each verified token's role — a configured `role` is ignored
+ *  (the server prints a notice). */
+async function buildExecution(config: KozouConfig, authOn: boolean): Promise<McpExecution | undefined> {
   const exec = config.server.mcp.execution;
   if (!exec.enabled) return undefined;
-  if (exec.role === undefined) {
-    // The config schema's refine guarantees a role when enabled; keep the
-    // contract explicit rather than asserting it away.
-    throw new Error('server.mcp.execution.role is required when execution is enabled.');
+  if (exec.role === undefined && !authOn) {
+    // No OAuth per-token identity here (stdio mode, or --http without an auth
+    // block), so a fixed role is the only identity execution can run as.
+    throw new Error(
+      'server.mcp.execution.role is required when execution is enabled without OAuth ' +
+        'per-token identity (stdio mode, or --http without server.mcp.http.auth). ' +
+        'Add server.mcp.execution.role, or run --http with an auth block.',
+    );
   }
   const { default: pg } = await import('pg');
   // Write-capable pool, distinct from the SchemaCache's read-only introspection
-  // client. The login role must be able to SET ROLE to the execution role.
+  // client. The login role must be able to SET ROLE to the target role.
   const pool = new pg.Pool({ connectionString: config.database.url });
   return {
     pool,
-    role: exec.role,
+    ...(exec.role === undefined ? {} : { role: exec.role }),
     claimsGuc: config.auth?.claimsGuc ?? DEFAULT_CLAIMS_GUC,
     claims: exec.claims ?? {},
-    allow: exec.allow,
+    ...(exec.allow === undefined ? {} : { allow: exec.allow }),
   };
 }
 
@@ -64,13 +73,40 @@ async function buildExecution(config: KozouConfig): Promise<McpExecution | undef
  *  conflicting explicit `introspection.role` (a silent "says A, does B" split is
  *  the hazard). Describe-only (no execution) resolves from config, refusing to
  *  guess a ready-made token's role. Returns undefined when the feature is off.
- *  Pure + exported for testing. */
+ *
+ *  With the OAuth resource-server block the acting role is per-token, so a
+ *  single annotated role is only truthful when exactly one role is assumable
+ *  (allowedRoles names one role). Any other combination is refused — a
+ *  per-caller annotation is the planned respectPrivileges deepening, not
+ *  something to fake with a config-picked role. Pure + exported for testing. */
 export function resolveMcpAnnotationRole(
   config: KozouConfig,
   executionRole: string | undefined,
   env: NodeJS.ProcessEnv,
 ): string | undefined {
   if (!config.introspection.respectPrivileges) return undefined;
+  const mcpAuth = config.server.mcp.http.auth;
+  if (mcpAuth !== undefined) {
+    const allowed = mcpAuth.allowedRoles ?? config.auth?.allowedRoles;
+    const single = allowed !== undefined && allowed.length === 1 ? allowed[0] : undefined;
+    if (single === undefined) {
+      throw new Error(
+        'introspection.respectPrivileges with server.mcp.http.auth needs allowedRoles to name ' +
+          'exactly one role: the acting role is per-token, so a single annotated role is only ' +
+          'truthful when only one role is assumable. Narrow allowedRoles or turn ' +
+          'respectPrivileges off for the MCP server.',
+      );
+    }
+    const explicit = config.introspection.role;
+    if (explicit !== undefined && explicit !== single) {
+      throw new Error(
+        `introspection.role ("${explicit}") differs from the single allowed token role ` +
+          `("${single}"): the describe tools would tell the agent role "${explicit}"'s ` +
+          `privileges while it acts as "${single}". Set them to the same role.`,
+      );
+    }
+    return single;
+  }
   if (executionRole !== undefined) {
     const explicit = config.introspection.role;
     if (explicit !== undefined && explicit !== executionRole) {
@@ -88,7 +124,15 @@ export function resolveMcpAnnotationRole(
 export async function mcpCommand(opts: McpOptions = {}): Promise<void> {
   const config = await loadConfig({ path: opts.config });
 
-  const execution = await buildExecution(config);
+  // OAuth applies to the HTTP transport only, so the per-token identity (which
+  // lets execution.role be omitted) exists only in --http mode. In stdio mode
+  // the auth block is ignored, so execution still needs its fixed role — base
+  // the relaxation on the *selected* transport, not merely on the block's
+  // presence, or a stdio run of an HTTP-auth config would reach startStdioServer
+  // with no identity and fail late.
+  const httpMode = opts.http === true;
+  const mcpAuth = resolveMcpAuthOptions(config);
+  const execution = await buildExecution(config, mcpAuth !== undefined && httpMode);
   const privilegeRole = resolveMcpAnnotationRole(config, execution?.role, process.env);
 
   const cache = new SchemaCache({
@@ -109,8 +153,9 @@ export async function mcpCommand(opts: McpOptions = {}): Promise<void> {
 
   if (execution !== undefined) {
     const scope = execution.allow ? `${execution.allow.length} allowlisted` : 'all exposed';
+    const who = mcpAuth !== undefined ? `each verified token's role` : `role "${execution.role}"`;
     process.stderr.write(
-      `[kozou mcp] \`call\` execution ENABLED: runs as role "${execution.role}" (${scope} functions)\n`,
+      `[kozou mcp] \`call\` execution ENABLED: runs as ${who} (${scope} functions)\n`,
     );
   }
 
@@ -123,9 +168,19 @@ export async function mcpCommand(opts: McpOptions = {}): Promise<void> {
       host: opts.host ?? config.server.mcp.http.host,
       logPrefix: '[kozou mcp]',
       execution,
+      ...(mcpAuth === undefined ? {} : { auth: mcpAuth }),
     });
     return;
   }
 
+  if (mcpAuth !== undefined) {
+    // OAuth applies to the HTTP transport only; stdio is same-machine trust
+    // (the client process was launched by the operator). Say so instead of
+    // silently ignoring the block. Execution then needs its fixed role.
+    process.stderr.write(
+      '[kozou mcp] NOTE: server.mcp.http.auth applies to --http only; stdio runs unauthenticated ' +
+        'under local process trust.\n',
+    );
+  }
   await startStdioServer(cache, { logPrefix: '[kozou mcp]', execution });
 }

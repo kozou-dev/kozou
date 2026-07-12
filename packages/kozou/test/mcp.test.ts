@@ -130,3 +130,135 @@ server:
     expect(lastHttpOpts().host).toBe('127.0.0.1');
   });
 });
+
+describe('resolveMcpAnnotationRole — OAuth mode (per-token acting role)', () => {
+  // With server.mcp.http.auth the acting role comes from each verified
+  // token, so a single annotated role is only truthful when exactly one
+  // role is assumable.
+  async function authConfig(overrides: Partial<KozouConfig>): Promise<KozouConfig> {
+    const base = await makeConfig();
+    return {
+      ...base,
+      server: {
+        ...base.server,
+        mcp: {
+          ...base.server.mcp,
+          http: {
+            ...base.server.mcp.http,
+            auth: {
+              resource: 'https://mcp.example.com/mcp',
+              authorizationServers: ['https://as.example.com'],
+              scopes: { describe: 'mcp:describe', execute: 'mcp:execute', admin: 'mcp:admin' },
+              adminRefresh: false,
+            },
+          },
+        },
+      },
+      ...overrides,
+    };
+  }
+
+  it('a single allowed role is annotated', async () => {
+    const config = await authConfig({
+      introspection: { respectPrivileges: true },
+      auth: { jwt: { secret: 's' }, allowedRoles: ['app_viewer'] },
+    });
+    expect(resolveMcpAnnotationRole(config, undefined, {})).toBe('app_viewer');
+  });
+
+  it('the MCP block’s own allowedRoles wins over the top-level list', async () => {
+    const config = await authConfig({
+      introspection: { respectPrivileges: true },
+      auth: { jwt: { secret: 's' }, allowedRoles: ['app_admin', 'app_viewer'] },
+    });
+    config.server.mcp.http.auth!.allowedRoles = ['app_viewer'];
+    expect(resolveMcpAnnotationRole(config, undefined, {})).toBe('app_viewer');
+  });
+
+  it('multiple (or absent) allowed roles are refused — per-token annotation is not faked', async () => {
+    const multi = await authConfig({
+      introspection: { respectPrivileges: true },
+      auth: { jwt: { secret: 's' }, allowedRoles: ['app_viewer', 'app_admin'] },
+    });
+    expect(() => resolveMcpAnnotationRole(multi, undefined, {})).toThrow(/exactly one role/);
+
+    const none = await authConfig({ introspection: { respectPrivileges: true } });
+    expect(() => resolveMcpAnnotationRole(none, undefined, {})).toThrow(/exactly one role/);
+  });
+
+  it('a conflicting introspection.role throws; a matching one is accepted', async () => {
+    const conflicting = await authConfig({
+      introspection: { respectPrivileges: true, role: 'reporter' },
+      auth: { jwt: { secret: 's' }, allowedRoles: ['app_viewer'] },
+    });
+    expect(() => resolveMcpAnnotationRole(conflicting, undefined, {})).toThrow(/differs from/);
+
+    const matching = await authConfig({
+      introspection: { respectPrivileges: true, role: 'app_viewer' },
+      auth: { jwt: { secret: 's' }, allowedRoles: ['app_viewer'] },
+    });
+    expect(resolveMcpAnnotationRole(matching, undefined, {})).toBe('app_viewer');
+  });
+
+  it('respectPrivileges off stays off in OAuth mode', async () => {
+    const config = await authConfig({
+      auth: { jwt: { secret: 's' }, allowedRoles: ['app_viewer'] },
+    });
+    expect(resolveMcpAnnotationRole(config, undefined, {})).toBeUndefined();
+  });
+});
+
+describe('mcpCommand --http passes the OAuth auth options through', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  const AUTH_CONFIG = `database:
+  url: postgres://u:p@db:5432/app
+server:
+  mcp:
+    http:
+      auth:
+        resource: https://mcp.example.com/mcp
+        authorizationServers:
+          - https://as.example.com
+        jwt:
+          jwksUri: https://as.example.com/jwks
+`;
+
+  it('startHttpServer receives the resolved auth block', async () => {
+    const file = await writeConfig(AUTH_CONFIG);
+    await mcpCommand({ http: true, config: file });
+    const opts = lastHttpOpts() as { auth?: { resource: string; jwt: { jwksUri?: string } } };
+    expect(opts.auth?.resource).toBe('https://mcp.example.com/mcp');
+    expect(opts.auth?.jwt.jwksUri).toBe('https://as.example.com/jwks');
+  });
+
+  it('no auth block -> no auth option (unchanged no-auth mode)', async () => {
+    const file = await writeConfig('database:\n  url: postgres://u:p@db:5432/app\n');
+    await mcpCommand({ http: true, config: file });
+    expect((lastHttpOpts() as { auth?: unknown }).auth).toBeUndefined();
+  });
+
+  it('stdio with an HTTP-auth config + execution but no role fails early (clear error, not a late crash)', async () => {
+    // The auth block relaxes execution.role only for --http (per-token
+    // identity); a stdio run of the same config must not reach startStdioServer
+    // with no identity — it errors up front instead.
+    const file = await writeConfig(`database:
+  url: postgres://u:p@db:5432/app
+server:
+  mcp:
+    http:
+      auth:
+        resource: https://mcp.example.com/mcp
+        authorizationServers:
+          - https://as.example.com
+        jwt:
+          jwksUri: https://as.example.com/jwks
+        allowedRoles: [app_agent]
+    execution:
+      enabled: true
+`);
+    await expect(mcpCommand({ stdio: true, config: file })).rejects.toThrow(/execution\.role is required/);
+  });
+});

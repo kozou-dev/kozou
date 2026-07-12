@@ -16,6 +16,7 @@ import { existsSync } from 'node:fs';
 import { resolve, isAbsolute } from 'node:path';
 import { parse as parseYAML } from 'yaml';
 import { z } from 'zod';
+import type { McpHttpAuthOptions } from '@kozou/mcp';
 
 // ---- Schema ---------------------------------------------------------------
 
@@ -38,23 +39,95 @@ const uiServerSchema = z
   })
   .prefault({});
 
+// JWT verification config shared by the REST auth block and the MCP
+// resource-server block. The "exactly one of secret / publicKey / jwksUri"
+// rule is enforced by the consuming server at start, so it is intentionally
+// not duplicated here.
+const jwtAuthSchema = z.object({
+  secret: z.string().min(1).optional(),
+  publicKey: z.string().min(1).optional(),
+  jwksUri: z.string().min(1).optional(),
+  algorithms: z.array(z.enum(['HS256', 'RS256'])).optional(),
+  issuer: z.string().min(1).optional(),
+  audience: z.union([z.string().min(1), z.array(z.string().min(1))]).optional(),
+});
+
+// Scope names the OAuth resource-server mode expects on tokens, matched
+// exactly. Renaming exists for IdPs that force a prefix onto scope names
+// (e.g. `api://kozou-mcp/mcp.describe`); the defaults are the plain names.
+const mcpAuthScopesSchema = z
+  .object({
+    describe: z.string().min(1).default('mcp:describe'),
+    execute: z.string().min(1).default('mcp:execute'),
+    admin: z.string().min(1).default('mcp:admin'),
+  })
+  .prefault({});
+
+// OAuth 2.1 resource-server mode for the MCP HTTP endpoint (the MCP
+// authorization spec). Presence of this block turns it on: the server
+// advertises `authorizationServers` via RFC 9728 protected-resource
+// metadata, verifies each request's bearer token, and the `call` tool runs
+// as the *token's* role (per-caller identity) instead of a fixed execution
+// role. kozou stays a resource server only — the authorization server is
+// the operator's own IdP.
+//
+// `resource` is the canonical resource URI (RFC 8707) — always explicit,
+// never derived from the Host header; behind a tunnel / reverse proxy it is
+// the public URL. It is also the default expected token audience — note
+// this is deliberately different from the REST `auth.jwt.audience` (a
+// client id), which is therefore never inherited.
+//
+// `jwt` / `roleClaim` / `allowedRoles` inherit from the top-level `auth`
+// block when omitted. `defaultRole` / `anonRole` deliberately do NOT exist
+// here: a request without a token is always 401, and a token without a
+// role claim is rejected — a default would silently grant a role to any
+// authenticated principal the IdP admin never assigned one (implicit
+// elevation), e.g. a federated first-time user.
+//
+// `extraScopesSupported` extends the advertised scope list (clients treat
+// it as "what to request from the AS" — add e.g. `offline_access` when the
+// AS needs it for refresh tokens). `adminRefresh` opts POST /admin/refresh
+// back in, gated on the admin scope (default: the route is disabled).
+//
+// `allowInsecureHttp` waves through plaintext http resource / AS URLs on
+// non-loopback hosts (loopback is always fine); default off = startup error,
+// because these URLs are advertised to clients and carry bearer tokens.
+// With `execution.enabled`, a non-empty effective `allowedRoles` is required
+// (validated at the config level, where the top-level inheritance is
+// visible) — the token's role claim selects the execution role, so the
+// assumable roles must be an explicit allowlist.
+const mcpAuthSchema = z.object({
+  resource: z.string().min(1),
+  authorizationServers: z.array(z.string().min(1)).min(1),
+  jwt: jwtAuthSchema.optional(),
+  roleClaim: z.string().min(1).optional(),
+  allowedRoles: z.array(z.string().min(1)).optional(),
+  scopes: mcpAuthScopesSchema,
+  extraScopesSupported: z.array(z.string().min(1)).optional(),
+  adminRefresh: z.boolean().default(false),
+  allowInsecureHttp: z.boolean().default(false),
+});
+
 const mcpHttpServerSchema = z
   .object({
     port: z.number().int().min(0).max(65_535).default(3334),
     host: z.string().min(1).default('127.0.0.1'),
+    auth: mcpAuthSchema.optional(),
   })
   .prefault({});
 
 // Opt-in execution for the MCP `call` tool (issue #103, Beyond v1.4). Default
 // OFF (describe-only). When enabled, the bundled `kozou mcp` server exposes a
-// `call` tool that runs the exposed RPC functions (api.rpc) under a single
-// operator-configured execution role. There is no per-caller identity, so it is
-// unsuitable for multi-tenant per-user authorization (use the REST API +
-// per-user JWT for that); a dedicated least-privilege role is strongly advised
-// (not the owner / a superuser). `role` is required when enabled. `claims` are
-// fixed claims published for row-level security; `allow` is an optional
-// allowlist of schema-qualified function names (`schema.fn`); omitted = every
-// exposed function may be called.
+// `call` tool that runs the exposed RPC functions (api.rpc). Identity depends
+// on the auth posture: without `server.mcp.http.auth`, calls run under the
+// single operator-configured `role` (required then; a dedicated
+// least-privilege role is strongly advised — not the owner / a superuser) and
+// there is no per-caller identity, so that mode is unsuitable for
+// multi-tenant per-user authorization. With the OAuth resource-server block,
+// calls run as each verified token's role and `role` / `claims` here are
+// ignored. `claims` are fixed claims published for row-level security;
+// `allow` is an optional allowlist of schema-qualified function names
+// (`schema.fn`); omitted = every exposed function may be called.
 const mcpExecutionSchema = z
   .object({
     enabled: z.boolean().default(false),
@@ -62,11 +135,7 @@ const mcpExecutionSchema = z
     claims: z.record(z.string(), z.unknown()).optional(),
     allow: z.array(z.string().min(1)).optional(),
   })
-  .prefault({})
-  .refine((e) => !e.enabled || (e.role !== undefined && e.role.length > 0), {
-    message: 'server.mcp.execution.role is required when server.mcp.execution.enabled is true',
-    path: ['role'],
-  });
+  .prefault({});
 
 const mcpServerSchema = z
   .object({
@@ -74,7 +143,20 @@ const mcpServerSchema = z
     stdio: z.boolean().default(false),
     execution: mcpExecutionSchema,
   })
-  .prefault({});
+  .prefault({})
+  .superRefine((server, ctx) => {
+    // Execution without the OAuth resource-server block needs its fixed role;
+    // with the block the role is per-token and a configured one is ignored.
+    if (server.execution.enabled && server.execution.role === undefined && server.http.auth === undefined) {
+      ctx.addIssue({
+        code: 'custom',
+        message:
+          'server.mcp.execution.role is required when server.mcp.execution.enabled is true ' +
+          'without server.mcp.http.auth (no OAuth = calls need a fixed execution role)',
+        path: ['execution', 'role'],
+      });
+    }
+  });
 
 const serverSchema = z
   .object({
@@ -159,19 +241,6 @@ const apiSchema = z
   })
   .prefault({});
 
-// Opt-in JWT auth for the in-house @kozou/api backend (`kozou dev --adapter
-// api`). Absent -> the API stays unauthenticated and loopback-only. The
-// "exactly one of secret / publicKey" rule is enforced by @kozou/api at
-// server start, so it is intentionally not duplicated here.
-const jwtAuthSchema = z.object({
-  secret: z.string().min(1).optional(),
-  publicKey: z.string().min(1).optional(),
-  jwksUri: z.string().min(1).optional(),
-  algorithms: z.array(z.enum(['HS256', 'RS256'])).optional(),
-  issuer: z.string().min(1).optional(),
-  audience: z.union([z.string().min(1), z.array(z.string().min(1))]).optional(),
-});
-
 // How the bundled Admin UI authenticates to @kozou/api when auth is on. This
 // is a CLI-only concern (not part of @kozou/api's AuthConfig): under HS256 the
 // CLI mints a token claiming `role` plus the optional `claims` (for RLS
@@ -184,6 +253,8 @@ const authUiSchema = z.object({
   claims: z.record(z.string(), z.unknown()).optional(),
 });
 
+// Opt-in JWT auth for the in-house @kozou/api backend (`kozou dev --adapter
+// api`). Absent -> the API stays unauthenticated and loopback-only.
 const authSchema = z.object({
   jwt: jwtAuthSchema,
   roleClaim: z.string().min(1).optional(),
@@ -199,16 +270,41 @@ const authSchema = z.object({
  *  asserts every top-level block here is documented in the config reference, so
  *  a newly added block (like `introspection` was) cannot ship undocumented.
  *  `Object.keys(configSchema.shape)` yields the top-level block names. */
-export const configSchema = z.object({
-  database: databaseSchema,
-  server: serverSchema,
-  adapter: adapterSchema,
-  api: apiSchema,
-  uiHints: uiHintsSchema,
-  cache: cacheSchema,
-  introspection: introspectionSchema,
-  auth: authSchema.optional(),
-});
+export const configSchema = z
+  .object({
+    database: databaseSchema,
+    server: serverSchema,
+    adapter: adapterSchema,
+    api: apiSchema,
+    uiHints: uiHintsSchema,
+    cache: cacheSchema,
+    introspection: introspectionSchema,
+    auth: authSchema.optional(),
+  })
+  .superRefine((config, ctx) => {
+    // MCP OAuth mode with execution turns the token's role claim into the
+    // `SET LOCAL ROLE` target, so the assumable roles must be an explicit
+    // non-empty allowlist — a broad connection role must not let a
+    // mis-mapped IdP claim select whatever role the database happens to
+    // permit. Deliberately stricter than the REST surface (where
+    // allowedRoles stays optional), the same posture as rejecting tokens
+    // without a role claim. Cross-block: the allowlist may be inherited
+    // from the top-level `auth`, which a nested schema cannot see.
+    const mcpAuth = config.server.mcp.http.auth;
+    if (mcpAuth === undefined || !config.server.mcp.execution.enabled) return;
+    const allowedRoles = mcpAuth.allowedRoles ?? config.auth?.allowedRoles;
+    if (allowedRoles === undefined || allowedRoles.length === 0) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['server', 'mcp', 'http', 'auth', 'allowedRoles'],
+        message:
+          'server.mcp.http.auth with server.mcp.execution.enabled requires a non-empty ' +
+          'allowedRoles (set it on server.mcp.http.auth, or inherit it from the top-level ' +
+          "auth block): the token's role claim selects the execution role, so the assumable " +
+          'roles must be an explicit allowlist.',
+      });
+    }
+  });
 
 export type KozouConfig = z.infer<typeof configSchema>;
 
@@ -285,6 +381,51 @@ export function hasReadyMadeToken(config: KozouConfig, env: NodeJS.ProcessEnv): 
     (config.auth?.ui?.token !== undefined && config.auth.ui.token.length > 0) ||
     (env.KOZOU_ADAPTER_TOKEN !== undefined && env.KOZOU_ADAPTER_TOKEN.length > 0)
   );
+}
+
+/** Resolve the effective OAuth resource-server options for the MCP HTTP
+ *  endpoint from `server.mcp.http.auth`, or undefined when the block is
+ *  absent (the no-auth loopback mode).
+ *
+ *  Inheritance (the usual single-IdP deployment): `jwt`, `roleClaim`, and
+ *  `allowedRoles` fall back to the top-level `auth` block — EXCEPT
+ *  `jwt.audience`, which never inherits: the REST audience is a client id
+ *  while the MCP token audience is the canonical resource URI (the
+ *  downstream default when unset), and inheriting the REST value would
+ *  accept REST-audience tokens on the MCP surface. `defaultRole` /
+ *  `anonRole` never carry over — the option type has no such fields, so a
+ *  role-claim-less token and a token-less request stay rejections. */
+export function resolveMcpAuthOptions(config: KozouConfig): McpHttpAuthOptions | undefined {
+  const mcpAuth = config.server.mcp.http.auth;
+  if (mcpAuth === undefined) return undefined;
+
+  let jwt = mcpAuth.jwt;
+  if (jwt === undefined && config.auth?.jwt !== undefined) {
+    const { audience: _restAudience, ...inherited } = config.auth.jwt;
+    jwt = inherited;
+  }
+  if (jwt === undefined || (jwt.secret === undefined && jwt.publicKey === undefined && jwt.jwksUri === undefined)) {
+    throw new Error(
+      'server.mcp.http.auth requires JWT verification config: set server.mcp.http.auth.jwt ' +
+        '(or a top-level auth.jwt to inherit) with one of jwksUri / publicKey / secret.',
+    );
+  }
+
+  const roleClaim = mcpAuth.roleClaim ?? config.auth?.roleClaim;
+  const allowedRoles = mcpAuth.allowedRoles ?? config.auth?.allowedRoles;
+  return {
+    resource: mcpAuth.resource,
+    authorizationServers: mcpAuth.authorizationServers,
+    jwt,
+    ...(roleClaim === undefined ? {} : { roleClaim }),
+    ...(allowedRoles === undefined ? {} : { allowedRoles }),
+    scopes: mcpAuth.scopes,
+    ...(mcpAuth.extraScopesSupported === undefined
+      ? {}
+      : { extraScopesSupported: mcpAuth.extraScopesSupported }),
+    adminRefresh: mcpAuth.adminRefresh,
+    allowInsecureHttp: mcpAuth.allowInsecureHttp,
+  };
 }
 
 // ---- Loader --------------------------------------------------------------

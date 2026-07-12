@@ -58,8 +58,9 @@ export type AuthConfig = {
     jwksUri?: string;
     /** Accepted algorithms. Defaults to ['HS256'] or ['RS256'] by key type. */
     algorithms?: JwtAlgorithm[];
-    /** Expected `iss`. When set, a mismatch is rejected. */
-    issuer?: string;
+    /** Expected `iss`. When set, a mismatch is rejected. A list accepts a
+     *  token from any one of the issuers (jose matches any). */
+    issuer?: string | string[];
     /** Expected `aud`. When set, a mismatch is rejected. */
     audience?: string | string[];
   };
