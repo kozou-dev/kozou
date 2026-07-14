@@ -395,18 +395,54 @@ function buildViewContext(input: {
   };
 }
 
-function buildConcept(view: RawView): ConceptContext {
+/** Derive join suggestions for a VIEW from the *real* foreign keys among its
+ *  underlying tables, instead of the old unresolved
+ *  `<fk_column> = <pk_column>` placeholder. For each underlying table with a FK
+ *  to another underlying table, surface the actual ON condition (a composite FK
+ *  becomes an `AND`-joined multi-column condition). A view whose underlying
+ *  tables have no FK between them yields `[]` — the concept stays silent rather
+ *  than guessing. Reuses the already-built `RelationContext`, so misaligned FKs
+ *  (skipped by buildRelations) never reach here. Under privilegeDisplay
+ *  'filter' a hidden table, absent from `relationsByTable`, contributes no
+ *  outgoing edges; an edge from a visible table to a hidden one is still
+ *  surfaced, the same way `TableContext.relations` retains such edges. */
+function deriveJoinSuggestions(
+  view: RawView,
+  relationsByTable: Map<string, RelationContext[]>,
+): { table: string; on: string }[] {
+  const underlying = new Set(view.underlyingTables.map((t) => `${t.schema}.${t.name}`));
+  const suggestions: { table: string; on: string }[] = [];
+  for (const ut of view.underlyingTables) {
+    const relations = relationsByTable.get(`${ut.schema}.${ut.name}`);
+    if (relations === undefined) continue; // an underlying view, or a hidden table
+    for (const rel of relations) {
+      const target = `${rel.references.schema}.${rel.references.table}`;
+      // Only suggest joins between tables the view actually reads from.
+      if (!underlying.has(target)) continue;
+      // `fields` / `references.columns` are the composite (v1.1+) sets; normalize
+      // against the scalar back-compat fields, as documented on RelationContext.
+      const fields = rel.fields ?? [rel.field];
+      const refColumns = rel.references.columns ?? [rel.references.column];
+      const on = fields
+        .map((field, i) => `${ut.name}.${field} = ${rel.references.table}.${refColumns[i]!}`)
+        .join(' AND ');
+      suggestions.push({ table: target, on });
+    }
+  }
+  return suggestions;
+}
+
+function buildConcept(
+  view: RawView,
+  relationsByTable: Map<string, RelationContext[]>,
+): ConceptContext {
   const parsed = parseCommentTags(view.comment);
-  const joinSuggestions = view.underlyingTables.map((t) => ({
-    table: `${t.schema}.${t.name}`,
-    on: `${view.name}.<fk_column> = ${t.name}.<pk_column>`,
-  }));
   return {
     name: view.name,
     label: view.name,
     description: parsed.body !== '' ? parsed.body : null,
     kind: 'VIEW',
-    joinSuggestions,
+    joinSuggestions: deriveJoinSuggestions(view, relationsByTable),
     aiNotes: parsed.ai,
     policies: parsed.policy,
     // `@example:` blocks on the VIEW's COMMENT - surfaced through MCP
@@ -516,7 +552,15 @@ export async function buildSchemaContext(opts: BuildOptions): Promise<SchemaCont
     description: null,
   }));
 
-  const concepts = visibleRawViews.map<ConceptContext>(buildConcept);
+  // Join suggestions are derived from the real FK graph among a view's
+  // underlying tables (see deriveJoinSuggestions), reusing the relations already
+  // built for the visible tables.
+  const relationsByTable = new Map<string, RelationContext[]>(
+    tables.map((t) => [t.qualifiedName, t.relations]),
+  );
+  const concepts = visibleRawViews.map<ConceptContext>((v) =>
+    buildConcept(v, relationsByTable),
+  );
 
   // RPC functions (issue #103): decide which tagged functions are exposed and
   // shape them; skipped-but-tagged functions append loud-skip issues below.
