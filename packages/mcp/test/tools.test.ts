@@ -449,3 +449,117 @@ describe('MCP tools: @policy is surfaced to the AI agent (no DB)', () => {
     expect(t.rowSecurity).toBeUndefined();
   });
 });
+
+describe('MCP tools: get_concept_context join suggestions (no DB)', () => {
+  // buildSchemaContext is pure, so this needs no container. These tests lock the
+  // concept join surface end to end: real FK-derived ON conditions (no
+  // `<fk_column>` placeholder) and the FK COMMENT surfaced as the join purpose.
+  const raw: RawIntrospection = {
+    serverVersion: '16.2',
+    introspectedAt: '2026-01-01T00:00:00.000Z',
+    schemas: ['public'],
+    enums: [],
+    functions: [],
+    tables: [
+      {
+        schema: 'public',
+        name: 'customers',
+        comment: null,
+        primaryKey: ['id'],
+        foreignKeys: [],
+        checks: [],
+        indexes: [],
+        rowCountEstimate: null,
+        columns: [
+          {
+            name: 'id',
+            dataType: 'uuid',
+            udtName: 'uuid',
+            nullable: false,
+            defaultExpr: null,
+            comment: null,
+            position: 1,
+          },
+        ],
+      },
+      {
+        schema: 'public',
+        name: 'orders',
+        comment: null,
+        primaryKey: ['id'],
+        foreignKeys: [
+          {
+            name: 'orders_customer_id_fkey',
+            columns: ['customer_id'],
+            referencedSchema: 'public',
+            referencedTable: 'customers',
+            referencedColumns: ['id'],
+            onDelete: 'NO ACTION',
+            onUpdate: 'NO ACTION',
+            comment: 'the customer who placed the order',
+          },
+        ],
+        checks: [],
+        indexes: [],
+        rowCountEstimate: null,
+        columns: [
+          {
+            name: 'id',
+            dataType: 'uuid',
+            udtName: 'uuid',
+            nullable: false,
+            defaultExpr: null,
+            comment: null,
+            position: 1,
+          },
+          {
+            name: 'customer_id',
+            dataType: 'uuid',
+            udtName: 'uuid',
+            nullable: false,
+            defaultExpr: null,
+            comment: null,
+            position: 2,
+          },
+        ],
+      },
+    ],
+    views: [
+      {
+        schema: 'public',
+        name: 'vw_orders',
+        comment: 'Orders with their customer.',
+        columns: [
+          {
+            name: 'id',
+            dataType: 'uuid',
+            udtName: 'uuid',
+            nullable: false,
+            defaultExpr: null,
+            comment: null,
+            position: 1,
+          },
+        ],
+        underlyingTables: [
+          { schema: 'public', name: 'orders' },
+          { schema: 'public', name: 'customers' },
+        ],
+        definition: 'SELECT o.id FROM orders o JOIN customers c ON o.customer_id = c.id',
+      },
+    ],
+  };
+
+  it('surfaces the real FK ON condition and the FK COMMENT as purpose', async () => {
+    const ctx = await buildSchemaContext({ raw });
+    const r = getConceptContext({ name: 'vw_orders' }, ctx);
+    expect(r.joinSuggestions).toEqual([
+      {
+        table: 'public.customers',
+        on: 'orders.customer_id = customers.id',
+        purpose: 'the customer who placed the order',
+      },
+    ]);
+    // The old unresolved placeholder must not reappear.
+    expect(r.joinSuggestions[0]!.on).not.toContain('<fk_column>');
+  });
+});

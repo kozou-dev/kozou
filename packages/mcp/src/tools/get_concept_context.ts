@@ -27,7 +27,9 @@ export function getConceptContext(
     joinSuggestions: concept.joinSuggestions.map((j) => ({
       table: j.table,
       on: j.on,
-      purpose: '',
+      // The FK's COMMENT is the join's documented purpose; surface it here
+      // (this field was always empty before). Empty when the FK has no COMMENT.
+      purpose: j.meaning ?? '',
     })),
     relatedTables,
     // `@example:` blocks captured on the VIEW's COMMENT by

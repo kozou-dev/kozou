@@ -287,8 +287,10 @@ export type ConceptContext = {
   description: string | null;
   /** Hard-coded "VIEW" in v0.1, with room to grow (e.g. "FUNCTION") */
   kind: 'VIEW';
-  /** Suggested query path: targets the VIEW can be joined to */
-  joinSuggestions: { table: string; on: string }[];
+  /** Suggested query path: real FK edges among the view's underlying tables.
+   *  `on` is the actual join condition; `meaning` is the FK's COMMENT (the
+   *  relationship's documented purpose), or null when the FK has no COMMENT. */
+  joinSuggestions: { table: string; on: string; meaning: string | null }[];
   /** @ai: lines from the COMMENT */
   aiNotes: string[];
   /** `@policy:` lines from the COMMENT — advisory business rules surfaced to

@@ -409,9 +409,9 @@ function buildViewContext(input: {
 function deriveJoinSuggestions(
   view: RawView,
   relationsByTable: Map<string, RelationContext[]>,
-): { table: string; on: string }[] {
+): { table: string; on: string; meaning: string | null }[] {
   const underlying = new Set(view.underlyingTables.map((t) => `${t.schema}.${t.name}`));
-  const suggestions: { table: string; on: string }[] = [];
+  const suggestions: { table: string; on: string; meaning: string | null }[] = [];
   for (const ut of view.underlyingTables) {
     const relations = relationsByTable.get(`${ut.schema}.${ut.name}`);
     if (relations === undefined) continue; // an underlying view, or a hidden table
@@ -426,7 +426,9 @@ function deriveJoinSuggestions(
       const on = fields
         .map((field, i) => `${ut.name}.${field} = ${rel.references.table}.${refColumns[i]!}`)
         .join(' AND ');
-      suggestions.push({ table: target, on });
+      // The FK's COMMENT documents what the relationship means; surface it so an
+      // agent gets the join's purpose, not just its mechanics. null when absent.
+      suggestions.push({ table: target, on, meaning: rel.meaning });
     }
   }
   return suggestions;

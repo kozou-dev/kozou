@@ -610,7 +610,7 @@ describe('buildSchemaContext', () => {
       referencedColumns: ['id'],
       onDelete: 'NO ACTION',
       onUpdate: 'NO ACTION',
-      comment: null,
+      comment: 'the customer who placed the order',
     };
     const view: RawView = {
       schema: 'public',
@@ -636,7 +636,11 @@ describe('buildSchemaContext', () => {
     });
     const ctx = await buildSchemaContext({ raw });
     expect(ctx.concepts[0]!.joinSuggestions).toEqual([
-      { table: 'public.customers', on: 'orders.customer_id = customers.id' },
+      {
+        table: 'public.customers',
+        on: 'orders.customer_id = customers.id',
+        meaning: 'the customer who placed the order',
+      },
     ]);
   });
 
@@ -680,6 +684,7 @@ describe('buildSchemaContext', () => {
       {
         table: 'public.orders',
         on: 'order_items.order_id = orders.id AND order_items.order_line = orders.line',
+        meaning: null,
       },
     ]);
   });
