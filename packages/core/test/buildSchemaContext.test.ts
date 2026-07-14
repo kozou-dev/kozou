@@ -593,10 +593,154 @@ describe('buildSchemaContext', () => {
       'start from this VIEW',
       'recommended for aggregations',
     ]);
-    expect(ctx.concepts[0]!.joinSuggestions).toEqual([
-      { table: 'public.orders', on: 'vw_sample.<fk_column> = orders.<pk_column>' },
-    ]);
+    // No base tables in this fixture (and a single underlying table has no FK
+    // edge to derive), so join suggestions stay empty rather than emitting an
+    // unresolved `<fk_column> = <pk_column>` placeholder. Real FK derivation is
+    // covered by the dedicated tests below.
+    expect(ctx.concepts[0]!.joinSuggestions).toEqual([]);
     expect(ctx.concepts[0]!.exampleQueries).toEqual([]);
+  });
+
+  it('joinSuggestions: derived from a real single-column FK among underlying tables', async () => {
+    const fk: RawForeignKey = {
+      name: 'orders_customer_id_fkey',
+      columns: ['customer_id'],
+      referencedSchema: 'public',
+      referencedTable: 'customers',
+      referencedColumns: ['id'],
+      onDelete: 'NO ACTION',
+      onUpdate: 'NO ACTION',
+      comment: null,
+    };
+    const view: RawView = {
+      schema: 'public',
+      name: 'vw_orders',
+      comment: 'Orders with their customer.',
+      columns: [makeCol('id', 'uuid')],
+      underlyingTables: [
+        { schema: 'public', name: 'orders' },
+        { schema: 'public', name: 'customers' },
+      ],
+      definition: 'SELECT 1',
+    };
+    const raw = makeRaw({
+      tables: [
+        makeTable('customers', { columns: [makeCol('id', 'uuid')], primaryKey: ['id'] }),
+        makeTable('orders', {
+          columns: [makeCol('customer_id', 'uuid')],
+          primaryKey: ['id'],
+          foreignKeys: [fk],
+        }),
+      ],
+      views: [view],
+    });
+    const ctx = await buildSchemaContext({ raw });
+    expect(ctx.concepts[0]!.joinSuggestions).toEqual([
+      { table: 'public.customers', on: 'orders.customer_id = customers.id' },
+    ]);
+  });
+
+  it('joinSuggestions: composite FK becomes an AND-joined condition', async () => {
+    const fk: RawForeignKey = {
+      name: 'items_order_fkey',
+      columns: ['order_id', 'order_line'],
+      referencedSchema: 'public',
+      referencedTable: 'orders',
+      referencedColumns: ['id', 'line'],
+      onDelete: 'NO ACTION',
+      onUpdate: 'NO ACTION',
+      comment: null,
+    };
+    const view: RawView = {
+      schema: 'public',
+      name: 'vw_order_items',
+      comment: 'Order items joined to their order.',
+      columns: [makeCol('order_id', 'uuid')],
+      underlyingTables: [
+        { schema: 'public', name: 'order_items' },
+        { schema: 'public', name: 'orders' },
+      ],
+      definition: 'SELECT 1',
+    };
+    const raw = makeRaw({
+      tables: [
+        makeTable('orders', {
+          columns: [makeCol('id', 'uuid'), makeCol('line', 'int4')],
+          primaryKey: ['id', 'line'],
+        }),
+        makeTable('order_items', {
+          columns: [makeCol('order_id', 'uuid'), makeCol('order_line', 'int4')],
+          foreignKeys: [fk],
+        }),
+      ],
+      views: [view],
+    });
+    const ctx = await buildSchemaContext({ raw });
+    expect(ctx.concepts[0]!.joinSuggestions).toEqual([
+      {
+        table: 'public.orders',
+        on: 'order_items.order_id = orders.id AND order_items.order_line = orders.line',
+      },
+    ]);
+  });
+
+  it('joinSuggestions: empty when underlying tables have no FK between them', async () => {
+    const view: RawView = {
+      schema: 'public',
+      name: 'vw_unrelated',
+      comment: 'Two unrelated tables.',
+      columns: [makeCol('id', 'uuid')],
+      underlyingTables: [
+        { schema: 'public', name: 'orders' },
+        { schema: 'public', name: 'products' },
+      ],
+      definition: 'SELECT 1',
+    };
+    const raw = makeRaw({
+      tables: [
+        makeTable('orders', { columns: [makeCol('id', 'uuid')], primaryKey: ['id'] }),
+        makeTable('products', { columns: [makeCol('id', 'uuid')], primaryKey: ['id'] }),
+      ],
+      views: [view],
+    });
+    const ctx = await buildSchemaContext({ raw });
+    expect(ctx.concepts[0]!.joinSuggestions).toEqual([]);
+  });
+
+  it('joinSuggestions: FK pointing outside the view is excluded', async () => {
+    const fk: RawForeignKey = {
+      name: 'orders_customer_id_fkey',
+      columns: ['customer_id'],
+      referencedSchema: 'public',
+      referencedTable: 'customers',
+      referencedColumns: ['id'],
+      onDelete: 'NO ACTION',
+      onUpdate: 'NO ACTION',
+      comment: null,
+    };
+    // The view reads only `orders`, not `customers`, so the FK to `customers`
+    // is not a join among the view's own tables and must not be suggested.
+    const view: RawView = {
+      schema: 'public',
+      name: 'vw_orders_only',
+      comment: 'Orders only.',
+      columns: [makeCol('id', 'uuid')],
+      underlyingTables: [{ schema: 'public', name: 'orders' }],
+      definition: 'SELECT 1',
+    };
+    const raw = makeRaw({
+      tables: [
+        makeTable('customers', { columns: [makeCol('id', 'uuid')], primaryKey: ['id'] }),
+        makeTable('orders', {
+          columns: [makeCol('customer_id', 'uuid')],
+          primaryKey: ['id'],
+          foreignKeys: [fk],
+        }),
+      ],
+      views: [view],
+    });
+    const ctx = await buildSchemaContext({ raw });
+    expect(ctx.concepts[0]!.joinSuggestions).toEqual([]);
   });
 
   it('VIEW concepts surface @example: blocks as exampleQueries', async () => {

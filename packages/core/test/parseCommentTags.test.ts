@@ -465,4 +465,35 @@ describe('parseCommentTags', () => {
       expect(warn).toHaveBeenCalledOnce();
     });
   });
+
+  // Regression: a colon is required on every tag, and a colon-less known token
+  // is treated uniformly (left in `body`, never captured). An earlier report
+  // observed an @ai/@policy asymmetry; the tag parser recognizes tags only via
+  // TAG_RE (colon-mandatory) for all tags, so the behaviour is symmetric. These
+  // lock that in so the asymmetry cannot regress.
+  describe('colon requirement is symmetric across tags', () => {
+    it('colon-less @ai is not captured and stays in body', () => {
+      const r = parseCommentTags('An item.\n@ai note without a colon');
+      expect(r.ai).toEqual([]);
+      expect(r.body).toContain('@ai note without a colon');
+    });
+
+    it('colon-less @policy is not captured and stays in body', () => {
+      const r = parseCommentTags('An item.\n@policy note without a colon');
+      expect(r.policy).toEqual([]);
+      expect(r.body).toContain('@policy note without a colon');
+    });
+
+    it('@ai and @policy behave identically with and without a colon', () => {
+      const aiNo = parseCommentTags('@ai x');
+      const polNo = parseCommentTags('@policy x');
+      expect(aiNo.ai).toEqual([]);
+      expect(polNo.policy).toEqual([]);
+
+      const aiYes = parseCommentTags('@ai: x');
+      const polYes = parseCommentTags('@policy: x');
+      expect(aiYes.ai).toEqual(['x']);
+      expect(polYes.policy).toEqual(['x']);
+    });
+  });
 });
