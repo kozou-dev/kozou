@@ -1,0 +1,5 @@
+dist/
+node_modules/
+# Run outputs are large and may embed transcripts; commit official runs
+# explicitly (git add -f results/<runId>) rather than by default.
+results/

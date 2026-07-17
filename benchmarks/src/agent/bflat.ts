@@ -7,7 +7,7 @@
 // (that comparison is against the selective arm B). Recorded for context.
 
 import Anthropic from '@anthropic-ai/sdk';
-import type { Client } from 'pg';
+import type { ClientBase } from 'pg';
 
 import { listRelations, describeRelation } from '../tools/catalog.js';
 import type { BenchTask } from '../types.js';
@@ -16,7 +16,7 @@ import { EFFORT, type TurnUsage } from './loop.js';
 const MAX_TOKENS = 4096;
 
 /** Concatenate a B-style describe of every table and view in the schema. */
-export async function generateBFlatContext(client: Client, schema: string): Promise<string> {
+export async function generateBFlatContext(client: ClientBase, schema: string): Promise<string> {
   const tables = await listRelations(client, schema, 'r');
   const views = await listRelations(client, schema, 'v');
   const blocks: string[] = ['-- Full schema (all relations, with comments).'];

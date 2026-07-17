@@ -31,14 +31,39 @@ export function jaccard(a: string, b: string): number {
   return union === 0 ? 0 : inter / union;
 }
 
-/** Extract the body of every `COMMENT ON ... IS '...';` in the SQL. */
+/** Extract the body of every `COMMENT ON ... IS '...';` in the SQL.
+ *  Hand-written single-pass scanner (no backtracking regex) that reads the
+ *  quoted literal with '' escapes — avoids any polynomial-ReDoS surface. */
 export function extractComments(sql: string): string[] {
   const out: string[] = [];
-  // Match up to the closing quote, allowing doubled '' escapes inside.
-  const re = /COMMENT ON [^']*IS\s+'((?:[^']|'')*)'/gi;
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(sql)) !== null) {
-    out.push(m[1].replace(/''/g, "'"));
+  const marker = ' IS ';
+  const upper = sql.toUpperCase();
+  let searchFrom = 0;
+  for (;;) {
+    const head = upper.indexOf('COMMENT ON', searchFrom);
+    if (head < 0) break;
+    const isIdx = upper.indexOf(marker, head);
+    if (isIdx < 0) break;
+    // Advance to the opening quote after "IS".
+    let i = isIdx + marker.length;
+    while (i < sql.length && sql[i] !== "'") i += 1;
+    if (i >= sql.length) break;
+    i += 1; // past opening quote
+    let body = '';
+    for (; i < sql.length; i += 1) {
+      if (sql[i] === "'") {
+        if (sql[i + 1] === "'") {
+          body += "'";
+          i += 1; // consume the escaped quote pair
+        } else {
+          break; // closing quote
+        }
+      } else {
+        body += sql[i];
+      }
+    }
+    out.push(body);
+    searchFrom = i + 1;
   }
   return out;
 }

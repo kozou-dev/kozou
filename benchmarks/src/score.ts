@@ -7,7 +7,7 @@
 // either way; these guards keep failure modes tidy and mirror how a
 // least-privilege reporting connection behaves.
 
-import type { Client } from 'pg';
+import type { ClientBase } from 'pg';
 
 import type { Scoring } from './types.js';
 
@@ -26,7 +26,18 @@ export interface Score {
   detail: string;
 }
 
-export async function executeTaskSql(client: Client, sql: string): Promise<SqlExecution> {
+/** Failure decomposition (C-13): navigation (couldn't reach the right objects
+ *  -> SQL error) vs semantic (ran fine but wrong logic) vs no-answer. */
+export type Outcome = 'correct' | 'no-answer' | 'navigation' | 'semantic';
+
+export function classifyOutcome(agentOk: boolean, execOk: boolean, correct: boolean): Outcome {
+  if (correct) return 'correct';
+  if (!agentOk) return 'no-answer';
+  if (!execOk) return 'navigation';
+  return 'semantic';
+}
+
+export async function executeTaskSql(client: ClientBase, sql: string): Promise<SqlExecution> {
   const trimmed = sql.trim().replace(/;\s*$/, '');
   if (trimmed.includes(';')) {
     return { ok: false, rows: [], error: 'multi-statement SQL is not allowed' };
