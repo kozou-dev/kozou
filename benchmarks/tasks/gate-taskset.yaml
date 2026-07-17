@@ -1,0 +1,67 @@
+# B competence gate task set (tooling validation, NOT the main comparison).
+#
+# Each answer is stated in / directly derivable from a single COMMENT, so a
+# generic MCP that can search + read comments (arm B) MUST solve these at a
+# high rate. This is the counterpart to the leak gate (which checks arm A is
+# not too strong): it checks arm B is not accidentally too weak (broken search
+# or comment path). Arm A, with no comments, is expected to struggle to locate
+# the right opaque column. Ground truth is CI-verified like the main tasks.
+
+tasks:
+  - id: gate-01
+    question: >-
+      What is the current catalog price of the Widget product? Give a single
+      number in dollars.
+    result_shape: exactly one row with a single numeric column
+    scoring:
+      kind: numeric
+      expected: 10.00
+    canonical_sql: >-
+      SELECT {{c:product.list_price}} FROM {{t:product}} WHERE {{c:product.name}} = 'Widget'
+    note: >-
+      A comment states which column holds the CURRENT catalog price; B must
+      find the products relation and that column.
+
+  - id: gate-02
+    question: >-
+      On order O2, what price per unit was actually charged for the Gadget line
+      (the price captured at order time)? Give a single number in dollars.
+    result_shape: exactly one row with a single numeric column
+    scoring:
+      kind: numeric
+      expected: 20.00
+    canonical_sql: >-
+      SELECT oi.{{c:order_item.unit_price}}
+      FROM {{t:order_item}} oi
+      JOIN {{t:order}} o ON o.{{c:order.id}} = oi.{{c:order_item.order_id}}
+      JOIN {{t:product}} p ON p.{{c:product.id}} = oi.{{c:order_item.product_id}}
+      WHERE o.{{c:order.code}} = 'O2' AND p.{{c:product.name}} = 'Gadget'
+    note: >-
+      A comment states which column is the captured (historical) unit price;
+      B must locate it and join via the documented FKs.
+
+  - id: gate-03
+    question: How many customers are marked as soft-deleted? Give a single number.
+    result_shape: exactly one row with a single numeric column
+    scoring:
+      kind: numeric
+      expected: 1
+    canonical_sql: >-
+      SELECT count(*) FROM {{t:customer}} WHERE {{c:customer.removed}} IS NOT NULL
+    note: >-
+      A comment states which timestamp column marks a soft-deleted row; B must
+      find it (only Dave is soft-deleted).
+
+  - id: gate-04
+    question: >-
+      What value is stored in the deprecated cached order-total field for order
+      O4? Give a single number in dollars.
+    result_shape: exactly one row with a single numeric column
+    scoring:
+      kind: numeric
+      expected: 400.00
+    canonical_sql: >-
+      SELECT {{c:order.amount_total}} FROM {{t:order}} WHERE {{c:order.code}} = 'O4'
+    note: >-
+      A comment identifies the deprecated cached total column; B must locate it
+      by reading that comment (the name is opaque).
