@@ -44,6 +44,8 @@ export interface LoopResult {
   toolCalls: number;
   /** Count of enumerate-all calls (list_*), tracked separately (C-12). */
   enumerateCalls: number;
+  /** Total chars returned by enumerate-all calls (C-12: size, not just count). */
+  enumerateChars: number;
   turns: number;
   capHit: boolean;
   stopReason: string | null;
@@ -88,11 +90,26 @@ function userPrompt(task: PromptTask): string {
 
 type Block = Anthropic.ContentBlockParam;
 
-function withCacheControl(blocks: Block[]): Block[] {
-  if (blocks.length === 0) return blocks;
-  const last = blocks[blocks.length - 1] as { cache_control?: unknown };
-  last.cache_control = { type: 'ephemeral' };
-  return blocks;
+/**
+ * Keep at most ONE rolling cache breakpoint on the messages (plus the static
+ * one on `system`), so the request never exceeds the API's 4-breakpoint limit
+ * no matter how many turns the exploration takes (#1). Clears cache_control
+ * from every prior block, then marks the last block of the last message; a
+ * single moving breakpoint still caches the whole prefix before it.
+ */
+function applyRollingCache(messages: Anthropic.MessageParam[]): void {
+  for (const m of messages) {
+    if (Array.isArray(m.content)) {
+      for (const b of m.content) delete (b as { cache_control?: unknown }).cache_control;
+    }
+  }
+  const last = messages[messages.length - 1];
+  if (last === undefined) return;
+  if (typeof last.content === 'string') {
+    last.content = [{ type: 'text', text: last.content, cache_control: { type: 'ephemeral' } }];
+  } else if (Array.isArray(last.content) && last.content.length > 0) {
+    (last.content[last.content.length - 1] as { cache_control?: unknown }).cache_control = { type: 'ephemeral' };
+  }
 }
 
 function readUsage(u: Anthropic.Usage): TurnUsage {
@@ -130,10 +147,12 @@ export async function runAgentLoop(opts: RunLoopOptions): Promise<LoopResult> {
   const usage: TurnUsage[] = [];
   let toolCalls = 0;
   let enumerateCalls = 0;
+  let enumerateChars = 0;
   let capHit = false;
 
   for (let turn = 1; turn <= MAX_TURNS; turn += 1) {
     const forceSubmit = capHit; // after the cap, force a final answer
+    applyRollingCache(messages);
     let response: Anthropic.Message;
     try {
       response = await client.messages.create({
@@ -147,7 +166,7 @@ export async function runAgentLoop(opts: RunLoopOptions): Promise<LoopResult> {
       } as Anthropic.MessageCreateParamsNonStreaming);
     } catch (err) {
       return {
-        ok: false, sql: '', notes: '', usage, toolCalls, enumerateCalls, turns: turn - 1,
+        ok: false, sql: '', notes: '', usage, toolCalls, enumerateCalls, enumerateChars, turns: turn - 1,
         capHit, stopReason: null, error: err instanceof Error ? err.message : String(err),
       };
     }
@@ -162,9 +181,7 @@ export async function runAgentLoop(opts: RunLoopOptions): Promise<LoopResult> {
       messages.push({ role: 'assistant', content: response.content });
       messages.push({
         role: 'user',
-        content: withCacheControl([
-          { type: 'text', text: 'Call submit_answer with your final single SELECT statement.' },
-        ]),
+        content: [{ type: 'text', text: 'Call submit_answer with your final single SELECT statement.' }],
       });
       continue;
     }
@@ -177,12 +194,12 @@ export async function runAgentLoop(opts: RunLoopOptions): Promise<LoopResult> {
       const notes = typeof input.notes === 'string' ? input.notes : '';
       if (sql.trim() === '') {
         return {
-          ok: false, sql: '', notes, usage, toolCalls, enumerateCalls, turns: turn,
+          ok: false, sql: '', notes, usage, toolCalls, enumerateCalls, enumerateChars, turns: turn,
           capHit, stopReason: response.stop_reason, error: 'submit_answer had empty sql',
         };
       }
       return {
-        ok: true, sql, notes, usage, toolCalls, enumerateCalls, turns: turn, capHit,
+        ok: true, sql, notes, usage, toolCalls, enumerateCalls, enumerateChars, turns: turn, capHit,
         stopReason: response.stop_reason,
       };
     }
@@ -192,7 +209,6 @@ export async function runAgentLoop(opts: RunLoopOptions): Promise<LoopResult> {
     const results: Anthropic.ToolResultBlockParam[] = [];
     for (const use of toolUses) {
       toolCalls += 1;
-      if (use.name.startsWith('list_')) enumerateCalls += 1;
       let text: string;
       let isError = false;
       try {
@@ -201,14 +217,18 @@ export async function runAgentLoop(opts: RunLoopOptions): Promise<LoopResult> {
         text = err instanceof Error ? err.message : String(err);
         isError = true;
       }
+      if (use.name.startsWith('list_')) {
+        enumerateCalls += 1;
+        enumerateChars += text.length; // C-12: size, not just count
+      }
       results.push({ type: 'tool_result', tool_use_id: use.id, content: text, is_error: isError });
     }
     if (toolCalls >= TOOL_CALL_CAP) capHit = true;
-    messages.push({ role: 'user', content: withCacheControl(results as Block[]) });
+    messages.push({ role: 'user', content: results as Block[] });
   }
 
   return {
-    ok: false, sql: '', notes: '', usage, toolCalls, enumerateCalls, turns: MAX_TURNS,
+    ok: false, sql: '', notes: '', usage, toolCalls, enumerateCalls, enumerateChars, turns: MAX_TURNS,
     capHit, stopReason: null, error: 'exceeded max turns without an answer',
   };
 }

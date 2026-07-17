@@ -65,9 +65,19 @@ interface FullRecord extends CellRecord {
   notes: string;
   toolCalls: number;
   enumerateCalls: number;
+  enumerateChars: number;
   turns: number;
   errorRatio?: number;
   error?: string;
+}
+
+function errorRecord(cell: Cell, err: unknown): FullRecord {
+  return {
+    taskId: cell.task.id, scale: cell.scale, arm: cell.arm, run: cell.run,
+    correct: false, billedInput: 0, uncachedInput: 0, capHit: false,
+    outcome: 'no-answer', sql: '', notes: '', toolCalls: 0, enumerateCalls: 0, enumerateChars: 0, turns: 0,
+    error: `cell threw: ${err instanceof Error ? err.message : String(err)}`,
+  };
 }
 
 function parseScales(): Scale[] {
@@ -212,7 +222,9 @@ async function main(): Promise<void> {
       const { uri, pool } = scaleDb[scale];
       let mcpUrl: string | null = null;
       if (arms.includes('C')) {
-        const started = await startKozouMcp(uri, mcpPort);
+        // Distinct port per scale so a slow-to-exit prior server can't race the
+        // next scale's bind (#10).
+        const started = await startKozouMcp(uri, mcpPort + scales.indexOf(scale));
         mcpProcs.push(started.child);
         mcpUrl = started.url;
       }
@@ -229,13 +241,24 @@ async function main(): Promise<void> {
       console.log(`scale ${scale}: ${cells.length} cells (concurrency ${concurrency})...`);
       let done = 0;
 
+      // Per-cell try/catch: a transient throw (MCP hiccup, pool acquire) becomes
+      // a recorded failed cell, not an aborted multi-hour batch (#2).
       const scaleRecords = await withPool(cells, concurrency, async (cell): Promise<FullRecord> => {
-        const rec = await runCell(cell, pool, mcpUrl, bflatContext, anthropic, model);
+        let rec: FullRecord;
+        try {
+          rec = await runCell(cell, pool, mcpUrl, bflatContext, anthropic, model);
+        } catch (err) {
+          rec = errorRecord(cell, err);
+        }
         done += 1;
         if (done % 25 === 0) console.log(`  ${done}/${cells.length}`);
         return rec;
       });
       records.push(...scaleRecords);
+
+      // Persist cumulative records after EACH scale so a later-scale failure
+      // never discards completed scales (#2).
+      writeFileSync(path.join(outDir, 'records.jsonl'), records.map((r) => JSON.stringify(r)).join('\n') + '\n');
 
       for (const p of mcpProcs) await stopProcess(p);
       mcpProcs.length = 0;
@@ -284,7 +307,7 @@ async function runCell(
   const base = {
     taskId: task.id, scale, arm, run,
     correct: false, billedInput: 0, uncachedInput: 0, capHit: false,
-    outcome: 'no-answer' as Outcome, sql: '', notes: '', toolCalls: 0, enumerateCalls: 0, turns: 0,
+    outcome: 'no-answer' as Outcome, sql: '', notes: '', toolCalls: 0, enumerateCalls: 0, enumerateChars: 0, turns: 0,
   };
 
   // B-flat: single-shot dump.
@@ -318,7 +341,7 @@ async function runCell(
   try {
     return {
       ...finalize(base, loop.ok, loop.sql, loop.notes, loop.usage, loop.capHit, task, scoreClient, loop.error),
-      toolCalls: loop.toolCalls, enumerateCalls: loop.enumerateCalls, turns: loop.turns,
+      toolCalls: loop.toolCalls, enumerateCalls: loop.enumerateCalls, enumerateChars: loop.enumerateChars, turns: loop.turns,
     };
   } finally {
     if (leaseClient) leaseClient.release();

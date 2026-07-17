@@ -84,6 +84,27 @@ describe('analyzeBatch scenarios', () => {
     expect(r.decision.scenario).toBe('F1');
   });
 
+  it('frozen rule: a SUB-delta deficit is NOT F1 (needs point <= -delta, not just significant negative)', () => {
+    // C=0.45, B=0.50 -> delta -0.05, inside the 7pt margin. The old code
+    // (hi<0) would have branded this moat-F1; the frozen rule must not.
+    const recs: CellRecord[] = [];
+    const RUNS20 = 20;
+    for (const scale of SCALES) {
+      for (let i = 0; i < NTASKS; i += 1) {
+        for (const arm of ['A', 'B', 'C'] as ArmId[]) {
+          const correctN = arm === 'C' ? 9 : 10; // C 9/20=0.45, B/A 10/20=0.50
+          for (let run = 0; run < RUNS20; run += 1) {
+            recs.push({ taskId: `t${i}`, scale, arm, run, correct: run < correctN, billedInput: 1000, uncachedInput: 1000, capHit: false });
+          }
+        }
+      }
+    }
+    const r = analyzeBatch(recs);
+    expect(r.accuracyDeltaCoprimaryL.point).toBeCloseTo(-0.05, 3);
+    expect(r.decision.negativeReplicate).toBe(false);
+    expect(r.decision.scenario).not.toBe('F1');
+  });
+
   it('reports per-arm accuracy and cap-hit rate', () => {
     const recs = make({ correctProb: (arm) => (arm === 'C' ? 1 : 0.5), billed: flatCost });
     const r = analyzeBatch(recs);

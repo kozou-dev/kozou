@@ -52,16 +52,22 @@ export async function createKozouMcpProvider(mcpUrl: string): Promise<ArmToolPro
     meta: { arm: 'C', offeredTools: offered, excludedTools: excluded },
     async execute(name, args) {
       const result = await client.callTool({ name, arguments: args });
-      const content = (result.content as Array<{ type: string; text?: string }>)[0];
-      if (!content || content.type !== 'text' || typeof content.text !== 'string') {
-        throw new Error(`unexpected MCP content from tool ${name}`);
-      }
-      if (result.isError) throw new Error(`tool ${name} error: ${content.text}`);
+      const blocks = (result.content as Array<{ type: string; text?: string }>) ?? [];
+      // Concatenate ALL text blocks (a multi-block response must not be
+      // silently truncated to its first block), and check isError FIRST so a
+      // structured/non-text error surfaces as the tool's error, not as
+      // "unexpected content".
+      const text = blocks
+        .filter((b) => b.type === 'text' && typeof b.text === 'string')
+        .map((b) => b.text as string)
+        .join('\n');
+      if (result.isError) throw new Error(`tool ${name} error: ${text || '(non-text error)'}`);
+      if (text === '') throw new Error(`unexpected MCP content from tool ${name}`);
       // Re-serialize JSON for a stable, readable block; pass through otherwise.
       try {
-        return JSON.stringify(JSON.parse(content.text) as unknown, null, 2);
+        return JSON.stringify(JSON.parse(text) as unknown, null, 2);
       } catch {
-        return content.text;
+        return text;
       }
     },
     async close() {
