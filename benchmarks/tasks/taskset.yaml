@@ -220,10 +220,11 @@ tasks:
       SELECT sum(oi.{{c:order_item.quantity}} * oi.{{c:order_item.unit_price}} - oi.{{c:order_item.discount}})
       FROM {{t:order_item}} oi
       JOIN {{t:order}} o ON o.{{c:order.id}} = oi.{{c:order_item.order_id}}
-      WHERE o.{{c:order.status}} IN ('refunded', 'chargeback')
+      WHERE o.{{c:order.status}} IN ('refunded', 'chargeback') AND o.{{c:order.is_test}} = false
     trap: >-
       Requires treating BOTH refunded and chargeback as reversals and valuing
-      at captured line prices: O6 (10) + O7 (20) = 30.
+      at captured line prices, excluding test orders (the @ai note applies the
+      test exclusion to EVERY metric): O6 (10) + O7 (20) = 30.
 
   - id: bench-11
     category: captured-price
@@ -319,10 +320,11 @@ tasks:
       kind: numeric
       expected: 2
     canonical_sql: >-
-      SELECT count(*) FROM {{t:order}} WHERE {{c:order.status}} IN ('refunded', 'chargeback')
+      SELECT count(*) FROM {{t:order}}
+      WHERE {{c:order.status}} IN ('refunded', 'chargeback') AND {{c:order.is_test}} = false
     trap: >-
-      Requires knowing that refunded and chargeback are the reversal states
-      (O6, O7 = 2), not e.g. counting all non-paid orders.
+      Requires knowing that refunded and chargeback are the reversal states and
+      excluding test orders (O6, O7 = 2), not e.g. counting all non-paid orders.
 
   - id: bench-16
     category: source-of-truth

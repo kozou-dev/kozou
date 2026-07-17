@@ -80,7 +80,8 @@ export interface CI {
 // --- per-(arm,scale,task) aggregation ----------------------------------------
 interface CellAgg {
   accuracy: number; // over all runs
-  meanBilled: number; // over non-cap runs (NaN if all cap-hit)
+  meanBilled: number; // over non-cap runs (NaN if all cap-hit) — primary
+  meanBilledAll: number; // over ALL runs incl cap-hit — sensitivity (#4)
   meanUncached: number;
   capHitRate: number;
   n: number;
@@ -109,6 +110,7 @@ function aggregate(records: CellRecord[]): {
     cells.set(k, {
       accuracy: mean(rs.map((r) => (r.correct ? 1 : 0))),
       meanBilled: mean(nonCap.map((r) => r.billedInput)),
+      meanBilledAll: mean(rs.map((r) => r.billedInput)),
       meanUncached: mean(nonCap.map((r) => r.uncachedInput)),
       capHitRate: mean(rs.map((r) => (r.capHit ? 1 : 0))),
       n: rs.length,
@@ -148,11 +150,15 @@ export interface BatchReport {
   capHitRate: Record<string, Record<string, number>>;
   accuracyDelta: Record<string, CI>; // scale -> C-B accuracy CI (95%)
   accuracyDeltaCoprimaryL: CI; // C-B accuracy at L (97.5%)
-  slopeRatioBoverC: CI; // B billed-growth / C billed-growth (97.5%)
+  slopeRatioBoverC: CI; // B/C billed-growth, cap-hit EXCLUDED (primary, 97.5%)
+  slopeRatioBoverCInclCap: CI; // #4 sensitivity: cap-hit INCLUDED at their real cost
   decision: {
-    p1Superiority: boolean; // S/M or L accuracy superiority beyond floor
-    p1SuperiorityAtSorM: boolean; // S1 requires S or M
-    negativeReplicate: boolean; // C significantly worse (F1 direction)
+    // Frozen pre-registration rules (R-9): point-estimate floor AND significance,
+    // not CI-lower-bound-vs-floor. F1 requires the -delta magnitude, not just a
+    // significant negative. (Operator ratified the frozen rule, 2026-07-18.)
+    p1SuperiorityAtSorM: boolean; // S1 driver
+    p1SuperiorityAtL: boolean; // L-only accuracy superiority (S2 driver)
+    negativeReplicate: boolean; // C worse by >= delta AND significant (F1)
     nonInferiorityAtL: boolean;
     p2Slope: boolean;
     scenario: 'S1' | 'S2' | 'S3' | 'F1';
@@ -225,27 +231,51 @@ export function analyzeBatch(records: CellRecord[], params: PreRegParams = DEFAU
     : { point: NaN, lo: NaN, hi: NaN, level: 0.975 };
 
   // Cost slope: (B billed growth S->L) / (C billed growth S->L).
-  const slopeStat = (sample: string[]): number => {
+  // #4: restrict to tasks with finite billed at BOTH S and L for BOTH arms, so
+  // the numerator/denominator are a clean PAIRED slope (not averaged over
+  // mismatched task subsets when a cell caps out at one scale only).
+  const slopeStatFor = (field: 'meanBilled' | 'meanBilledAll') => (sample: string[]): number => {
+    const common = sample.filter((t) =>
+      (['B', 'C'] as ArmId[]).every((arm) =>
+        (['S', 'L'] as Scale[]).every((scale) => {
+          const v = cells.get(key(arm, scale, t))?.[field];
+          return v !== undefined && Number.isFinite(v);
+        }),
+      ),
+    );
+    if (common.length === 0) return NaN;
     const meanOver = (arm: ArmId, scale: Scale): number => {
-      const vals = sample.map((t) => cells.get(key(arm, scale, t))?.meanBilled).filter((v): v is number => v !== undefined && Number.isFinite(v));
-      return vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : NaN;
+      const vals = common.map((t) => cells.get(key(arm, scale, t))![field]);
+      return vals.reduce((a, b) => a + b, 0) / vals.length;
     };
     const bGrow = meanOver('B', 'L') / meanOver('B', 'S');
     const cGrow = meanOver('C', 'L') / meanOver('C', 'S');
     return cGrow === 0 ? NaN : bGrow / cGrow;
   };
-  const slopeRatioBoverC = hasL && scales.includes('S')
-    ? bootstrap(tasksByScale.get('L') ?? [], slopeStat, params.bootstrapIters, params.seed + 2, 0.975)
-    : { point: NaN, lo: NaN, hi: NaN, level: 0.975 };
+  const canSlope = hasL && scales.includes('S');
+  const noCI: CI = { point: NaN, lo: NaN, hi: NaN, level: 0.975 };
+  const slopeRatioBoverC = canSlope
+    ? bootstrap(tasksByScale.get('L') ?? [], slopeStatFor('meanBilled'), params.bootstrapIters, params.seed + 2, 0.975)
+    : noCI;
+  const slopeRatioBoverCInclCap = canSlope
+    ? bootstrap(tasksByScale.get('L') ?? [], slopeStatFor('meanBilledAll'), params.bootstrapIters, params.seed + 3, 0.975)
+    : noCI;
 
-  // Decisions.
-  const supBeyondFloor = (ci: CI): boolean => Number.isFinite(ci.lo) && ci.lo > params.accuracyFloor;
-  const p1SuperiorityAtSorM = ['S', 'M'].some((s) => scales.includes(s as Scale) && supBeyondFloor(accuracyDelta[s]));
-  const p1SuperiorityAtL = supBeyondFloor(accuracyDeltaCoprimaryL);
-  const p1Superiority = p1SuperiorityAtSorM || p1SuperiorityAtL;
-  const negativeReplicate = Number.isFinite(accuracyDeltaCoprimaryL.hi) && accuracyDeltaCoprimaryL.hi < 0;
+  // Decisions — faithful to the FROZEN pre-registration: point-estimate floor
+  // AND significance (CI excludes the null), not CI-lower-bound-vs-floor.
+  const sig = (ci: CI): boolean => Number.isFinite(ci.lo) && Number.isFinite(ci.hi);
+  const p1SupAtScale = (ci: CI): boolean =>
+    sig(ci) && ci.point >= params.accuracyFloor && ci.lo > 0; // point >= +floor AND significantly > 0
+  const p1SuperiorityAtSorM = ['S', 'M'].some((s) => scales.includes(s as Scale) && p1SupAtScale(accuracyDelta[s]));
+  const p1SuperiorityAtL = p1SupAtScale(accuracyDeltaCoprimaryL);
+  // F1: C worse by AT LEAST delta AND significant (not merely any significant negative).
+  const negativeReplicate =
+    sig(accuracyDeltaCoprimaryL) &&
+    accuracyDeltaCoprimaryL.point <= -params.niMargin &&
+    accuracyDeltaCoprimaryL.hi < 0;
   const nonInferiorityAtL = Number.isFinite(accuracyDeltaCoprimaryL.lo) && accuracyDeltaCoprimaryL.lo > -params.niMargin;
-  const p2Slope = Number.isFinite(slopeRatioBoverC.lo) && slopeRatioBoverC.lo > params.slopeRatioFloor;
+  // P2: growth ratio point >= floor AND significantly > parity (reliably asymmetric).
+  const p2Slope = sig(slopeRatioBoverC) && slopeRatioBoverC.point >= params.slopeRatioFloor && slopeRatioBoverC.lo > 1;
 
   let scenario: 'S1' | 'S2' | 'S3' | 'F1';
   if (negativeReplicate) scenario = 'F1';
@@ -261,18 +291,37 @@ export function analyzeBatch(records: CellRecord[], params: PreRegParams = DEFAU
     accuracyDelta,
     accuracyDeltaCoprimaryL,
     slopeRatioBoverC,
-    decision: { p1Superiority, p1SuperiorityAtSorM, negativeReplicate, nonInferiorityAtL, p2Slope, scenario },
+    slopeRatioBoverCInclCap,
+    decision: { p1SuperiorityAtSorM, p1SuperiorityAtL, negativeReplicate, nonInferiorityAtL, p2Slope, scenario },
   };
 }
 
-/** Reproduction: the pre-registered decision must hold in BOTH batches. */
+/**
+ * Reproduction (#6): requires not just the same scenario LABEL but the same
+ * DECISIVE endpoint(s) to replicate across both batches. A scenario reached via
+ * different drivers in each batch is NOT reproduced. Distinguishes a reproduced
+ * positive from a reproduced null.
+ */
 export function combineReproduction(b1: BatchReport, b2: BatchReport): {
   reproduced: boolean;
   scenario: BatchReport['decision']['scenario'] | 'not-reproduced';
+  positive: boolean;
 } {
-  const same = b1.decision.scenario === b2.decision.scenario;
+  const d1 = b1.decision;
+  const d2 = b2.decision;
+  const sameScenario = d1.scenario === d2.scenario;
+  // The endpoint booleans that drive the scenario must match in both batches.
+  const driversMatch =
+    d1.p1SuperiorityAtSorM === d2.p1SuperiorityAtSorM &&
+    d1.p1SuperiorityAtL === d2.p1SuperiorityAtL &&
+    d1.p2Slope === d2.p2Slope &&
+    d1.nonInferiorityAtL === d2.nonInferiorityAtL &&
+    d1.negativeReplicate === d2.negativeReplicate;
+  const reproduced = sameScenario && driversMatch;
+  const positive = reproduced && d1.scenario !== 'S3';
   return {
-    reproduced: same,
-    scenario: same ? b1.decision.scenario : 'not-reproduced',
+    reproduced,
+    scenario: reproduced ? d1.scenario : 'not-reproduced',
+    positive,
   };
 }
