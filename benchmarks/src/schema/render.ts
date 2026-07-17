@@ -68,12 +68,18 @@ export interface RenderInput {
 export function renderFixtureSql(input: RenderInput): string {
   const sections: string[] = [];
 
+  // Roles are cluster-global. On a shared CI cluster, two fixtures loading
+  // concurrently race on CREATE ROLE: the loser can raise EITHER
+  // duplicate_object (check-then-create) OR unique_violation on
+  // pg_authid_rolname_index (insert race). Catch BOTH so the idempotent create
+  // is truly concurrency-safe. (loadFixture also serializes role creation with
+  // an advisory lock — belt and suspenders.)
   sections.push(
     `DO $$
 BEGIN
   CREATE ROLE analyst NOLOGIN;
 EXCEPTION
-  WHEN duplicate_object THEN NULL;
+  WHEN duplicate_object OR unique_violation THEN NULL;
 END
 $$;`,
   );
