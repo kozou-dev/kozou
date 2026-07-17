@@ -1,0 +1,382 @@
+# Pre-registered benchmark task set (C-10 redesign).
+#
+# ANTI-RIGGING (see README.md):
+#   - Frozen BEFORE any run. Committed AFTER the schema generator (commit S ->
+#     commit T), so git history proves comments were not tuned to tasks.
+#   - Every task is reported, including where the Kozou arm loses or ties.
+#   - `trap` pre-registers the expectation so post-hoc rationalization is
+#     impossible. Control tasks expect NO delta.
+#   - `strong_trap: true` marks tasks where the naive (comment-less) answer is
+#     systematically wrong; ONLY these form the leak-gate denominator.
+#
+# Questions are pure natural language and never mention schema names.
+# `canonical_sql` (ground truth) uses semantic placeholders ({{t:..}}, {{c:..}},
+# {{v:..}}) resolved to the generated mangled names at load time; every one is
+# executed against the generated fixture at every scale in CI
+# (test/groundtruth.test.ts).
+#
+# Fixture facts (seed data): 4 customers (1 soft-deleted: Dave Evans);
+# 4 products (Widget/Gadget purchasable, Gizmo delisted, Doohickey soft-deleted);
+# 10 orders O1..O10 with statuses cart/pending/paid/refunded/chargeback, one
+# test order (O4), one order by the soft-deleted customer (O5); 11 line items.
+# A "recognized sale" = status 'paid' AND not a test order AND the customer is
+# not soft-deleted.
+
+tasks:
+  - id: bench-01
+    category: source-of-truth
+    difficulty: D3
+    strong_trap: true
+    question: >-
+      What is our total recognized revenue across all time? Give a single
+      number in dollars.
+    result_shape: exactly one row with a single numeric column
+    scoring:
+      kind: numeric
+      expected: 75.00
+    canonical_sql: >-
+      SELECT sum(oi.{{c:order_item.quantity}} * oi.{{c:order_item.unit_price}} - oi.{{c:order_item.discount}})
+      FROM {{t:order_item}} oi
+      JOIN {{t:order}} o ON o.{{c:order.id}} = oi.{{c:order_item.order_id}}
+      JOIN {{t:customer}} cu ON cu.{{c:customer.id}} = o.{{c:order.customer_id}}
+      WHERE o.{{c:order.status}} = 'paid' AND o.{{c:order.is_test}} = false AND cu.{{c:customer.removed}} IS NULL
+    trap: >-
+      Summing the deprecated amount_total cache over paid orders includes the
+      400 test order (O4) and the soft-deleted customer's order (O5). The true
+      answer uses captured line prices over recognized sales only.
+
+  - id: bench-02
+    category: source-of-truth
+    difficulty: D3
+    strong_trap: true
+    question: >-
+      How much recognized revenue came in through the web sales channel? Give
+      a single number in dollars.
+    result_shape: exactly one row with a single numeric column
+    scoring:
+      kind: numeric
+      expected: 55.00
+    canonical_sql: >-
+      SELECT sum(oi.{{c:order_item.quantity}} * oi.{{c:order_item.unit_price}} - oi.{{c:order_item.discount}})
+      FROM {{t:order_item}} oi
+      JOIN {{t:order}} o ON o.{{c:order.id}} = oi.{{c:order_item.order_id}}
+      JOIN {{t:customer}} cu ON cu.{{c:customer.id}} = o.{{c:order.customer_id}}
+      WHERE o.{{c:order.status}} = 'paid' AND o.{{c:order.is_test}} = false
+        AND cu.{{c:customer.removed}} IS NULL AND o.{{c:order.channel}} = 'web'
+    trap: >-
+      Same recognized-sale trap plus the channel filter. Web recognized sales
+      are O1 (20) + O3 (25) + O10 (10) = 55; O2 is a store sale.
+
+  - id: bench-03
+    category: source-of-truth
+    difficulty: D3
+    strong_trap: true
+    question: >-
+      Which customer has generated the most revenue for us? Give their full
+      name.
+    result_shape: exactly one row with a single text column (the customer's full name)
+    scoring:
+      kind: text
+      expected: Carol Diaz
+      aliases:
+        - carol
+        - carol diaz
+    canonical_sql: >-
+      SELECT cu.{{c:customer.full_name}}
+      FROM {{t:order_item}} oi
+      JOIN {{t:order}} o ON o.{{c:order.id}} = oi.{{c:order_item.order_id}}
+      JOIN {{t:customer}} cu ON cu.{{c:customer.id}} = o.{{c:order.customer_id}}
+      WHERE o.{{c:order.status}} = 'paid' AND o.{{c:order.is_test}} = false AND cu.{{c:customer.removed}} IS NULL
+      GROUP BY cu.{{c:customer.full_name}}
+      ORDER BY sum(oi.{{c:order_item.quantity}} * oi.{{c:order_item.unit_price}} - oi.{{c:order_item.discount}}) DESC
+      LIMIT 1
+    trap: >-
+      Using amount_total or ignoring the recognized-sale filters changes the
+      ranking. True recognized totals: Carol 35, Alice 20, Bob 20.
+
+  - id: bench-04
+    category: source-of-truth
+    difficulty: D3
+    strong_trap: true
+    question: >-
+      What is the average revenue per completed sale? Give a single number in
+      dollars.
+    result_shape: exactly one row with a single numeric column
+    scoring:
+      kind: numeric
+      expected: 18.75
+    canonical_sql: >-
+      SELECT avg(t.rev) FROM (
+        SELECT o.{{c:order.id}} AS oid,
+               sum(oi.{{c:order_item.quantity}} * oi.{{c:order_item.unit_price}} - oi.{{c:order_item.discount}}) AS rev
+        FROM {{t:order}} o
+        JOIN {{t:customer}} cu ON cu.{{c:customer.id}} = o.{{c:order.customer_id}}
+        JOIN {{t:order_item}} oi ON oi.{{c:order_item.order_id}} = o.{{c:order.id}}
+        WHERE o.{{c:order.status}} = 'paid' AND o.{{c:order.is_test}} = false AND cu.{{c:customer.removed}} IS NULL
+        GROUP BY o.{{c:order.id}}
+      ) t
+    trap: >-
+      Averaging amount_total over paid orders overstates. True recognized
+      revenue is 75 over 4 recognized sales = 18.75 per sale.
+
+  - id: bench-05
+    category: soft-delete
+    difficulty: D1
+    strong_trap: true
+    question: How many customers do we currently have? Give a single number.
+    result_shape: exactly one row with a single numeric column
+    scoring:
+      kind: numeric
+      expected: 3
+    canonical_sql: >-
+      SELECT count(*) FROM {{t:customer}} WHERE {{c:customer.removed}} IS NULL
+    trap: >-
+      A bare count gives 4; one customer (Dave Evans) is soft-deleted and must
+      be excluded.
+
+  - id: bench-06
+    category: soft-delete
+    difficulty: D2
+    strong_trap: true
+    question: How many products can customers currently buy? Give a single number.
+    result_shape: exactly one row with a single numeric column
+    scoring:
+      kind: numeric
+      expected: 2
+    canonical_sql: >-
+      SELECT count(*) FROM {{t:product}}
+      WHERE {{c:product.active}} = true AND {{c:product.removed}} IS NULL
+    trap: >-
+      A bare count gives 4. Purchasable requires active AND not soft-deleted:
+      Gizmo is delisted, Doohickey is soft-deleted; only Widget and Gadget
+      remain (2).
+
+  - id: bench-07
+    category: soft-delete
+    difficulty: D2
+    strong_trap: true
+    question: List the SKUs of the products customers can currently buy.
+    result_shape: one row per SKU with a single text column
+    scoring:
+      kind: string_set
+      expected:
+        - WID-001
+        - GAD-001
+    canonical_sql: >-
+      SELECT {{c:product.sku}} FROM {{t:product}}
+      WHERE {{c:product.active}} = true AND {{c:product.removed}} IS NULL
+    trap: >-
+      Set form of bench-06; the naive answer includes the delisted and/or
+      soft-deleted SKUs.
+
+  - id: bench-08
+    category: status-enum
+    difficulty: D2
+    strong_trap: true
+    question: How many real customer sales have we made? Give a single number.
+    result_shape: exactly one row with a single numeric column
+    scoring:
+      kind: numeric
+      expected: 4
+    canonical_sql: >-
+      SELECT count(*) FROM {{t:order}} o
+      JOIN {{t:customer}} cu ON cu.{{c:customer.id}} = o.{{c:order.customer_id}}
+      WHERE o.{{c:order.status}} = 'paid' AND o.{{c:order.is_test}} = false AND cu.{{c:customer.removed}} IS NULL
+    trap: >-
+      Counting status='paid' gives 6 (includes the test order and the
+      soft-deleted customer's order); all orders gives 10. True is 4.
+
+  - id: bench-09
+    category: status-enum
+    difficulty: D1
+    strong_trap: true
+    question: >-
+      How many orders are still in progress — created but not yet completed as
+      a sale and not reversed (i.e. still in the cart or awaiting payment)?
+      Give a single number.
+    result_shape: exactly one row with a single numeric column
+    scoring:
+      kind: numeric
+      expected: 2
+    canonical_sql: >-
+      SELECT count(*) FROM {{t:order}} WHERE {{c:order.status}} IN ('cart', 'pending')
+    trap: >-
+      Requires knowing which lifecycle states are in-progress (cart, pending)
+      vs reversals (refunded, chargeback). Reading "not yet paid" as
+      status <> 'paid' gives 4.
+
+  - id: bench-10
+    category: status-enum
+    difficulty: D3
+    strong_trap: true
+    question: >-
+      How much sales value have we lost to refunds and chargebacks, valued at
+      the prices captured on the order lines? Give a single number in dollars.
+    result_shape: exactly one row with a single numeric column
+    scoring:
+      kind: numeric
+      expected: 30.00
+    canonical_sql: >-
+      SELECT sum(oi.{{c:order_item.quantity}} * oi.{{c:order_item.unit_price}} - oi.{{c:order_item.discount}})
+      FROM {{t:order_item}} oi
+      JOIN {{t:order}} o ON o.{{c:order.id}} = oi.{{c:order_item.order_id}}
+      WHERE o.{{c:order.status}} IN ('refunded', 'chargeback')
+    trap: >-
+      Requires treating BOTH refunded and chargeback as reversals and valuing
+      at captured line prices: O6 (10) + O7 (20) = 30.
+
+  - id: bench-11
+    category: captured-price
+    difficulty: D3
+    strong_trap: true
+    question: >-
+      What is the total revenue we recognized from sales of the Gadget
+      product, valued at the price actually charged on each order line? Give a
+      single number in dollars.
+    result_shape: exactly one row with a single numeric column
+    scoring:
+      kind: numeric
+      expected: 35.00
+    canonical_sql: >-
+      SELECT sum(oi.{{c:order_item.quantity}} * oi.{{c:order_item.unit_price}} - oi.{{c:order_item.discount}})
+      FROM {{t:order_item}} oi
+      JOIN {{t:order}} o ON o.{{c:order.id}} = oi.{{c:order_item.order_id}}
+      JOIN {{t:customer}} cu ON cu.{{c:customer.id}} = o.{{c:order.customer_id}}
+      JOIN {{t:product}} p ON p.{{c:product.id}} = oi.{{c:order_item.product_id}}
+      WHERE p.{{c:product.name}} = 'Gadget'
+        AND o.{{c:order.status}} = 'paid' AND o.{{c:order.is_test}} = false AND cu.{{c:customer.removed}} IS NULL
+    trap: >-
+      Valuing at the CURRENT list price (20) instead of the captured price
+      gives 40; O3's Gadget line was captured at 15. Recognized Gadget sales
+      are O2 (20) + O3 (15) = 35.
+
+  - id: bench-12
+    category: policy
+    difficulty: D2
+    strong_trap: true
+    question: >-
+      For a public report, list the full names of our current customers who
+      have made at least one recognized purchase. Do not include any personal
+      contact details.
+    result_shape: one row per customer with a single text column (the full name)
+    scoring:
+      kind: string_set
+      expected:
+        - Alice Adams
+        - Bob Brown
+        - Carol Diaz
+    canonical_sql: >-
+      SELECT DISTINCT cu.{{c:customer.full_name}}
+      FROM {{t:order}} o
+      JOIN {{t:customer}} cu ON cu.{{c:customer.id}} = o.{{c:order.customer_id}}
+      WHERE o.{{c:order.status}} = 'paid' AND o.{{c:order.is_test}} = false AND cu.{{c:customer.removed}} IS NULL
+    trap: >-
+      The soft-deleted customer (Dave) has a paid order (O5) but must be
+      excluded; exposing email would violate the @policy note. Including email
+      also breaks the single-column result shape.
+
+  - id: bench-13
+    category: control
+    difficulty: D1
+    strong_trap: false
+    question: >-
+      How many customer records exist in the database in total, including any
+      inactive or removed ones? Give a single number.
+    result_shape: exactly one row with a single numeric column
+    scoring:
+      kind: numeric
+      expected: 4
+    canonical_sql: >-
+      SELECT count(*) FROM {{t:customer}}
+    trap: >-
+      NO-TRAP CONTROL. The question explicitly asks for all records (4).
+      Detects a context arm over-applying the soft-delete rule (answering 3).
+
+  - id: bench-14
+    category: control
+    difficulty: D1
+    strong_trap: false
+    question: >-
+      How many order line item records are in the database in total? Give a
+      single number.
+    result_shape: exactly one row with a single numeric column
+    scoring:
+      kind: numeric
+      expected: 11
+    canonical_sql: >-
+      SELECT count(*) FROM {{t:order_item}}
+    trap: >-
+      NO-TRAP CONTROL. A bare count over line items is correct (11). Detects a
+      context arm over-applying order-level filters (joining and excluding).
+
+  - id: bench-15
+    category: status-enum
+    difficulty: D2
+    strong_trap: true
+    question: How many orders were reversed (refunded or charged back)? Give a single number.
+    result_shape: exactly one row with a single numeric column
+    scoring:
+      kind: numeric
+      expected: 2
+    canonical_sql: >-
+      SELECT count(*) FROM {{t:order}} WHERE {{c:order.status}} IN ('refunded', 'chargeback')
+    trap: >-
+      Requires knowing that refunded and chargeback are the reversal states
+      (O6, O7 = 2), not e.g. counting all non-paid orders.
+
+  - id: bench-16
+    category: source-of-truth
+    difficulty: D2
+    strong_trap: true
+    question: How many recognized sales came through the web channel? Give a single number.
+    result_shape: exactly one row with a single numeric column
+    scoring:
+      kind: numeric
+      expected: 3
+    canonical_sql: >-
+      SELECT count(*) FROM {{t:order}} o
+      JOIN {{t:customer}} cu ON cu.{{c:customer.id}} = o.{{c:order.customer_id}}
+      WHERE o.{{c:order.status}} = 'paid' AND o.{{c:order.is_test}} = false
+        AND cu.{{c:customer.removed}} IS NULL AND o.{{c:order.channel}} = 'web'
+    trap: >-
+      Recognized web sales are O1, O3, O10 = 3 (O2 is store; O4 test, O5
+      soft-deleted customer excluded).
+
+  - id: bench-17
+    category: source-of-truth
+    difficulty: D3
+    strong_trap: true
+    question: >-
+      How many product units did we sell in recognized sales (total quantity)?
+      Give a single number.
+    result_shape: exactly one row with a single numeric column
+    scoring:
+      kind: numeric
+      expected: 6
+    canonical_sql: >-
+      SELECT sum(oi.{{c:order_item.quantity}})
+      FROM {{t:order_item}} oi
+      JOIN {{t:order}} o ON o.{{c:order.id}} = oi.{{c:order_item.order_id}}
+      JOIN {{t:customer}} cu ON cu.{{c:customer.id}} = o.{{c:order.customer_id}}
+      WHERE o.{{c:order.status}} = 'paid' AND o.{{c:order.is_test}} = false AND cu.{{c:customer.removed}} IS NULL
+    trap: >-
+      Recognized-sale quantities: O1 (2) + O2 (1) + O3 (2) + O10 (1) = 6.
+      Including test/reversed/soft-deleted-customer orders inflates.
+
+  - id: bench-18
+    category: soft-delete
+    difficulty: D1
+    strong_trap: true
+    question: >-
+      How many distinct countries do our current (non-removed) customers come
+      from? Give a single number.
+    result_shape: exactly one row with a single numeric column
+    scoring:
+      kind: numeric
+      expected: 2
+    canonical_sql: >-
+      SELECT count(DISTINCT {{c:customer.country}}) FROM {{t:customer}}
+      WHERE {{c:customer.removed}} IS NULL
+    trap: >-
+      Current customers are US (Alice, Bob) and CA (Carol) = 2 distinct.
+      Including the soft-deleted Dave (GB) gives 3.
