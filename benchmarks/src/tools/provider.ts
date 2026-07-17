@@ -5,7 +5,7 @@
 // share a catalog-backed provider (B adds comments + search); C is an MCP
 // proxy (see mcpProxy.ts).
 
-import type { Client } from 'pg';
+import type { ClientBase } from 'pg';
 
 import { listRelations, describeRelation, searchComments } from './catalog.js';
 
@@ -49,7 +49,7 @@ const QUERY_ARG = {
  * and recorded); the only cross-arm difference is comments/search.
  */
 export function createCatalogProvider(
-  client: Client,
+  client: ClientBase,
   schema: string,
   withComments: boolean,
 ): ArmToolProvider {

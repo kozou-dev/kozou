@@ -15,7 +15,12 @@
 import Anthropic from '@anthropic-ai/sdk';
 
 import type { ArmToolProvider } from '../tools/provider.js';
-import type { BenchTask } from '../types.js';
+
+/** The minimal task shape the loop needs (BenchTask and GateTask both satisfy). */
+export interface PromptTask {
+  question: string;
+  result_shape: string;
+}
 
 export const DEFAULT_MODEL = 'claude-sonnet-5';
 export const EFFORT = 'high';
@@ -71,7 +76,7 @@ function systemPrompt(): string {
   ].join('\n');
 }
 
-function userPrompt(task: BenchTask): string {
+function userPrompt(task: PromptTask): string {
   return [
     `Question: ${task.question}`,
     '',
@@ -108,7 +113,7 @@ function readUsage(u: Anthropic.Usage): TurnUsage {
 export interface RunLoopOptions {
   client: Anthropic;
   model: string;
-  task: BenchTask;
+  task: PromptTask;
   provider: ArmToolProvider;
 }
 

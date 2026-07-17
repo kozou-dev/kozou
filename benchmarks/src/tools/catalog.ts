@@ -6,7 +6,7 @@
 // search. Everything is read from the PostgreSQL system catalogs against the
 // fixture schema — no Kozou interpretation.
 
-import type { Client } from 'pg';
+import type { ClientBase } from 'pg';
 
 export interface RelationRef {
   name: string;
@@ -65,7 +65,7 @@ const VIEWDEF_SQL = `
 
 /** List base tables (relkind 'r') or views ('v') in the schema. */
 export async function listRelations(
-  client: Client,
+  client: ClientBase,
   schema: string,
   kind: 'r' | 'v',
 ): Promise<RelationRef[]> {
@@ -77,7 +77,7 @@ export async function listRelations(
   return res.rows.map((r) => ({ name: r.relname }));
 }
 
-async function relationExists(client: Client, schema: string, name: string): Promise<boolean> {
+async function relationExists(client: ClientBase, schema: string, name: string): Promise<boolean> {
   const res = await client.query(
     `SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
      WHERE n.nspname = $1 AND c.relname = $2 AND c.relkind IN ('r','v')`,
@@ -96,7 +96,7 @@ export interface DescribeOptions {
 /** Describe a relation as a `\d`-style text block. Throws if it does not
  *  exist (so the tool can return an actionable error to the model). */
 export async function describeRelation(
-  client: Client,
+  client: ClientBase,
   schema: string,
   name: string,
   opts: DescribeOptions,
@@ -146,7 +146,7 @@ interface CommentHit {
 /** Full-text (case-insensitive substring) search over ALL comments in the
  *  schema: table, column, view, and constraint comments. Arm B only. */
 export async function searchComments(
-  client: Client,
+  client: ClientBase,
   schema: string,
   query: string,
 ): Promise<string> {
