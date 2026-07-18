@@ -114,15 +114,21 @@ const TOOL_DEFINITIONS = [
     inputSchema: {
       type: 'object',
       properties: {
-        query: { type: 'string', description: 'Case-insensitive substring to search for' },
+        query: {
+          type: 'string',
+          minLength: 1,
+          description: 'Case-insensitive substring to search for',
+        },
         schema: { type: 'string', description: 'Restrict to a single schema (default: all)' },
         kinds: {
           type: 'array',
           items: { type: 'string', enum: ['table', 'column', 'view', 'function', 'enum'] },
+          minItems: 1,
           description: 'Restrict to these object kinds (default: all)',
         },
         limit: {
-          type: 'number',
+          type: 'integer',
+          minimum: 1,
           description: 'Max hits to return, ranked (default 20, capped at 100)',
         },
       },
