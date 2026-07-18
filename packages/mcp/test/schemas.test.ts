@@ -14,6 +14,8 @@ import {
   getConceptContextOutputSchema,
   describeFunctionsInputSchema,
   describeFunctionsOutputSchema,
+  searchSchemaInputSchema,
+  searchSchemaOutputSchema,
 } from '../src/index.js';
 
 describe('list_tables schemas', () => {
@@ -339,6 +341,73 @@ describe('describe_functions schemas', () => {
             publicCallable: true,
             args: [],
             returns: { kind: 'table', typeName: 'x', columns: null },
+          },
+        ],
+      }),
+    ).toThrow();
+  });
+});
+
+describe('search_schema schemas', () => {
+  it('input: a bare query passes', () => {
+    expect(() => searchSchemaInputSchema.parse({ query: 'x' })).not.toThrow();
+  });
+  it('input: query plus every optional field passes', () => {
+    expect(() =>
+      searchSchemaInputSchema.parse({
+        query: 'x',
+        schema: 'public',
+        kinds: ['table', 'column', 'view', 'function', 'enum'],
+        limit: 5,
+      }),
+    ).not.toThrow();
+  });
+  it('input: an empty query throws', () => {
+    expect(() => searchSchemaInputSchema.parse({ query: '' })).toThrow();
+  });
+  it('input: a missing query throws', () => {
+    expect(() => searchSchemaInputSchema.parse({ schema: 'public' })).toThrow();
+  });
+  it('input: an unknown kind throws', () => {
+    expect(() => searchSchemaInputSchema.parse({ query: 'x', kinds: ['concept'] })).toThrow();
+  });
+  it('input: an empty kinds array throws', () => {
+    expect(() => searchSchemaInputSchema.parse({ query: 'x', kinds: [] })).toThrow();
+  });
+  it('input: a non-integer limit throws', () => {
+    expect(() => searchSchemaInputSchema.parse({ query: 'x', limit: 1.5 })).toThrow();
+  });
+  it('output: a valid result passes', () => {
+    expect(() =>
+      searchSchemaOutputSchema.parse({
+        query: 'inv',
+        truncated: false,
+        hits: [
+          {
+            kind: 'table',
+            ref: 'public.invoices',
+            label: 'Invoices',
+            matchedField: 'name',
+            snippet: 'invoices',
+            score: 15,
+          },
+        ],
+      }),
+    ).not.toThrow();
+  });
+  it('output: an unknown matchedField throws', () => {
+    expect(() =>
+      searchSchemaOutputSchema.parse({
+        query: 'inv',
+        truncated: false,
+        hits: [
+          {
+            kind: 'table',
+            ref: 'public.invoices',
+            label: 'Invoices',
+            matchedField: 'purpose',
+            snippet: 'x',
+            score: 1,
           },
         ],
       }),

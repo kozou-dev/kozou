@@ -13,6 +13,7 @@ import { describeView } from './tools/describe_view.js';
 import { listConcepts } from './tools/list_concepts.js';
 import { getConceptContext } from './tools/get_concept_context.js';
 import { describeFunctions } from './tools/describe_functions.js';
+import { searchSchema } from './tools/search_schema.js';
 import { callToolAs } from './tools/call.js';
 import type { SchemaCache } from './schemaCache.js';
 import { fixedIdentity, type CallIdentity, type McpExecution } from './execution.js';
@@ -98,6 +99,35 @@ const TOOL_DEFINITIONS = [
       '@ai / @policy advisory. Run one with the `call` tool (when enabled on ' +
       'this server) or POST /rpc/<schema>.<fn>.',
     inputSchema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'search_schema',
+    description:
+      'Search the schema documentation for a substring and return ranked hits ' +
+      '— the way to find "which tables, columns, views, functions, or enums ' +
+      'relate to X?" without enumerating the whole catalog. Matches object ' +
+      'names, labels, COMMENT bodies, @ai notes, @policy notes, and enum ' +
+      'members. Each hit names what matched, which field it matched on, and a ' +
+      'snippet, so you know which describe_table / describe_view / ' +
+      'describe_functions call to make next. Reads only already-introspected ' +
+      'metadata — no row data.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: 'Case-insensitive substring to search for' },
+        schema: { type: 'string', description: 'Restrict to a single schema (default: all)' },
+        kinds: {
+          type: 'array',
+          items: { type: 'string', enum: ['table', 'column', 'view', 'function', 'enum'] },
+          description: 'Restrict to these object kinds (default: all)',
+        },
+        limit: {
+          type: 'number',
+          description: 'Max hits to return, ranked (default 20, capped at 100)',
+        },
+      },
+      required: ['query'],
+    },
   },
 ] as const;
 
@@ -234,6 +264,8 @@ export function createMcpServer(
           return successResult(getConceptContext(args as { name: string }, ctx));
         case 'describe_functions':
           return successResult(describeFunctions(args, ctx));
+        case 'search_schema':
+          return successResult(searchSchema(args as { query: string }, ctx));
         case 'call': {
           // Defense in depth: the tool is not listed without execution, but a
           // client could still send the name. callToolAs owns its own success

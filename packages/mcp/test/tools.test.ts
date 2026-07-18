@@ -14,6 +14,7 @@ import {
   describeView,
   listConcepts,
   getConceptContext,
+  searchSchema,
 } from '../src/index.js';
 
 describe('MCP tools (generic English fixture)', () => {
@@ -215,6 +216,34 @@ describe('MCP tools (generic English fixture)', () => {
 
     const concept = getConceptContext({ name: 'vw_inventory_for_sale' }, ctx);
     expect(concept.aiNotes.some((n) => /start from this VIEW/i.test(n))).toBe(true);
+  });
+
+  it('search_schema: finds a table by name over real introspection', async () => {
+    const ctx = await cache.get();
+    const r = searchSchema({ query: 'inventory' }, ctx);
+    const table = r.hits.find(
+      (h) => h.kind === 'table' && h.ref === `${db.schema}.inventory_items`,
+    );
+    expect(table).toBeDefined();
+    expect(table!.matchedField).toBe('name');
+  });
+
+  it('search_schema: finds a column by a CHECK-constraint value (enumValue)', async () => {
+    const ctx = await cache.get();
+    const r = searchSchema({ query: 'for_sale', kinds: ['column'] }, ctx);
+    const status = r.hits.find((h) => h.ref === `${db.schema}.inventory_items.status`);
+    expect(status).toBeDefined();
+    expect(status!.matchedField).toBe('enumValue');
+    expect(status!.snippet).toBe('for_sale');
+  });
+
+  it('search_schema: never returns row data — only known metadata fields', async () => {
+    const ctx = await cache.get();
+    const r = searchSchema({ query: 'a' }, ctx);
+    const allowed = new Set(['kind', 'ref', 'label', 'matchedField', 'snippet', 'score']);
+    for (const hit of r.hits) {
+      for (const key of Object.keys(hit)) expect(allowed.has(key)).toBe(true);
+    }
   });
 });
 
@@ -561,5 +590,154 @@ describe('MCP tools: get_concept_context join suggestions (no DB)', () => {
     ]);
     // The old unresolved placeholder must not reappear.
     expect(r.joinSuggestions[0]!.on).not.toContain('<fk_column>');
+  });
+});
+
+describe('MCP search_schema (no DB)', () => {
+  // buildSchemaContext is pure, so ranking / snippet / filter behavior is
+  // asserted here without a container. A two-schema billing fixture with a
+  // native enum, @ai notes, and a long comment exercises every hit kind.
+  const raw: RawIntrospection = {
+    serverVersion: '16.2',
+    introspectedAt: '2026-01-01T00:00:00.000Z',
+    schemas: ['public', 'billing'],
+    enums: [{ schema: 'public', name: 'order_status', values: ['pending', 'shipped', 'delivered'] }],
+    functions: [],
+    tables: [
+      {
+        schema: 'public',
+        name: 'invoices',
+        comment:
+          'Customer invoices issued for each order.\n@ai: join to payments via invoice_id to reconcile.',
+        primaryKey: ['id'],
+        foreignKeys: [],
+        checks: [],
+        indexes: [],
+        rowCountEstimate: null,
+        columns: [
+          { name: 'id', dataType: 'uuid', udtName: 'uuid', nullable: false, defaultExpr: null, comment: null, position: 1 },
+          { name: 'status', dataType: 'public.order_status', udtName: 'order_status', nullable: false, defaultExpr: null, comment: 'Lifecycle state of the invoice.', position: 2 },
+          { name: 'total_amount', dataType: 'numeric', udtName: 'numeric', nullable: false, defaultExpr: null, comment: 'The grand total the customer owes.', position: 3 },
+          {
+            name: 'memo',
+            dataType: 'text',
+            udtName: 'text',
+            nullable: true,
+            defaultExpr: null,
+            comment:
+              'This column stores the reconciliation memo that finance uses when the amount disputed by the customer must be investigated further.',
+            position: 4,
+          },
+        ],
+      },
+      {
+        schema: 'billing',
+        name: 'payments',
+        comment: 'Payments received against invoices.',
+        primaryKey: ['id'],
+        foreignKeys: [],
+        checks: [],
+        indexes: [],
+        rowCountEstimate: null,
+        columns: [
+          { name: 'id', dataType: 'uuid', udtName: 'uuid', nullable: false, defaultExpr: null, comment: null, position: 1 },
+        ],
+      },
+    ],
+    views: [
+      {
+        schema: 'public',
+        name: 'vw_unpaid_invoices',
+        comment: 'Invoices with an outstanding balance.\n@ai: start here for dunning workflows.',
+        columns: [
+          { name: 'id', dataType: 'uuid', udtName: 'uuid', nullable: false, defaultExpr: null, comment: null, position: 1 },
+        ],
+        underlyingTables: [{ schema: 'public', name: 'invoices' }],
+        definition: 'SELECT id FROM invoices',
+      },
+    ],
+  };
+
+  it('ranks an exact table-name match first and returns hits by descending score', async () => {
+    const ctx = await buildSchemaContext({ raw });
+    const r = searchSchema({ query: 'invoices' }, ctx);
+    expect(r.hits.length).toBeGreaterThan(1);
+    expect(r.hits[0]!.kind).toBe('table');
+    expect(r.hits[0]!.ref).toBe('public.invoices');
+    expect(r.hits[0]!.matchedField).toBe('name');
+    for (let i = 1; i < r.hits.length; i++) {
+      expect(r.hits[i]!.score).toBeLessThanOrEqual(r.hits[i - 1]!.score);
+    }
+  });
+
+  it('prefers the @ai note (aiDescription) over the plain comment body', async () => {
+    const ctx = await buildSchemaContext({ raw });
+    const r = searchSchema({ query: 'payments', kinds: ['table'] }, ctx);
+    const invoice = r.hits.find((h) => h.ref === 'public.invoices');
+    // "payments" appears in both the full comment body and the @ai line; the
+    // higher-weighted aiDescription wins (one hit per object).
+    expect(invoice).toBeDefined();
+    expect(invoice!.matchedField).toBe('aiDescription');
+  });
+
+  it('matches a native enum type by one of its members', async () => {
+    const ctx = await buildSchemaContext({ raw });
+    const r = searchSchema({ query: 'shipped', kinds: ['enum'] }, ctx);
+    const enumHit = r.hits.find((h) => h.ref === 'public.order_status');
+    expect(enumHit).toBeDefined();
+    expect(enumHit!.kind).toBe('enum');
+    expect(enumHit!.matchedField).toBe('enumValue');
+    expect(enumHit!.snippet).toBe('shipped');
+  });
+
+  it('windows a long comment snippet and elides both ends', async () => {
+    const ctx = await buildSchemaContext({ raw });
+    const r = searchSchema({ query: 'disputed', kinds: ['column'] }, ctx);
+    const memo = r.hits.find((h) => h.ref === 'public.invoices.memo');
+    expect(memo).toBeDefined();
+    expect(memo!.matchedField).toBe('description');
+    expect(memo!.snippet.startsWith('…')).toBe(true);
+    expect(memo!.snippet.endsWith('…')).toBe(true);
+    expect(memo!.snippet).toContain('disputed');
+    expect(memo!.snippet.length).toBeLessThan(
+      'This column stores the reconciliation memo that finance uses when the amount disputed by the customer must be investigated further.'
+        .length,
+    );
+  });
+
+  it('honors the kinds filter', async () => {
+    const ctx = await buildSchemaContext({ raw });
+    const r = searchSchema({ query: 'invoices', kinds: ['view'] }, ctx);
+    expect(r.hits.length).toBeGreaterThan(0);
+    expect(r.hits.every((h) => h.kind === 'view')).toBe(true);
+    expect(r.hits.some((h) => h.ref === 'public.vw_unpaid_invoices')).toBe(true);
+  });
+
+  it('honors the schema filter', async () => {
+    const ctx = await buildSchemaContext({ raw });
+    const r = searchSchema({ query: 'payments', schema: 'billing' }, ctx);
+    expect(r.hits.length).toBeGreaterThan(0);
+    expect(r.hits.every((h) => h.ref.startsWith('billing.'))).toBe(true);
+  });
+
+  it('caps results at limit and reports truncation', async () => {
+    const ctx = await buildSchemaContext({ raw });
+    const r = searchSchema({ query: 'invoice', limit: 1 }, ctx);
+    expect(r.hits).toHaveLength(1);
+    expect(r.truncated).toBe(true);
+  });
+
+  it('returns no hits and truncated=false when nothing matches', async () => {
+    const ctx = await buildSchemaContext({ raw });
+    const r = searchSchema({ query: 'zzzznotfound' }, ctx);
+    expect(r.hits).toEqual([]);
+    expect(r.truncated).toBe(false);
+    expect(r.query).toBe('zzzznotfound');
+  });
+
+  it('is case-insensitive', async () => {
+    const ctx = await buildSchemaContext({ raw });
+    const upper = searchSchema({ query: 'INVOICES', kinds: ['table'] }, ctx);
+    expect(upper.hits.some((h) => h.ref === 'public.invoices')).toBe(true);
   });
 });
