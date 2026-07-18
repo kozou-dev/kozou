@@ -1,4 +1,6 @@
+import { ZodError } from 'zod';
 import type { ColumnContext, SchemaContext } from '@kozou/core';
+import { McpToolError } from '../errors.js';
 import {
   searchSchemaInputSchema,
   type SearchSchemaHit,
@@ -45,6 +47,12 @@ const LONG_FIELDS: ReadonlySet<SearchSchemaMatchedField> = new Set<SearchSchemaM
 // A word char, for the word-boundary bonus (Unicode letters/numbers).
 const WORD_CHAR = /[\p{L}\p{N}]/u;
 
+// Escape regex metacharacters so the query matches literally (e.g. "a.b" is a
+// dot, not a wildcard).
+function escapeRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 interface Candidate {
   field: SearchSchemaMatchedField;
   text: string;
@@ -56,42 +64,49 @@ interface Match {
   score: number;
 }
 
-/** Locate `query` (already lower-cased) in `flat` and score the match quality:
- *  whole-field equality > prefix > word-boundary start > mid-word. */
-function findMatch(query: string, flat: string): { index: number; bonus: number } | null {
-  const lower = flat.toLowerCase();
-  const index = lower.indexOf(query);
-  if (index === -1) return null;
+/** Locate the query (as a precompiled case-insensitive matcher) in `flat` and
+ *  score the match quality: whole-field equality > prefix > word-boundary
+ *  start > mid-word. The index refers to the ORIGINAL `flat` (matching on a
+ *  lower-cased copy would drift for characters whose lowercase changes length,
+ *  e.g. U+0130), so the snippet slice and the boundary char stay aligned. */
+function findMatch(
+  matcher: RegExp,
+  queryLower: string,
+  flat: string,
+): { index: number; length: number; bonus: number } | null {
+  const m = matcher.exec(flat);
+  if (m === null) return null;
+  const index = m.index;
   let bonus = 0;
-  if (lower === query) bonus = 5;
+  if (flat.toLowerCase() === queryLower) bonus = 5;
   else if (index === 0) bonus = 3;
   else if (!WORD_CHAR.test(flat[index - 1] ?? '')) bonus = 1;
-  return { index, bonus };
+  return { index, length: m[0].length, bonus };
 }
 
 function makeSnippet(
   field: SearchSchemaMatchedField,
   flat: string,
   index: number,
-  queryLen: number,
+  matchLen: number,
 ): string {
   if (!LONG_FIELDS.has(field)) return flat;
   const start = Math.max(0, index - SNIPPET_PAD);
-  const end = Math.min(flat.length, index + queryLen + SNIPPET_PAD);
+  const end = Math.min(flat.length, index + matchLen + SNIPPET_PAD);
   return `${start > 0 ? '…' : ''}${flat.slice(start, end)}${end < flat.length ? '…' : ''}`;
 }
 
 /** The single best-scoring field among a node's candidates (one hit per node). */
-function bestMatch(query: string, candidates: Candidate[]): Match | null {
+function bestMatch(matcher: RegExp, queryLower: string, candidates: Candidate[]): Match | null {
   let best: Match | null = null;
   for (const c of candidates) {
     const flat = LONG_FIELDS.has(c.field) ? c.text.replace(/\s+/g, ' ').trim() : c.text.trim();
     if (!flat) continue;
-    const found = findMatch(query, flat);
+    const found = findMatch(matcher, queryLower, flat);
     if (!found) continue;
     const score = FIELD_WEIGHT[c.field] + found.bonus;
     if (best === null || score > best.score) {
-      best = { field: c.field, snippet: makeSnippet(c.field, flat, found.index, query.length), score };
+      best = { field: c.field, snippet: makeSnippet(c.field, flat, found.index, found.length), score };
     }
   }
   return best;
@@ -111,8 +126,26 @@ function columnCandidates(col: ColumnContext): Candidate[] {
 }
 
 export function searchSchema(input: SearchSchemaInput, ctx: SchemaContext): SearchSchemaOutput {
-  const parsed = searchSchemaInputSchema.parse(input);
-  const query = parsed.query.toLowerCase();
+  let parsed: SearchSchemaInput;
+  try {
+    parsed = searchSchemaInputSchema.parse(input);
+  } catch (err) {
+    // Turn a validation failure into an actionable, leak-safe message (built
+    // only from fixed text) so an agent can self-correct, rather than letting
+    // the raw ZodError fall through to the dispatcher's generic "tool failed".
+    if (err instanceof ZodError) {
+      throw new McpToolError(
+        'search_schema: invalid arguments. Requires a non-empty "query" string; ' +
+          'optional "schema" (string), "kinds" (a non-empty array of ' +
+          'table|column|view|function|enum), and "limit" (a positive integer).',
+      );
+    }
+    throw err;
+  }
+  const queryLower = parsed.query.toLowerCase();
+  // Compile the case-insensitive matcher once per search (not per candidate):
+  // the query is fixed, so this bounds the regex cost on large schemas.
+  const matcher = new RegExp(escapeRegExp(parsed.query), 'iu');
   const limit = Math.min(parsed.limit ?? DEFAULT_LIMIT, MAX_LIMIT);
   const kindFilter = parsed.kinds ? new Set<SearchSchemaKind>(parsed.kinds) : null;
 
@@ -126,7 +159,7 @@ export function searchSchema(input: SearchSchemaInput, ctx: SchemaContext): Sear
     label: string,
     candidates: Candidate[],
   ): void => {
-    const m = bestMatch(query, candidates);
+    const m = bestMatch(matcher, queryLower, candidates);
     if (m) {
       hits.push({ kind, ref, label, matchedField: m.field, snippet: m.snippet, score: m.score });
     }

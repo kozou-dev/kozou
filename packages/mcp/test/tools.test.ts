@@ -15,6 +15,7 @@ import {
   listConcepts,
   getConceptContext,
   searchSchema,
+  McpToolError,
 } from '../src/index.js';
 
 describe('MCP tools (generic English fixture)', () => {
@@ -237,7 +238,7 @@ describe('MCP tools (generic English fixture)', () => {
     expect(status!.snippet).toBe('for_sale');
   });
 
-  it('search_schema: never returns row data — only known metadata fields', async () => {
+  it('search_schema: hits expose only the declared metadata fields (shape guard)', async () => {
     const ctx = await cache.get();
     const r = searchSchema({ query: 'a' }, ctx);
     const allowed = new Set(['kind', 'ref', 'label', 'matchedField', 'snippet', 'score']);
@@ -628,6 +629,18 @@ describe('MCP search_schema (no DB)', () => {
               'This column stores the reconciliation memo that finance uses when the amount disputed by the customer must be investigated further.',
             position: 4,
           },
+          {
+            name: 'audit_note',
+            dataType: 'text',
+            udtName: 'text',
+            nullable: true,
+            defaultExpr: null,
+            // Deliberately messy whitespace (newlines + runs of spaces) around
+            // the searched term, to exercise collapse-then-window index integrity.
+            comment:
+              'First line of the audit note.\n\n    The   escalation    keyword RECONCILE appears here after messy whitespace.',
+            position: 5,
+          },
         ],
       },
       {
@@ -739,5 +752,36 @@ describe('MCP search_schema (no DB)', () => {
     const ctx = await buildSchemaContext({ raw });
     const upper = searchSchema({ query: 'INVOICES', kinds: ['table'] }, ctx);
     expect(upper.hits.some((h) => h.ref === 'public.invoices')).toBe(true);
+  });
+
+  it('rejects invalid arguments with an actionable McpToolError', async () => {
+    const ctx = await buildSchemaContext({ raw });
+    expect(() => searchSchema({ query: '' }, ctx)).toThrow(McpToolError);
+    expect(() => searchSchema({ query: '' }, ctx)).toThrow(/invalid arguments/);
+    // A non-integer limit is advertised as integer/minimum but still guarded.
+    expect(() => searchSchema({ query: 'x', limit: 1.5 }, ctx)).toThrow(McpToolError);
+  });
+
+  it('draws every snippet from the object documentation (metadata provenance)', async () => {
+    const ctx = await buildSchemaContext({ raw });
+    const r = searchSchema({ query: 'grand total', kinds: ['column'] }, ctx);
+    const total = r.hits.find((h) => h.ref === 'public.invoices.total_amount');
+    expect(total).toBeDefined();
+    expect(total!.matchedField).toBe('description');
+    // The snippet is a slice of the column's COMMENT — nothing else.
+    expect('The grand total the customer owes.').toContain(total!.snippet.replace(/…/g, ''));
+  });
+
+  it('collapses whitespace before windowing and keeps the match aligned', async () => {
+    const ctx = await buildSchemaContext({ raw });
+    const r = searchSchema({ query: 'reconcile', kinds: ['column'] }, ctx);
+    const note = r.hits.find((h) => h.ref === 'public.invoices.audit_note');
+    expect(note).toBeDefined();
+    expect(note!.matchedField).toBe('description');
+    // Original-case text at the correct index survives the collapse...
+    expect(note!.snippet).toContain('RECONCILE');
+    // ...and the collapse actually happened (no newlines / no space runs).
+    expect(note!.snippet).not.toContain('\n');
+    expect(note!.snippet).not.toMatch(/ {2,}/);
   });
 });
