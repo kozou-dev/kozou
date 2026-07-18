@@ -560,8 +560,9 @@ describe('OAuth RS mode: scope-gated tool advertising', () => {
     const names = await listToolNames('mcp:describe');
     expect(names).toContain('list_tables');
     expect(names).toContain('describe_functions');
+    expect(names).toContain('search_schema');
     expect(names).not.toContain('call');
-    expect(names).toHaveLength(7);
+    expect(names).toHaveLength(8);
   });
 
   it('an execute-only token sees only `call`', async () => {
@@ -569,7 +570,7 @@ describe('OAuth RS mode: scope-gated tool advertising', () => {
   });
 
   it('a token with both scopes sees everything', async () => {
-    expect(await listToolNames('mcp:describe mcp:execute')).toHaveLength(8);
+    expect(await listToolNames('mcp:describe mcp:execute')).toHaveLength(9);
   });
 });
 
