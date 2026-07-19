@@ -109,7 +109,10 @@ const TOOL_DEFINITIONS = [
       'names, labels, COMMENT bodies, @ai notes, @policy notes, and enum ' +
       'members. Each hit names what matched, which field it matched on, and a ' +
       'snippet, so you know which describe_table / describe_view / ' +
-      'describe_functions call to make next. Reads only already-introspected ' +
+      'describe_functions call to make next. A concept (business view) is ' +
+      'found as a "view" hit, but text unique to a concept — its example ' +
+      'queries and join meanings — is not searched here; use list_concepts / ' +
+      'get_concept_context for those. Reads only already-introspected ' +
       'metadata — no row data.',
     inputSchema: {
       type: 'object',
