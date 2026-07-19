@@ -1,6 +1,6 @@
 {
   "name": "@kozou/ui-core",
-  "version": "1.14.0",
+  "version": "1.15.0",
   "description": "Kozou framework-agnostic UI core: the read-path logic (DataAdapter implementations, list params, view columns, cell formatting, FK label resolution, resource ids, schema/FK caches) that turns a SchemaContext + DataAdapter into the data a reference Admin UI renders.",
   "license": "Apache-2.0",
   "repository": {
