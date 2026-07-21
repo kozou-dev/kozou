@@ -37,7 +37,7 @@ services:
     # `kozou dev` spawns the bundled @kozou/svelte-ui Admin UI, the MCP HTTP
     # server, and Kozou's in-house REST backend (all in-process). Each binds
     # 0.0.0.0 inside the container so the port mappings below reach your host.
-    image: ghcr.io/kozou-dev/kozou:v1.15.1
+    image: ghcr.io/kozou-dev/kozou:v1.16.0
     command: ["dev"]
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER:-kozou}:${POSTGRES_PASSWORD:-kozou}@postgres:5432/${POSTGRES_DB:-kozou}
