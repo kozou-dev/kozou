@@ -17,7 +17,7 @@ import { searchSchema } from './tools/search_schema.js';
 import { callToolAs } from './tools/call.js';
 import type { SchemaCache } from './schemaCache.js';
 import { fixedIdentity, type CallIdentity, type McpExecution } from './execution.js';
-import { successResult, errorResult } from './result.js';
+import { successResult, errorResult, type McpToolResult } from './result.js';
 import { McpToolError } from './errors.js';
 import type { SchemaContext } from '@kozou/core';
 
@@ -197,6 +197,10 @@ export function createMcpServer(
   execution?: McpExecution,
   scopes?: McpToolScopes,
   allowedRoles?: string[],
+  /** Opt-in: stamp read/describe tool results with a `provenance` object
+   *  ({ serverVersion, builtAt }) so an agent can explain which database
+   *  version / schema build produced an answer. Emit-only; default off. */
+  provenance = false,
 ): Server {
   if (scopes !== undefined && execution !== undefined && (allowedRoles?.length ?? 0) === 0) {
     throw new Error(
@@ -257,24 +261,39 @@ export function createMcpServer(
       return errorResult('Schema is currently unavailable.');
     }
 
+    // Read/describe tools all return a JSON object payload through this one
+    // point. When provenance is enabled, stamp each with an additive
+    // `provenance` block ({ serverVersion, builtAt }) taken straight from the
+    // schema context — emit-only, no new work. The `call` tool shapes its own
+    // result (and owns a no-leak contract), so it is intentionally not stamped.
+    const emit = (payload: unknown): McpToolResult =>
+      successResult(
+        provenance
+          ? {
+              ...(payload as Record<string, unknown>),
+              provenance: { serverVersion: ctx.meta.serverVersion, builtAt: ctx.meta.builtAt },
+            }
+          : payload,
+      );
+
     try {
       switch (name) {
         case 'list_tables':
-          return successResult(listTables(args, ctx));
+          return emit(listTables(args, ctx));
         case 'describe_table':
-          return successResult(describeTable(args, ctx));
+          return emit(describeTable(args, ctx));
         case 'list_views':
-          return successResult(listViews(args, ctx));
+          return emit(listViews(args, ctx));
         case 'describe_view':
-          return successResult(describeView(args, ctx));
+          return emit(describeView(args, ctx));
         case 'list_concepts':
-          return successResult(listConcepts(args, ctx));
+          return emit(listConcepts(args, ctx));
         case 'get_concept_context':
-          return successResult(getConceptContext(args as { name: string }, ctx));
+          return emit(getConceptContext(args as { name: string }, ctx));
         case 'describe_functions':
-          return successResult(describeFunctions(args, ctx));
+          return emit(describeFunctions(args, ctx));
         case 'search_schema':
-          return successResult(searchSchema(args as { query: string }, ctx));
+          return emit(searchSchema(args as { query: string }, ctx));
         case 'call': {
           // Defense in depth: the tool is not listed without execution, but a
           // client could still send the name. callToolAs owns its own success

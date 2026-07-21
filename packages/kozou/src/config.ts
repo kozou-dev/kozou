@@ -142,6 +142,13 @@ const mcpServerSchema = z
     http: mcpHttpServerSchema,
     stdio: z.boolean().default(false),
     execution: mcpExecutionSchema,
+    // Opt-in: stamp every read/describe tool result with a `provenance` object
+    // ({ serverVersion, builtAt }) so an agent can explain which database
+    // version and schema build produced an answer. Emit-only — the values are
+    // already computed in the schema context; nothing new is introspected and
+    // no state is kept. Default off: the field is additive and `builtAt` changes
+    // per build, so leaving it off keeps existing consumers' output byte-stable.
+    provenance: z.boolean().default(false),
   })
   .prefault({})
   .superRefine((server, ctx) => {
