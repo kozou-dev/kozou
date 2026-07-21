@@ -233,6 +233,7 @@ export async function devCommand(opts: DevOptions = {}): Promise<void> {
     port: config.server.mcp.http.port,
     host: config.server.mcp.http.host,
     logPrefix: `${PREFIX} mcp`,
+    provenance: config.server.mcp.provenance,
     ...(mcpAuth === undefined ? {} : { auth: mcpAuth }),
   });
 

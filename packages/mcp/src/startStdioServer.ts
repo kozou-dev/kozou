@@ -16,6 +16,9 @@ export type StartStdioServerOptions = {
    *  stdio has no network exposure, so enabling it here is safe. stdio has
    *  no OAuth layer, so `execution.role` is required (calls run as it). */
   execution?: McpExecution;
+  /** Opt-in: stamp read/describe tool results with a `provenance` object
+   *  ({ databaseVersion, kozouVersion, builtAt }). Emit-only; default off. */
+  provenance?: boolean;
 };
 
 /**
@@ -32,7 +35,7 @@ export async function startStdioServer(
   const prefix = opts.logPrefix ?? '[@kozou/mcp]';
   // Fail fast: stdio always runs calls under the fixed execution role.
   if (opts.execution !== undefined) fixedIdentity(opts.execution, prefix);
-  const server = createMcpServer(cache, opts.execution);
+  const server = createMcpServer(cache, opts.execution, undefined, undefined, opts.provenance ?? false);
   process.on('SIGHUP', () => {
     cache.invalidate();
     process.stderr.write(`${prefix} SIGHUP received, cache invalidated\n`);

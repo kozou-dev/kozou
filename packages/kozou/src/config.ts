@@ -142,6 +142,15 @@ const mcpServerSchema = z
     http: mcpHttpServerSchema,
     stdio: z.boolean().default(false),
     execution: mcpExecutionSchema,
+    // Opt-in: stamp every read/describe tool result with a `provenance` object
+    // ({ databaseVersion, kozouVersion, builtAt }) so an agent can explain which
+    // database version and schema build produced an answer. Emit-only — the
+    // values are already computed in the schema context; nothing new is
+    // introspected and no state is kept. `databaseVersion` is the PostgreSQL
+    // version reduced to major.minor (no OS/patch fingerprint). Default off: the
+    // field is additive and `builtAt` is regenerated on each schema (re)build
+    // (cache refresh), so leaving it off keeps existing consumers' output stable.
+    provenance: z.boolean().default(false),
   })
   .prefault({})
   .superRefine((server, ctx) => {

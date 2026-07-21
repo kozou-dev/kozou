@@ -168,6 +168,7 @@ export async function mcpCommand(opts: McpOptions = {}): Promise<void> {
       host: opts.host ?? config.server.mcp.http.host,
       logPrefix: '[kozou mcp]',
       execution,
+      provenance: config.server.mcp.provenance,
       ...(mcpAuth === undefined ? {} : { auth: mcpAuth }),
     });
     return;
@@ -182,5 +183,9 @@ export async function mcpCommand(opts: McpOptions = {}): Promise<void> {
         'under local process trust.\n',
     );
   }
-  await startStdioServer(cache, { logPrefix: '[kozou mcp]', execution });
+  await startStdioServer(cache, {
+    logPrefix: '[kozou mcp]',
+    execution,
+    provenance: config.server.mcp.provenance,
+  });
 }

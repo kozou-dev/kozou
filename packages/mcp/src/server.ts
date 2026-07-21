@@ -17,7 +17,7 @@ import { searchSchema } from './tools/search_schema.js';
 import { callToolAs } from './tools/call.js';
 import type { SchemaCache } from './schemaCache.js';
 import { fixedIdentity, type CallIdentity, type McpExecution } from './execution.js';
-import { successResult, errorResult } from './result.js';
+import { successResult, errorResult, type McpToolResult } from './result.js';
 import { McpToolError } from './errors.js';
 import type { SchemaContext } from '@kozou/core';
 
@@ -30,6 +30,16 @@ const pkg = JSON.parse(readFileSync(require.resolve('../package.json'), 'utf8'))
   version: string;
 };
 const SERVER_VERSION = pkg.version;
+
+/** Reduce a PostgreSQL `server_version` string to `major.minor`. The raw GUC
+ *  can carry a distro/build tag (e.g. "16.2 (Ubuntu 16.2-1.pgdg22.04+1)")
+ *  that fingerprints the OS and patch build; the provenance stamp only needs
+ *  the semantic version, so we keep the leading `<major>[.<minor>]` and drop
+ *  the rest. A non-numeric value (e.g. "unknown") is returned unchanged. */
+function pgMajorMinor(version: string): string {
+  const match = /^\d+(?:\.\d+)?/.exec(version.trim());
+  return match ? match[0] : version;
+}
 
 const TOOL_DEFINITIONS = [
   {
@@ -197,6 +207,11 @@ export function createMcpServer(
   execution?: McpExecution,
   scopes?: McpToolScopes,
   allowedRoles?: string[],
+  /** Opt-in: stamp read/describe tool results with a `provenance` object
+   *  ({ databaseVersion, kozouVersion, builtAt }) so an agent can explain
+   *  which database version and schema build produced an answer. Emit-only;
+   *  default off. */
+  provenance = false,
 ): Server {
   if (scopes !== undefined && execution !== undefined && (allowedRoles?.length ?? 0) === 0) {
     throw new Error(
@@ -257,24 +272,48 @@ export function createMcpServer(
       return errorResult('Schema is currently unavailable.');
     }
 
+    // Read/describe tools all return a JSON object payload through this one
+    // point. When provenance is enabled, stamp each with an additive
+    // `provenance` block taken straight from the schema context — emit-only,
+    // no new work. The `call` tool shapes its own result (and owns a no-leak
+    // contract), so it is intentionally not stamped.
+    //   - databaseVersion: PostgreSQL server version, reduced to major.minor
+    //     so the stamp cannot fingerprint the OS/patch build (pgMajorMinor).
+    //   - kozouVersion: this MCP server's version — the compiler build that
+    //     produced the answer (the more relevant "which build" than the DB's).
+    //   - builtAt: when this schema context was (re)built (cache refresh time).
+    const emit = (payload: unknown): McpToolResult =>
+      successResult(
+        provenance
+          ? {
+              ...(payload as Record<string, unknown>),
+              provenance: {
+                databaseVersion: pgMajorMinor(ctx.meta.serverVersion),
+                kozouVersion: SERVER_VERSION,
+                builtAt: ctx.meta.builtAt,
+              },
+            }
+          : payload,
+      );
+
     try {
       switch (name) {
         case 'list_tables':
-          return successResult(listTables(args, ctx));
+          return emit(listTables(args, ctx));
         case 'describe_table':
-          return successResult(describeTable(args, ctx));
+          return emit(describeTable(args, ctx));
         case 'list_views':
-          return successResult(listViews(args, ctx));
+          return emit(listViews(args, ctx));
         case 'describe_view':
-          return successResult(describeView(args, ctx));
+          return emit(describeView(args, ctx));
         case 'list_concepts':
-          return successResult(listConcepts(args, ctx));
+          return emit(listConcepts(args, ctx));
         case 'get_concept_context':
-          return successResult(getConceptContext(args as { name: string }, ctx));
+          return emit(getConceptContext(args as { name: string }, ctx));
         case 'describe_functions':
-          return successResult(describeFunctions(args, ctx));
+          return emit(describeFunctions(args, ctx));
         case 'search_schema':
-          return successResult(searchSchema(args as { query: string }, ctx));
+          return emit(searchSchema(args as { query: string }, ctx));
         case 'call': {
           // Defense in depth: the tool is not listed without execution, but a
           // client could still send the name. callToolAs owns its own success

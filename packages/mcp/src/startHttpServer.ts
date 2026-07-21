@@ -62,6 +62,9 @@ export type StartHttpServerOptions = {
    *  non-loopback bind the startup warning is escalated: anyone who can reach
    *  the host could execute exposed functions as the execution role. */
   execution?: McpExecution;
+  /** Opt-in: stamp read/describe tool results with a `provenance` object
+   *  ({ databaseVersion, kozouVersion, builtAt }). Emit-only; default off. */
+  provenance?: boolean;
   /** Override the set of `Host` header values accepted by the DNS-rebinding
    *  guard (host:port form, e.g. `mcp.internal:3334`). When omitted, a loopback
    *  bind accepts the loopback names on the bound port and a specific
@@ -304,7 +307,18 @@ export async function startHttpServer(
   const maxBodyBytes = opts.maxBodyBytes ?? DEFAULT_MAX_BODY_BYTES;
 
   const httpServer = createServer((req, res) => {
-    handleRequest(req, res, cache, mcpPath, transports, opts.execution, guard, maxBodyBytes, auth).catch(
+    handleRequest(
+      req,
+      res,
+      cache,
+      mcpPath,
+      transports,
+      opts.execution,
+      guard,
+      maxBodyBytes,
+      auth,
+      opts.provenance ?? false,
+    ).catch(
       (err) => {
         // Never echo the raw error to the client (it can carry stack/database
         // detail); log it server-side and return a generic message.
@@ -371,6 +385,7 @@ async function handleRequest(
   guard: RebindingGuard,
   maxBodyBytes: number,
   auth: McpHttpAuth | undefined,
+  provenance: boolean,
 ): Promise<void> {
   // DNS-rebinding guard: reject requests whose Host/Origin is not allowed
   // before doing any work, covering every route (the MCP endpoint and
@@ -453,7 +468,7 @@ async function handleRequest(
         extra: { role: authCtx.role, claims: authCtx.claims },
       };
     }
-    await handleMcp(req, res, cache, transports, execution, maxBodyBytes, auth, authCtx);
+    await handleMcp(req, res, cache, transports, execution, maxBodyBytes, auth, authCtx, provenance);
     return;
   }
 
@@ -538,6 +553,7 @@ async function handleMcp(
   maxBodyBytes: number,
   auth: McpHttpAuth | undefined,
   authCtx: McpAuthContext | undefined,
+  provenance: boolean,
 ): Promise<void> {
   const sessionId = headerValue(req.headers['mcp-session-id']);
 
@@ -625,6 +641,7 @@ async function handleMcp(
     execution,
     auth === undefined ? undefined : { describe: auth.scopes.describe, execute: auth.scopes.execute },
     auth?.allowedRoles,
+    provenance,
   );
   await server.connect(transport);
   await transport.handleRequest(req, res, body);
