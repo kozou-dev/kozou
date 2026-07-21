@@ -60,8 +60,8 @@ describe('MCP provenance stamp (opt-in, additive)', () => {
   let client: Client | undefined;
 
   /** Connect a client to a server built with the given provenance flag. */
-  async function connect(provenance: boolean): Promise<Client> {
-    const ctx = await buildSchemaContext({ raw: RAW });
+  async function connect(provenance: boolean, raw: RawIntrospection = RAW): Promise<Client> {
+    const ctx = await buildSchemaContext({ raw });
     const cache = { get: async () => ctx } as unknown as SchemaCache;
     const server = createMcpServer(cache, undefined, undefined, undefined, provenance);
     const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
@@ -83,17 +83,31 @@ describe('MCP provenance stamp (opt-in, additive)', () => {
     expect(p).toHaveProperty('tables');
   });
 
-  it('stamps read tools with { serverVersion, builtAt } when enabled', async () => {
+  it('stamps read tools with { databaseVersion, kozouVersion, builtAt } when enabled', async () => {
     const c = await connect(true);
     const p = payload(await c.callTool({ name: 'list_tables', arguments: {} }));
-    const provenance = p.provenance as { serverVersion?: unknown; builtAt?: unknown } | undefined;
-    // serverVersion is deterministic (from the fixture); builtAt is a build-time
-    // timestamp, so assert its shape (ISO 8601), not an exact value.
-    expect(provenance?.serverVersion).toBe('16.2');
+    const provenance = p.provenance as
+      | { databaseVersion?: unknown; kozouVersion?: unknown; builtAt?: unknown }
+      | undefined;
+    // databaseVersion is deterministic (from the fixture); kozouVersion is this
+    // package's version; builtAt is a context-build timestamp, so assert its
+    // shape (ISO 8601), not an exact value.
+    expect(provenance?.databaseVersion).toBe('16.2');
+    expect(typeof provenance?.kozouVersion).toBe('string');
+    expect((provenance?.kozouVersion as string).length).toBeGreaterThan(0);
     expect(typeof provenance?.builtAt).toBe('string');
     expect(provenance?.builtAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
     // Additive: the existing payload keys are untouched.
     expect(p.sourceSchemas).toEqual(['public']);
+  });
+
+  it('reduces databaseVersion to major.minor (no OS/patch fingerprint)', async () => {
+    // A Debian/Ubuntu server_version carries a distro/build tag; the stamp must
+    // not leak it.
+    const c = await connect(true, { ...RAW, serverVersion: '16.2 (Ubuntu 16.2-1.pgdg22.04+1)' });
+    const p = payload(await c.callTool({ name: 'list_tables', arguments: {} }));
+    const provenance = p.provenance as { databaseVersion?: unknown } | undefined;
+    expect(provenance?.databaseVersion).toBe('16.2');
   });
 
   it('applies at the shared emit point, so describe_table is stamped too', async () => {
@@ -102,7 +116,7 @@ describe('MCP provenance stamp (opt-in, additive)', () => {
       await c.callTool({ name: 'describe_table', arguments: { qualifiedName: 'public.widgets' } }),
     );
     expect(p.qualifiedName).toBe('public.widgets');
-    const provenance = p.provenance as { serverVersion?: unknown } | undefined;
-    expect(provenance?.serverVersion).toBe('16.2');
+    const provenance = p.provenance as { databaseVersion?: unknown } | undefined;
+    expect(provenance?.databaseVersion).toBe('16.2');
   });
 });

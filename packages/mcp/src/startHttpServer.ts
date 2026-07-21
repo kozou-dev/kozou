@@ -63,7 +63,7 @@ export type StartHttpServerOptions = {
    *  the host could execute exposed functions as the execution role. */
   execution?: McpExecution;
   /** Opt-in: stamp read/describe tool results with a `provenance` object
-   *  ({ serverVersion, builtAt }). Emit-only; default off. */
+   *  ({ databaseVersion, kozouVersion, builtAt }). Emit-only; default off. */
   provenance?: boolean;
   /** Override the set of `Host` header values accepted by the DNS-rebinding
    *  guard (host:port form, e.g. `mcp.internal:3334`). When omitted, a loopback

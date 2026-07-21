@@ -31,6 +31,16 @@ const pkg = JSON.parse(readFileSync(require.resolve('../package.json'), 'utf8'))
 };
 const SERVER_VERSION = pkg.version;
 
+/** Reduce a PostgreSQL `server_version` string to `major.minor`. The raw GUC
+ *  can carry a distro/build tag (e.g. "16.2 (Ubuntu 16.2-1.pgdg22.04+1)")
+ *  that fingerprints the OS and patch build; the provenance stamp only needs
+ *  the semantic version, so we keep the leading `<major>[.<minor>]` and drop
+ *  the rest. A non-numeric value (e.g. "unknown") is returned unchanged. */
+function pgMajorMinor(version: string): string {
+  const match = /^\d+(?:\.\d+)?/.exec(version.trim());
+  return match ? match[0] : version;
+}
+
 const TOOL_DEFINITIONS = [
   {
     name: 'list_tables',
@@ -198,8 +208,9 @@ export function createMcpServer(
   scopes?: McpToolScopes,
   allowedRoles?: string[],
   /** Opt-in: stamp read/describe tool results with a `provenance` object
-   *  ({ serverVersion, builtAt }) so an agent can explain which database
-   *  version / schema build produced an answer. Emit-only; default off. */
+   *  ({ databaseVersion, kozouVersion, builtAt }) so an agent can explain
+   *  which database version and schema build produced an answer. Emit-only;
+   *  default off. */
   provenance = false,
 ): Server {
   if (scopes !== undefined && execution !== undefined && (allowedRoles?.length ?? 0) === 0) {
@@ -263,15 +274,24 @@ export function createMcpServer(
 
     // Read/describe tools all return a JSON object payload through this one
     // point. When provenance is enabled, stamp each with an additive
-    // `provenance` block ({ serverVersion, builtAt }) taken straight from the
-    // schema context — emit-only, no new work. The `call` tool shapes its own
-    // result (and owns a no-leak contract), so it is intentionally not stamped.
+    // `provenance` block taken straight from the schema context — emit-only,
+    // no new work. The `call` tool shapes its own result (and owns a no-leak
+    // contract), so it is intentionally not stamped.
+    //   - databaseVersion: PostgreSQL server version, reduced to major.minor
+    //     so the stamp cannot fingerprint the OS/patch build (pgMajorMinor).
+    //   - kozouVersion: this MCP server's version — the compiler build that
+    //     produced the answer (the more relevant "which build" than the DB's).
+    //   - builtAt: when this schema context was (re)built (cache refresh time).
     const emit = (payload: unknown): McpToolResult =>
       successResult(
         provenance
           ? {
               ...(payload as Record<string, unknown>),
-              provenance: { serverVersion: ctx.meta.serverVersion, builtAt: ctx.meta.builtAt },
+              provenance: {
+                databaseVersion: pgMajorMinor(ctx.meta.serverVersion),
+                kozouVersion: SERVER_VERSION,
+                builtAt: ctx.meta.builtAt,
+              },
             }
           : payload,
       );

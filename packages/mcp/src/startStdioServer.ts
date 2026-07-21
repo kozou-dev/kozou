@@ -17,7 +17,7 @@ export type StartStdioServerOptions = {
    *  no OAuth layer, so `execution.role` is required (calls run as it). */
   execution?: McpExecution;
   /** Opt-in: stamp read/describe tool results with a `provenance` object
-   *  ({ serverVersion, builtAt }). Emit-only; default off. */
+   *  ({ databaseVersion, kozouVersion, builtAt }). Emit-only; default off. */
   provenance?: boolean;
 };
 
