@@ -97,8 +97,8 @@ Advisory only: enforcement stays in PostgreSQL (GRANTs + your RLS). See
 Use the runtime image directly:
 
 ```bash
-docker pull ghcr.io/kozou-dev/kozou:v1.15.1
-docker run --rm ghcr.io/kozou-dev/kozou:v1.15.1 mcp --help
+docker pull ghcr.io/kozou-dev/kozou:v1.16.0
+docker run --rm ghcr.io/kozou-dev/kozou:v1.16.0 mcp --help
 ```
 
 Or install the packages for library / embedded use:
@@ -143,7 +143,7 @@ stricter than REST: no anonymous access, no default role. See the deployment gui
 
 ## Requirements
 
-Runtime requirements for v1.15.1:
+Runtime requirements for v1.16.0:
 
 - **PostgreSQL 16 or later** — the canonical source of truth
 - **Docker 24 or later** (optional) — recommended for the `docker compose up` stack, which brings up PostgreSQL and a `kozou` service running `kozou dev` (the bundled Admin UI + MCP HTTP server, plus Kozou's in-house REST backend served in-process) from `ghcr.io/kozou-dev/kozou` (a multi-arch image, native on linux/amd64 and linux/arm64). The default stack needs **no separate REST container**; to opt out and use an external PostgREST instead, set `adapter.type: postgrest` and add the (commented) service in the scaffold's `docker-compose.yml`.
@@ -184,7 +184,8 @@ Contributors additionally need **pnpm 9 or later**. See [CONTRIBUTING.md](CONTRI
 - v1.14.0 (shipped): sharper join context for views, back-compatible. The MCP `get_concept_context` **join suggestions are now derived from the real foreign keys** among a view's underlying tables — actual `ON` conditions (composite keys joined with `AND`) instead of the previous unresolved `<fk_column> = <pk_column>` placeholder, and a view whose underlying tables share no foreign key returns no suggestions rather than a misleading guess. Each suggestion also carries the **foreign key's `COMMENT` as its purpose**, so an agent gets the documented meaning of a join, not just its mechanics (the `purpose` field, previously always empty, is now populated). Built entirely from the existing schema context — no new introspection, and the `{ table, on }` shape is unchanged.
 - v1.15.0 (shipped): **MCP `search_schema`** — a read-only metadata search tool, the discovery primitive between `list_*` (which return everything) and `describe_*` (one named object). It answers *"which tables, columns, views, functions, or enums relate to X?"* without enumerating the whole catalog, so an agent's context budget scales with the question, not the size of the schema. It searches object names, labels, COMMENT bodies, `@ai` / `@policy` notes, and enum members (native `ENUM` types and CHECK-derived value sets), and returns **ranked hits** — each `{ kind, ref, label, matchedField, snippet, score }`, where `ref` (`schema.table`, `schema.relation.column`, `schema.view`, `schema.function`, `schema.enumtype`) is the identifier to feed the next `describe_*` call. Hits are ranked best-match first — an object's name and label outrank matches in its prose (COMMENT / `@ai` / `@policy`), and a cleaner match (a whole field or a prefix) outranks an incidental mid-word one — with one hit per object (its best-matching field). Callers can scope the search with optional `schema` / `kinds` filters and bound it with a `limit` (default 20, capped at 100) that sets a `truncated` flag when more matched. The exact ranking weights are advisory and may change between releases — not a contract to compute against. It is a pure function over the already-built schema context — no row data, no new introspection, zero database footprint — and additive: no existing tool's input or output changes, and it is gated by the existing `describe` scope in OAuth resource-server mode.
 - v1.15.1 (shipped): a documentation patch. The MCP `search_schema` tool description now states its concept scope — a concept (business view) is found as a `view` hit, but text unique to a concept (its example queries and join meanings) is not searched there, so an agent is pointed to `list_concepts` / `get_concept_context` for that. Description-only; no behavior change.
-- Beyond v1.15: React UI exploration — optional write-path parity (a second UI driving create / edit / delete across both adapters)
+- v1.16.0 (shipped): **opt-in provenance on MCP results** — set `server.mcp.provenance` (default off) and every read/describe MCP tool result carries a small `provenance` object so an agent can explain *which database version and schema build produced an answer*: `databaseVersion` (the PostgreSQL server version, reduced to `major.minor` so it cannot fingerprint the OS / patch build), `kozouVersion` (the MCP server build that compiled the answer), and `builtAt` (when the schema context was introspected). It is **emit-only and additive**: the values come straight from the already-built schema context — no new introspection, no state, no database writes — the stamp is applied uniformly to the eight read/describe tools (the `call` execution tool shapes its own result and is not stamped), and with the flag off existing consumers' output is byte-for-byte unchanged. Plus dependency hygiene: several transitive dependencies (`brace-expansion`, `js-yaml`, `protobufjs`, `body-parser`) are pinned to their patched versions for published OSV-Scanner advisories.
+- Beyond v1.16: React UI exploration — optional write-path parity (a second UI driving create / edit / delete across both adapters)
 
 ## Name
 

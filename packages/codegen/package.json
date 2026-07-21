@@ -1,6 +1,6 @@
 {
   "name": "@kozou/codegen",
-  "version": "1.15.1",
+  "version": "1.16.0",
   "description": "Kozou TypeScript codegen: emit row / entity types from a SchemaContext (experimental).",
   "license": "Apache-2.0",
   "repository": {
