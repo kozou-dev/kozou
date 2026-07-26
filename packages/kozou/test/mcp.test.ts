@@ -16,7 +16,7 @@ vi.mock('@kozou/mcp', () => ({
   startStdioServer: vi.fn(async () => {}),
 }));
 
-import { startHttpServer } from '@kozou/mcp';
+import { startHttpServer, startStdioServer } from '@kozou/mcp';
 import { loadConfig, type KozouConfig } from '../src/config.js';
 import { mcpCommand, resolveMcpAnnotationRole } from '../src/commands/mcp.js';
 
@@ -128,6 +128,43 @@ server:
     await mcpCommand({ http: true, port: 9999, host: '127.0.0.1', config: file });
     expect(lastHttpOpts().port).toBe(9999);
     expect(lastHttpOpts().host).toBe('127.0.0.1');
+  });
+});
+
+describe('mcpCommand honours server.mcp.http.enabled', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  const DISABLED = `database:
+  url: postgres://u:p@db:5432/app
+server:
+  mcp:
+    http:
+      enabled: false
+`;
+
+  it('--http against a disabled endpoint throws and starts no listener', async () => {
+    const file = await writeConfig(DISABLED);
+    await expect(mcpCommand({ http: true, config: file })).rejects.toThrow(
+      /server\.mcp\.http\.enabled is false/,
+    );
+    expect(startHttpServer).not.toHaveBeenCalled();
+  });
+
+  it('a CLI --port does not re-enable a disabled endpoint', async () => {
+    const file = await writeConfig(DISABLED);
+    await expect(mcpCommand({ http: true, port: 9999, config: file })).rejects.toThrow(
+      /server\.mcp\.http\.enabled is false/,
+    );
+    expect(startHttpServer).not.toHaveBeenCalled();
+  });
+
+  it('stdio is unaffected by the HTTP endpoint being disabled', async () => {
+    const file = await writeConfig(DISABLED);
+    await mcpCommand({ stdio: true, config: file });
+    expect(startStdioServer).toHaveBeenCalledTimes(1);
+    expect(startHttpServer).not.toHaveBeenCalled();
   });
 });
 

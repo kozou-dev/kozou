@@ -71,8 +71,9 @@ Runs the bundled `@kozou/svelte-ui` Admin UI (adapter-node)
 alongside an MCP HTTP server, both wired up from
 `kozou.config.yaml`. The Admin UI listens on port 3333 and the MCP
 HTTP server on 3334 by default (override via `server.ui` /
-`server.mcp.http` in the config); `Ctrl-C` (SIGINT / SIGTERM)
-tears both down. This is the command behind the `kozou` service in
+`server.mcp.http` in the config, or turn the MCP endpoint off with
+`server.mcp.http.enabled: false`); `Ctrl-C` (SIGINT / SIGTERM)
+tears them down. This is the command behind the `kozou` service in
 the scaffolded `docker-compose.yml`.
 
 ### `create-kozou <dir>`
@@ -114,9 +115,12 @@ uiHints:
 ```
 
 The full schema also accepts `server.ui.{port,host}`,
-`server.mcp.http.{port,host}`, `server.mcp.stdio`, and
+`server.mcp.http.{enabled,port,host}`, `server.mcp.stdio`, and
 `cache.ttlMs` overrides; defaults match the template that
-`create-kozou` writes. `${VAR}` and `${VAR:-default}` are
+`create-kozou` writes. `server.mcp.http.enabled: false` turns the
+MCP HTTP endpoint off entirely — `kozou dev` then serves the Admin
+UI and REST alone and starts no MCP listener, and `kozou mcp --http`
+refuses rather than contradicting the config (stdio is unaffected). `${VAR}` and `${VAR:-default}` are
 expanded from the process environment at load time.
 
 ### Choosing a backend

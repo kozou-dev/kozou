@@ -110,11 +110,34 @@ const mcpAuthSchema = z.object({
 
 const mcpHttpServerSchema = z
   .object({
+    // Serve the MCP Streamable HTTP endpoint at all. Default ON (the transport
+    // is the point of `kozou dev`). Set false when the runtime is wanted for
+    // the Admin UI and REST only: `kozou dev` then starts no MCP listener, so
+    // the endpoint's posture stops depending on bind address and network
+    // topology alone. Without an `auth` block the endpoint has no
+    // authentication of its own, and an operator who never points an agent at
+    // it should be able to not run it rather than only hide it.
+    enabled: z.boolean().default(true),
     port: z.number().int().min(0).max(65_535).default(3334),
     host: z.string().min(1).default('127.0.0.1'),
     auth: mcpAuthSchema.optional(),
   })
-  .prefault({});
+  .prefault({})
+  .superRefine((http, ctx) => {
+    // An auth block under a disabled endpoint is dead configuration: it reads
+    // as "the endpoint is protected" while nothing is served. Make the
+    // contradiction explicit instead of silently ignoring one of the two.
+    if (!http.enabled && http.auth !== undefined) {
+      ctx.addIssue({
+        code: 'custom',
+        message:
+          'server.mcp.http.auth is set while server.mcp.http.enabled is false ' +
+          '(no endpoint is served, so the auth block has no effect). ' +
+          'Enable the endpoint, or drop the auth block.',
+        path: ['auth'],
+      });
+    }
+  });
 
 // Opt-in execution for the MCP `call` tool (issue #103, Beyond v1.4). Default
 // OFF (describe-only). When enabled, the bundled `kozou mcp` server exposes a

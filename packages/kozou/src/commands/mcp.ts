@@ -4,7 +4,8 @@
 //   connection details from kozou.config.yaml / environment.
 // --http: spins up the @kozou/mcp server with the Streamable HTTP
 //   transport, binding to localhost by default and
-//   exposing POST /admin/refresh for cache invalidation.
+//   exposing POST /admin/refresh for cache invalidation. Rejected when
+//   server.mcp.http.enabled is false (that config turns the endpoint off).
 //
 // The `call` execution tool is opt-in (server.mcp.execution.enabled, default
 // OFF). When on, this command opens a write-capable pool and runs calls under
@@ -131,6 +132,17 @@ export async function mcpCommand(opts: McpOptions = {}): Promise<void> {
   // presence, or a stdio run of an HTTP-auth config would reach startStdioServer
   // with no identity and fail late.
   const httpMode = opts.http === true;
+  // `--http` against a config that turned the endpoint off is a contradiction,
+  // and serving it anyway would be a silent posture change of exactly the kind
+  // the flag exists to prevent. Fail before any listener or pool is opened, and
+  // name both sides so the operator can pick which one they meant. stdio is
+  // unaffected: server.mcp.http governs the HTTP endpoint only.
+  if (httpMode && !config.server.mcp.http.enabled) {
+    throw new Error(
+      '--http was requested but server.mcp.http.enabled is false. ' +
+        'Set it to true to serve the endpoint, or drop --http (stdio is unaffected).',
+    );
+  }
   const mcpAuth = resolveMcpAuthOptions(config);
   const execution = await buildExecution(config, mcpAuth !== undefined && httpMode);
   const privilegeRole = resolveMcpAnnotationRole(config, execution?.role, process.env);
