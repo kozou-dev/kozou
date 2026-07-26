@@ -1,10 +1,16 @@
+import { randomBytes } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
+import { mkdtemp, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 import { loadConfig, type KozouConfig } from '../src/config.js';
 import {
-  UI_MCP_LINK_ENV,
-  UI_MCP_LINK_OFF,
+  UI_MCP_POSTURE_ENV,
+  UI_MCP_POSTURE_LOCAL,
+  UI_MCP_POSTURE_OAUTH,
+  UI_MCP_POSTURE_OFF,
   buildAdminUiEnv,
   classifyAdminUiExposure,
   describeApiAuth,
@@ -23,6 +29,33 @@ async function makeConfig(
     skipFile: true,
     env: { DATABASE_URL: 'postgres://u:p@db:5432/app', ...overrides.env },
   });
+}
+
+// A config whose MCP HTTP endpoint is an OAuth 2.1 protected resource. Loaded
+// from a real file rather than hand-built, so the auth block is the shape the
+// schema actually produces (defaults included).
+async function makeOauthMcpConfig(): Promise<KozouConfig> {
+  const dir = await mkdtemp(join(tmpdir(), `kozou-dev-${randomBytes(4).toString('hex')}-`));
+  const file = join(dir, 'kozou.config.yaml');
+  await writeFile(
+    file,
+    [
+      'database:',
+      '  url: postgres://u:p@db:5432/app',
+      'server:',
+      '  mcp:',
+      '    http:',
+      '      auth:',
+      '        resource: https://mcp.example.com/mcp',
+      '        authorizationServers:',
+      '          - https://as.example.com',
+      '        jwt:',
+      '          jwksUri: https://as.example.com/.well-known/jwks.json',
+      '',
+    ].join('\n'),
+    'utf8',
+  );
+  return loadConfig({ path: file, env: {} });
 }
 
 describe('resolveOrigin', () => {
@@ -74,6 +107,8 @@ describe('buildAdminUiEnv', () => {
       NODE_ENV: 'production',
       // The co-located MCP HTTP server's port, for the "Connect an AI agent" page.
       KOZOU_MCP_HTTP_PORT: '3334',
+      // ...and how that endpoint authenticates: no auth block -> 'local'.
+      KOZOU_UI_MCP_POSTURE: 'local',
     });
   });
 
@@ -91,8 +126,18 @@ describe('buildAdminUiEnv', () => {
     };
     const env = buildAdminUiEnv(custom, 'http://localhost:3333', {});
     expect(env.KOZOU_MCP_HTTP_PORT).toBe('9999');
-    // The endpoint is on, so nothing tells the UI to hide the connection page.
-    expect(env.KOZOU_UI_MCP_LINK).toBeUndefined();
+    // The endpoint is on with no auth block, which is a posture of its own —
+    // the page states "no authentication" only for this one.
+    expect(env.KOZOU_UI_MCP_POSTURE).toBe('local');
+  });
+
+  it('reports the OAuth posture when server.mcp.http.auth is configured', async () => {
+    const config = await makeOauthMcpConfig();
+    const env = buildAdminUiEnv(config, 'http://localhost:3333', {});
+    // Same endpoint, same port, different truth about authentication: without
+    // this the page asserts "no authentication" about a protected resource.
+    expect(env.KOZOU_UI_MCP_POSTURE).toBe('oauth');
+    expect(env.KOZOU_MCP_HTTP_PORT).toBe('3334');
   });
 
   it('tells the UI the MCP endpoint is off, and drops the port', async () => {
@@ -111,19 +156,30 @@ describe('buildAdminUiEnv', () => {
     // Explicit, not by omission: the page falls back to the default port when
     // none is passed, so an absent port alone would leave it advertising 3334
     // with nothing listening.
-    expect(env.KOZOU_UI_MCP_LINK).toBe('off');
+    expect(env.KOZOU_UI_MCP_POSTURE).toBe('off');
     expect(env.KOZOU_MCP_HTTP_PORT).toBeUndefined();
   });
 
-  it('clears a stray inherited KOZOU_UI_MCP_LINK when the endpoint is on', async () => {
+  it('overwrites a stray inherited posture with the one this runtime is in', async () => {
     const config = await makeConfig();
     // A parent environment claiming the endpoint is off must not hide a
-    // connection page for an endpoint this runtime is in fact serving.
+    // connection page for an endpoint this runtime is in fact serving — nor,
+    // now, describe an authentication posture this runtime is not in.
     const env = buildAdminUiEnv(config, 'http://localhost:3333', {
-      KOZOU_UI_MCP_LINK: 'off',
+      KOZOU_UI_MCP_POSTURE: 'off',
     });
-    expect(env.KOZOU_UI_MCP_LINK).toBeUndefined();
+    expect(env.KOZOU_UI_MCP_POSTURE).toBe('local');
     expect(env.KOZOU_MCP_HTTP_PORT).toBe('3334');
+  });
+
+  it('overwrites a stray inherited posture that overstates authentication', async () => {
+    const config = await makeConfig();
+    // The dangerous direction too: an inherited 'oauth' must not make a page
+    // for an unauthenticated endpoint claim it is protected.
+    const env = buildAdminUiEnv(config, 'http://localhost:3333', {
+      KOZOU_UI_MCP_POSTURE: 'oauth',
+    });
+    expect(env.KOZOU_UI_MCP_POSTURE).toBe('local');
   });
 
   it('carries the configured adapter url and UI host/port', async () => {
@@ -248,13 +304,14 @@ describe('buildAdminUiEnv', () => {
   });
 });
 
-describe('the Admin UI link channel is a cross-package contract', () => {
-  // buildAdminUiEnv writes UI_MCP_LINK_ENV; the Admin UI reads that name in two
-  // server loads, in another package, and compares against UI_MCP_LINK_OFF.
+describe('the Admin UI posture channel is a cross-package contract', () => {
+  // buildAdminUiEnv writes UI_MCP_POSTURE_ENV; the Admin UI reads that name in
+  // two server loads, in another package, and matches the values written here.
   // Nothing else connects the two — no shared type, and no test crosses the
   // boundary — so a rename on one side alone would leave every unit test,
-  // typecheck and lint green while the connection page silently disappeared or
-  // came back. These assertions are what turn that into a failing test.
+  // typecheck and lint green while the connection page silently disappeared,
+  // came back, or described the wrong authentication posture. These assertions
+  // are what turn that into a failing test.
   const READERS = [
     '../../svelte-ui/src/routes/+layout.server.ts',
     '../../svelte-ui/src/routes/connect/+page.server.ts',
@@ -262,21 +319,27 @@ describe('the Admin UI link channel is a cross-package contract', () => {
 
   it('is the exact env name both Admin UI server loads read', () => {
     // Anchored with a negative lookahead, not `toContain`: a substring check
-    // passes against a *longer* name (KOZOU_UI_MCP_LINK_RENAMED contains
-    // KOZOU_UI_MCP_LINK), which is exactly the rename this test exists to catch.
-    const reference = new RegExp(`process\\.env\\.${UI_MCP_LINK_ENV}(?![A-Za-z0-9_])`);
+    // passes against a *longer* name (KOZOU_UI_MCP_POSTURE_RENAMED contains
+    // KOZOU_UI_MCP_POSTURE), which is exactly the rename this test catches.
+    const reference = new RegExp(`process\\.env\\.${UI_MCP_POSTURE_ENV}(?![A-Za-z0-9_])`);
     for (const rel of READERS) {
       const src = readFileSync(new URL(rel, import.meta.url), 'utf8');
       expect(src).toMatch(reference);
     }
   });
 
-  it('is the exact off value the Admin UI helper compares against', () => {
+  it('are the exact posture values the Admin UI helper matches on', () => {
     const helper = readFileSync(
       new URL('../../svelte-ui/src/lib/connect/mcp-connection.ts', import.meta.url),
       'utf8',
     );
-    expect(helper).toContain(`!== '${UI_MCP_LINK_OFF}'`);
+    // `=== '<value>'` rather than the bare value: the comparison is the code
+    // that has to agree, and a value merely named in prose would not.
+    // A posture this CLI emits but the helper stopped matching resolves there
+    // as "unknown", which silently downgrades correct wording to a hedge.
+    for (const posture of [UI_MCP_POSTURE_OFF, UI_MCP_POSTURE_LOCAL, UI_MCP_POSTURE_OAUTH]) {
+      expect(helper).toContain(`=== '${posture}'`);
+    }
   });
 });
 

@@ -61,9 +61,9 @@
       The tools are <strong>read-only</strong>: an agent can read your schema's
       meaning, never mutate data, through this surface.
     </li>
+    <li>{data.connection.authNote}</li>
     <li>
-      The MCP HTTP server has no authentication and binds to loopback by
-      default. The URL above uses the host Kozou is configured with
+      The URL above uses the host Kozou is configured with
       (<code class="font-mono">localhost</code> by default) and the MCP port; if
       you reach Kozou through a different host — a proxy or another machine —
       adjust the host accordingly.

@@ -82,12 +82,24 @@ Optional, both concerning the "Connect an AI agent" page:
 - `KOZOU_MCP_HTTP_PORT` — port the co-located MCP Streamable HTTP
   server listens on, used to build the copy-paste client config
   (default `3334`). `kozou dev` sets this from its own config.
-- `KOZOU_UI_MCP_LINK` — set to `off` to drop the connection page and
-  both links to it (the header link and the dashboard card). `kozou
-  dev` sets it when `server.mcp.http.enabled` is false, so the UI
-  stops advertising an endpoint that is not listening; set it yourself
-  when you run this server standalone next to no MCP endpoint. Any
-  other value, or none, offers the page.
+- `KOZOU_UI_MCP_POSTURE` — how the MCP endpoint runs, which decides
+  whether the connection page exists and what it says about
+  authentication. `kozou dev` sets it from its own config on every run:
+  - `off` — no listener (`server.mcp.http.enabled: false`). The page
+    404s and both links to it (the header link and the dashboard card)
+    are gone, so nothing advertises an endpoint that is not listening.
+    Set this yourself when you run this server standalone next to no
+    MCP endpoint.
+  - `local` — serving with no authentication (the loopback default).
+  - `oauth` — serving as an OAuth 2.1 protected resource
+    (`server.mcp.http.auth`). The URL and both config snippets are
+    unchanged — a client discovers the authorization server from the
+    endpoint itself — so only the wording differs.
+
+  Absent reads as `local`, which is the posture a standalone UI is in.
+  A value this build does not recognize (a newer CLI) still offers the
+  page, since the snippets do not depend on the posture, but says
+  nothing about authentication rather than guessing.
 
 ```bash
 # from the monorepo root

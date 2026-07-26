@@ -11,21 +11,40 @@ import type { KozouConfig } from '../config.js';
 import { resolvePrivilegeRole } from '../config.js';
 
 /**
- * The env var this CLI uses to tell the bundled Admin UI child whether an MCP
- * endpoint exists to link to, and the single value it carries.
+ * The env var this CLI uses to tell the bundled Admin UI child which posture
+ * the MCP HTTP endpoint runs in, and the values it carries.
+ *
+ * One value rather than a flag per property, because the endpoint has three
+ * postures and the page has to describe the one it is actually in: off, on with
+ * no authentication, or on as an OAuth 2.1 protected resource. A boolean pair
+ * would let the UI combine them into a state that does not exist, and a fourth
+ * posture would need another flag; a single value keeps the whole vocabulary in
+ * one place on both sides.
  *
  * Exported because nothing else ties the two sides together: the Admin UI reads
  * this name in its own server loads, in another package, with no shared type
  * between them. A rename on one side alone would leave every unit test,
- * typecheck and lint green while silently hiding — or restoring — the
+ * typecheck and lint green while silently hiding — or misdescribing — the
  * connection page. `test/dev.test.ts` asserts the readers still spell it this
  * way, which is the only thing that makes that a test failure rather than a
  * field report.
  */
-export const UI_MCP_LINK_ENV = 'KOZOU_UI_MCP_LINK';
+export const UI_MCP_POSTURE_ENV = 'KOZOU_UI_MCP_POSTURE';
 
-/** The only value {@link UI_MCP_LINK_ENV} takes; absence means "link offered". */
-export const UI_MCP_LINK_OFF = 'off';
+/** No MCP listener at all (`server.mcp.http.enabled: false`). */
+export const UI_MCP_POSTURE_OFF = 'off';
+
+/** Serving with no authentication — the loopback-default dev posture. */
+export const UI_MCP_POSTURE_LOCAL = 'local';
+
+/** Serving as an OAuth 2.1 protected resource (`server.mcp.http.auth`). */
+export const UI_MCP_POSTURE_OAUTH = 'oauth';
+
+/** The postures {@link UI_MCP_POSTURE_ENV} carries. */
+export type UiMcpPosture =
+  | typeof UI_MCP_POSTURE_OFF
+  | typeof UI_MCP_POSTURE_LOCAL
+  | typeof UI_MCP_POSTURE_OAUTH;
 
 // Resolve the Admin UI's adapter-node standalone server entry. The
 // `build/` directory ships in @kozou/svelte-ui's published `files`, and
@@ -113,21 +132,35 @@ export function buildAdminUiEnv(
   // being run standalone), so dropping the port alone would leave it
   // advertising 3334 with nothing listening.
   //
-  // KOZOU_UI_MCP_LINK, deliberately not KOZOU_MCP_HTTP_ENABLED: this is a
+  // KOZOU_UI_MCP_POSTURE, deliberately not KOZOU_MCP_HTTP_ENABLED: this is a
   // CLI-to-UI-child channel, not a config override. The KOZOU_MCP_HTTP_*
   // namespace belongs to the operator — loadConfig honours those — and a name
   // sitting in it that the config loader ignored would fail silently for anyone
   // who set it in a compose file, which is the failure mode this feature exists
   // to remove.
   //
-  // Both are set authoritatively: the off-flag is deleted when the endpoint is
-  // on, so a stray inherited value cannot hide the page for an endpoint that is
-  // in fact serving.
+  // The posture is what the page needs, not just whether to render: with
+  // server.mcp.http.auth the endpoint is an OAuth 2.1 protected resource, and a
+  // page that can only distinguish on/off states the wrong thing about how it
+  // authenticates. The URL, the client JSON and the `claude mcp add` command are
+  // the same either way (a client discovers the authorization server from the
+  // endpoint's own RFC 9728 metadata), so only the wording differs.
+  //
+  // Derived from the presence of the auth block, not from resolveMcpAuthOptions:
+  // that resolver throws on an auth block with no usable JWT config, and it is
+  // commands/dev.ts — which cannot serve the endpoint at all in that case — that
+  // must surface the failure. Keeping this mapping total leaves buildAdminUiEnv
+  // pure.
+  //
+  // Always set, never merely deleted: a stray inherited value cannot hide a page
+  // for an endpoint that is in fact serving, nor describe a posture this runtime
+  // is not in.
   if (config.server.mcp.http.enabled) {
     env.KOZOU_MCP_HTTP_PORT = String(config.server.mcp.http.port);
-    delete env[UI_MCP_LINK_ENV];
+    env[UI_MCP_POSTURE_ENV] =
+      config.server.mcp.http.auth === undefined ? UI_MCP_POSTURE_LOCAL : UI_MCP_POSTURE_OAUTH;
   } else {
-    env[UI_MCP_LINK_ENV] = UI_MCP_LINK_OFF;
+    env[UI_MCP_POSTURE_ENV] = UI_MCP_POSTURE_OFF;
     delete env.KOZOU_MCP_HTTP_PORT;
   }
   // Privilege-aware introspection (issue #99): pass the resolved role through to
