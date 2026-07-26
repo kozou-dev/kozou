@@ -10,6 +10,23 @@ import { dirname, join } from 'node:path';
 import type { KozouConfig } from '../config.js';
 import { resolvePrivilegeRole } from '../config.js';
 
+/**
+ * The env var this CLI uses to tell the bundled Admin UI child whether an MCP
+ * endpoint exists to link to, and the single value it carries.
+ *
+ * Exported because nothing else ties the two sides together: the Admin UI reads
+ * this name in its own server loads, in another package, with no shared type
+ * between them. A rename on one side alone would leave every unit test,
+ * typecheck and lint green while silently hiding — or restoring — the
+ * connection page. `test/dev.test.ts` asserts the readers still spell it this
+ * way, which is the only thing that makes that a test failure rather than a
+ * field report.
+ */
+export const UI_MCP_LINK_ENV = 'KOZOU_UI_MCP_LINK';
+
+/** The only value {@link UI_MCP_LINK_ENV} takes; absence means "link offered". */
+export const UI_MCP_LINK_OFF = 'off';
+
 // Resolve the Admin UI's adapter-node standalone server entry. The
 // `build/` directory ships in @kozou/svelte-ui's published `files`, and
 // resolving the package's own package.json works whether kozou runs from
@@ -108,9 +125,9 @@ export function buildAdminUiEnv(
   // in fact serving.
   if (config.server.mcp.http.enabled) {
     env.KOZOU_MCP_HTTP_PORT = String(config.server.mcp.http.port);
-    delete env.KOZOU_UI_MCP_LINK;
+    delete env[UI_MCP_LINK_ENV];
   } else {
-    env.KOZOU_UI_MCP_LINK = 'off';
+    env[UI_MCP_LINK_ENV] = UI_MCP_LINK_OFF;
     delete env.KOZOU_MCP_HTTP_PORT;
   }
   // Privilege-aware introspection (issue #99): pass the resolved role through to

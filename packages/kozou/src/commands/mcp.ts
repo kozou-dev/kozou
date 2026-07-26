@@ -139,8 +139,10 @@ export async function mcpCommand(opts: McpOptions = {}): Promise<void> {
   // unaffected: server.mcp.http governs the HTTP endpoint only.
   if (httpMode && !config.server.mcp.http.enabled) {
     throw new Error(
-      '--http was requested but server.mcp.http.enabled is false. ' +
-        'Set it to true to serve the endpoint, or drop --http (stdio is unaffected).',
+      '--http was requested but the MCP HTTP endpoint is disabled ' +
+        '(server.mcp.http.enabled in the config, or KOZOU_MCP_HTTP_ENABLED in the ' +
+        'environment — name both because either can be the source). Set it to true ' +
+        'to serve the endpoint, or drop --http (stdio is unaffected).',
     );
   }
   const mcpAuth = resolveMcpAuthOptions(config);
