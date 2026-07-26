@@ -4,14 +4,27 @@
 // Admin UI — instead of finding the connection docs unaided. Pure projection
 // lives in $lib/connect/mcp-connection so the template stays declarative.
 
+import { error } from '@sveltejs/kit';
+
 import type { PageServerLoad } from './$types';
 
 import {
   buildMcpConnectionInfo,
+  isMcpHttpEnabled,
   resolveMcpHttpPort,
 } from '$lib/connect/mcp-connection.js';
 
 export const load: PageServerLoad = ({ url }) => {
+  // Hiding the two links is not enough: this URL is reachable directly, from a
+  // bookmark or a shared link. Serving the page with no endpoint behind it
+  // would hand the operator copy-paste config for a listener that is not
+  // running, which is a worse failure than the page being absent.
+  if (!isMcpHttpEnabled(process.env.KOZOU_MCP_HTTP_ENABLED)) {
+    error(
+      404,
+      'The MCP HTTP endpoint is turned off for this runtime (server.mcp.http.enabled: false), so there is nothing to connect an agent to.',
+    );
+  }
   // `kozou dev` forwards the co-located MCP HTTP server's port; absent (e.g. the
   // UI run standalone) falls back to the documented default. The host comes from
   // the UI's request URL — ORIGIN-bound under `kozou dev`, so `localhost` by

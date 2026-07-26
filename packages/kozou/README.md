@@ -120,8 +120,12 @@ The full schema also accepts `server.ui.{port,host}`,
 `create-kozou` writes. `server.mcp.http.enabled: false` turns the
 MCP HTTP endpoint off entirely — `kozou dev` then serves the Admin
 UI and REST alone and starts no MCP listener, and `kozou mcp --http`
-refuses rather than contradicting the config (stdio is unaffected). `${VAR}` and `${VAR:-default}` are
-expanded from the process environment at load time.
+refuses rather than contradicting the config (stdio is unaffected).
+The Admin UI follows suit: its "Connect an AI agent" page and both
+links to it are gone, so nothing hands out connection instructions
+for an endpoint that is not listening. `${VAR}` and
+`${VAR:-default}` are expanded from the process environment at load
+time.
 
 ### Choosing a backend
 

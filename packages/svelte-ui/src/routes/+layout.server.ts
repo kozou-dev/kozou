@@ -4,10 +4,18 @@
 
 import type { LayoutServerLoad } from './$types';
 
+import { isMcpHttpEnabled } from '$lib/connect/mcp-connection.js';
+
 export const load: LayoutServerLoad = ({ locals }) => {
   return {
     appName: 'Kozou',
     tableCount: locals.schema.tables.length,
     viewCount: locals.schema.views.length,
+    // Whether an MCP endpoint exists to point an agent at. Resolved here, at
+    // the layout, because both entry points to the connection page (the header
+    // link and the dashboard card) need it — offering either one while
+    // `kozou dev` runs with server.mcp.http.enabled false would send the
+    // operator to a page describing an endpoint that is not listening.
+    mcpEnabled: isMcpHttpEnabled(process.env.KOZOU_MCP_HTTP_ENABLED),
   };
 };

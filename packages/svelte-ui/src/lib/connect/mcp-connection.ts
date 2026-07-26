@@ -39,6 +39,21 @@ export function resolveMcpHttpPort(raw: string | undefined): number {
     : DEFAULT_MCP_HTTP_PORT;
 }
 
+/**
+ * Whether an MCP HTTP endpoint exists to connect to, from
+ * `KOZOU_MCP_HTTP_ENABLED`.
+ *
+ * Absent means yes, on purpose. `kozou dev` sets this to `'false'` only when
+ * `server.mcp.http.enabled` turns the endpoint off; every other way of running
+ * the Admin UI (standalone `node build/index.js`, the E2E suite, an older
+ * `kozou dev`) leaves it unset and keeps the pre-existing behaviour of offering
+ * the connection page. Only the explicit opt-out hides it, so this stays
+ * additive.
+ */
+export function isMcpHttpEnabled(raw: string | undefined): boolean {
+  return raw?.trim().toLowerCase() !== 'false';
+}
+
 export function buildMcpConnectionInfo(input: {
   /** The browser's request URL to the Admin UI; only origin parts are used. */
   requestUrl: URL;
