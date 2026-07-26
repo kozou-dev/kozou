@@ -2,6 +2,7 @@
 // `kozou` CLI entry point. Wires up the sub-commands via commander.
 
 import { Command } from 'commander';
+import { formatCliError } from './cli-error.js';
 import { inspectCommand } from './commands/inspect.js';
 import { codegenCommand } from './commands/codegen.js';
 import { docsCommand } from './commands/docs.js';
@@ -121,7 +122,7 @@ program
     });
   });
 
-program.parseAsync(process.argv).catch((err) => {
-  process.stderr.write(`${err instanceof Error ? err.message : String(err)}\n`);
+program.parseAsync(process.argv).catch((err: unknown) => {
+  process.stderr.write(`${formatCliError(err)}\n`);
   process.exit(1);
 });

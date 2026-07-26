@@ -295,6 +295,28 @@ server:
     }
   });
 
+  it('blames the environment, not the config file, for an unreadable value', async () => {
+    // The file is read (database.url comes from it) but contains nothing about
+    // this variable, so carrying its path would send anyone who reports the
+    // location — the CLI does — looking in the wrong place.
+    const dir = await makeTempDir();
+    const file = await writeYaml(dir, 'database:\n  url: postgres://u:p@host:5432/db\n');
+    let thrown: unknown;
+    try {
+      await loadConfig({ path: file, env: { KOZOU_MCP_HTTP_ENABLED: 'yes' } });
+    } catch (err) {
+      thrown = err;
+    }
+    expect(thrown).toBeInstanceOf(KozouConfigError);
+    expect((thrown as KozouConfigError).filePath).toBeNull();
+    expect((thrown as KozouConfigError).issues).toEqual([
+      {
+        path: 'KOZOU_MCP_HTTP_ENABLED',
+        message: 'must be "true" or "false" (unset it to leave the config value in place)',
+      },
+    ]);
+  });
+
   it('expands ${VAR} placeholders from env', async () => {
     const dir = await makeTempDir();
     const file = await writeYaml(

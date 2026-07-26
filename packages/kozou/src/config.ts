@@ -550,16 +550,16 @@ function injectDatabaseUrlFromEnv(raw: unknown, env: NodeJS.ProcessEnv): unknown
 // the exact silent posture change these controls exist to prevent, and the
 // reason `kozou mcp --http` errors instead of no-oping against a disabled
 // endpoint.
-function parseBooleanEnv(
-  name: string,
-  raw: string | undefined,
-  filePath: string | null,
-): boolean | undefined {
+// The error carries no filePath on purpose: the fault is an environment
+// variable, and a config file the loader happened to read alongside it does not
+// contain the offending value. Attributing it there sent anyone who printed the
+// location — and now the CLI does — looking in the wrong place.
+function parseBooleanEnv(name: string, raw: string | undefined): boolean | undefined {
   if (raw === undefined || raw.trim() === '') return undefined;
   const value = raw.trim().toLowerCase();
   if (value === 'true') return true;
   if (value === 'false') return false;
-  throw new KozouConfigError(`Invalid ${name}: expected "true" or "false", got "${raw}"`, filePath, [
+  throw new KozouConfigError(`Invalid ${name}: expected "true" or "false", got "${raw}"`, null, [
     {
       path: name,
       message: 'must be "true" or "false" (unset it to leave the config value in place)',
@@ -581,18 +581,10 @@ function parseBooleanEnv(
 // reaches values written in the YAML. For the boolean, expansion could not work
 // even then: it yields the string "false", which the schema rightly refuses for
 // a boolean field.
-function injectServerOverridesFromEnv(
-  raw: unknown,
-  env: NodeJS.ProcessEnv,
-  filePath: string | null,
-): unknown {
+function injectServerOverridesFromEnv(raw: unknown, env: NodeJS.ProcessEnv): unknown {
   const uiHost = env.KOZOU_UI_HOST;
   const mcpHost = env.KOZOU_MCP_HTTP_HOST;
-  const mcpEnabled = parseBooleanEnv(
-    'KOZOU_MCP_HTTP_ENABLED',
-    env.KOZOU_MCP_HTTP_ENABLED,
-    filePath,
-  );
+  const mcpEnabled = parseBooleanEnv('KOZOU_MCP_HTTP_ENABLED', env.KOZOU_MCP_HTTP_ENABLED);
   if (!uiHost && !mcpHost && mcpEnabled === undefined) return raw;
   const asObj = (v: unknown): Record<string, unknown> =>
     v !== null && typeof v === 'object' ? { ...(v as Record<string, unknown>) } : {};
@@ -672,9 +664,11 @@ function injectAuthFromEnv(raw: unknown, env: NodeJS.ProcessEnv): unknown {
 // the same silent-misconfiguration class as unforwarded auth env vars
 // (every RLS policy keyed on a claim would just see nothing).
 function parseUiClaimsEnv(raw: string): Record<string, unknown> {
-  // The CLI surfaces only the top-level error message, so the actionable
-  // detail (which env var, what is wrong with it) must live there — not
-  // just in the structured issues.
+  // The actionable detail (which env var, what is wrong with it) lives in the
+  // message as well as in the structured issues, so it survives any consumer
+  // that only reports the message. The CLI renders both (see cli-error.ts) and
+  // skips an issue the message already states, so this costs no duplication
+  // there.
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw);
@@ -726,7 +720,7 @@ export async function loadConfig(opts: LoadConfigOptions = {}): Promise<KozouCon
   // Apply KOZOU_UI_HOST / KOZOU_MCP_HTTP_HOST / KOZOU_MCP_HTTP_ENABLED
   // overrides (e.g. a container that needs to bind 0.0.0.0, or one that serves
   // no MCP endpoint), even with no config file.
-  const withOverrides = injectServerOverridesFromEnv(withAuth, env, fileLoaded);
+  const withOverrides = injectServerOverridesFromEnv(withAuth, env);
 
   try {
     return configSchema.parse(withOverrides);
