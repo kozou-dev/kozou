@@ -3,13 +3,17 @@ name: Security scan
 # Continuous secret-leak and dependency-vulnerability scanning. Added in
 # Step 4-A4-b; the action shapes were ironed out in Step 4-A4-d/e/f.
 #
-# Three jobs:
+# Four jobs:
 # - secret-scan (gitleaks, MIT): runs the gitleaks CLI directly in
 #   docker (gitleaks-action v2 became an organization-licensed
 #   commercial product)
-# - dependency-scan (OSV-Scanner, Apache 2.0): runs the OSV-Scanner CLI
+# - dependency-scan (OSV-Scanner, Apache 2.0): the blocking CVE gate,
+#   scanning the dependency trees a consumer installing our published
+#   packages from npm would actually get. Runs the OSV-Scanner CLI
 #   directly in docker (the google/osv-scanner-action root action.yml
 #   carries brand info only; the reusable-workflow form requires GHAS)
+# - dependency-scan-report (OSV-Scanner): the same scanner over the whole
+#   workspace, unfiltered and non-blocking, on scheduled runs only
 # - codeql (CodeQL, JS/TS): GitHub's first-party SAST. Code scanning /
 #   CodeQL is free for public repositories, so the analyze step uploads
 #   SARIF to the Security tab via `security-events: write`. Added in
@@ -58,24 +62,125 @@ jobs:
             zricethezav/gitleaks:latest \
             detect --source . --config .gitleaks.toml --verbose --redact
 
+  # Dependency CVE scanning runs in two layers, because one scan cannot mean
+  # two things. The blocking layer answers "is an adopter exposed?"; the
+  # reporting layer keeps the rest of the workspace visible without gating
+  # merges.
+  #
+  # Until this split, a single job scanned the root pnpm-lock.yaml, and that
+  # answered neither question. It over-reported, because the lockfile carries
+  # devDependencies, examples/ and benchmarks/ - a demo app and the lint
+  # toolchain gated merges as hard as the published packages, so the gate's
+  # failure rate tracked npm's advisory publication rate rather than kozou's
+  # risk. It also under-reported, which is the worse half: `pnpm.overrides`
+  # reshape that lockfile, and overrides are workspace-local. They never reach
+  # a consumer's resolver. `cookie` is the live example - pinned to 0.7.2 here,
+  # still 0.6.0 for every adopter, and invisible to a workspace scan.
+
   dependency-scan:
     name: Dependency CVE (OSV-Scanner)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
-      - name: OSV-Scanner
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version-file: '.nvmrc'
+
+      - name: Derive the consumer trees
+        # Reconstructs, per publishable package, the dependency set someone
+        # installing it from npm would get, and resolves each with npm the way
+        # that consumer's client would. See the script header for why this is
+        # one project per package rather than one merged project, and for the
+        # caveat that this is npm's resolution specifically.
+        #
+        # --package-lock-only: we need the resolved graph, not the files.
+        run: |
+          mkdir -p "$RUNNER_TEMP/consumer"
+          node scripts/derive-consumer-manifests.mjs "$RUNNER_TEMP/consumer" \
+            > "$RUNNER_TEMP/projects.txt"
+          while read -r project; do
+            (cd "$project" && npm install --package-lock-only --no-audit --no-fund)
+          done < "$RUNNER_TEMP/projects.txt"
+
+      - name: OSV-Scanner (consumer trees)
         # The reusable-workflow form of google/osv-scanner-action uploads
         # SARIF to code-scanning, which requires GHAS (Advanced Security).
         # Public repos often have GHAS disabled by default, so we run the
         # osv-scanner CLI directly in docker (same pattern as gitleaks).
-        # Results land in the CI log; a high CVE finding fails the job
-        # via the non-zero exit code. (CodeQL SARIF -> code scanning is
-        # handled by the separate `codeql` job below.)
+        # Results land in the CI log; a finding fails the job via the non-zero
+        # exit code. (CodeQL SARIF -> code scanning is handled by the separate
+        # `codeql` job below.)
+        #
+        # A finding here needs no triage about whether it reaches users: the
+        # input is the users' tree. The exceptions file is passed explicitly
+        # rather than by auto-discovery, since a root osv-scanner.toml would
+        # also filter the report-only job.
         run: |
-          docker run --rm -v "$PWD:/repo" -w /repo \
+          scan_status=0
+          docker run --rm \
+            -v "$RUNNER_TEMP/consumer:/consumer:ro" \
+            -v "$PWD/.github/osv-scanner-exceptions.toml:/cfg/osv.toml:ro" \
+            -w /consumer \
             ghcr.io/google/osv-scanner:latest \
-            -r ./
+            --config /cfg/osv.toml \
+            -r ./ > "$RUNNER_TEMP/scan.log" 2>&1 || scan_status=$?
+          cat "$RUNNER_TEMP/scan.log"
+          # A stale exception is a finding of its own: upstream fixed something
+          # we are still ignoring. osv-scanner reports it but exits 0, so fail
+          # on it deliberately. This is what replaces an `ignoreUntil` date -
+          # it fires on the fixable condition rather than on the calendar.
+          if grep -q 'has unused ignores' "$RUNNER_TEMP/scan.log"; then
+            echo "::error::An entry in .github/osv-scanner-exceptions.toml no longer matches any finding - upstream has fixed it. Delete the stale entry."
+            scan_status=1
+          fi
+          exit "$scan_status"
+
+  dependency-scan-report:
+    name: Dependency CVE (whole repo, report only)
+    runs-on: ubuntu-latest
+    # Scheduled runs only. Dev, build and examples/ dependencies are a real
+    # supply-chain surface and must stay observed, but they must not gate
+    # merges - and a job that is permanently red on every PR is the same
+    # desensitization this split exists to avoid, just relocated. The weekly
+    # run is the review point, so that is when it runs.
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: OSV-Scanner (unfiltered)
+        # Writes into RUNNER_TEMP rather than the checkout so the scan never
+        # sees its own report. The two ways this job can be non-green - real
+        # findings, or the scanner never running - are told apart by the
+        # annotation, since `continue-on-error` renders both the same.
+        run: |
+          scan_status=0
+          docker run --rm -v "$PWD:/repo:ro" -v "$RUNNER_TEMP:/out" -w /repo \
+            ghcr.io/google/osv-scanner:latest \
+            --format markdown --output-file /out/osv-report.md \
+            -r ./ || scan_status=$?
+          {
+            echo '## Dependency CVE - whole repository (non-blocking)'
+            echo
+            echo 'Includes dev tooling, build tooling and examples/, which never'
+            echo 'enter the blocking `dependency-scan` job - that one scans the'
+            echo 'trees adopters actually install. Findings here do not reach'
+            echo 'users through a published package.'
+            echo
+            if [ -f "$RUNNER_TEMP/osv-report.md" ]; then
+              cat "$RUNNER_TEMP/osv-report.md"
+            else
+              echo 'No report produced - the scanner did not run to completion.'
+              echo 'See the step log; this is a tooling failure, not a clean scan.'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [ ! -f "$RUNNER_TEMP/osv-report.md" ]; then
+            echo "::error::OSV-Scanner produced no report - this is a tooling failure, not a clean scan."
+          elif [ "$scan_status" -ne 0 ]; then
+            echo "::warning::Findings outside the adopter-facing gate. See the job summary."
+          fi
+          exit "$scan_status"
 
   codeql:
     name: CodeQL (JavaScript/TypeScript)
