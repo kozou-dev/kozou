@@ -17,6 +17,23 @@ export const DEFAULT_MCP_HTTP_PORT = 3334;
 /** Path the MCP Streamable HTTP transport is served at. */
 export const MCP_HTTP_PATH = '/mcp';
 
+/**
+ * How the co-located MCP HTTP endpoint runs, as reported by `kozou dev` through
+ * `KOZOU_UI_MCP_POSTURE`:
+ *
+ *   - `off`     — no listener (`server.mcp.http.enabled: false`); the page 404s;
+ *   - `local`   — serving with no authentication (the loopback-default posture);
+ *   - `oauth`   — serving as an OAuth 2.1 protected resource
+ *                 (`server.mcp.http.auth`);
+ *   - `unknown` — a value this build does not recognize, i.e. a CLI newer than
+ *                 this Admin UI. Never emitted by the CLI; see
+ *                 {@link resolveMcpPosture}.
+ */
+export type McpPosture = 'off' | 'local' | 'oauth' | 'unknown';
+
+/** The postures that have an endpoint behind them, so the page renders. */
+export type ServedMcpPosture = Exclude<McpPosture, 'off'>;
+
 export interface McpConnectionInfo {
   /** The live MCP endpoint, e.g. `http://localhost:3334/mcp`. */
   httpUrl: string;
@@ -24,6 +41,8 @@ export interface McpConnectionInfo {
   claudeCodeCommand: string;
   /** `mcpServers` JSON entry (HTTP transport) for Claude Desktop / Cursor. */
   jsonConfig: string;
+  /** What to tell the operator about authentication, for this posture. */
+  authNote: string;
 }
 
 /**
@@ -40,22 +59,58 @@ export function resolveMcpHttpPort(raw: string | undefined): number {
 }
 
 /**
- * Whether to offer the connection page at all, from `KOZOU_UI_MCP_LINK`.
+ * Read the endpoint's posture from `KOZOU_UI_MCP_POSTURE`.
  *
- * `kozou dev` sets this to `'off'` when `server.mcp.http.enabled` turns the MCP
- * endpoint off, so the UI stops advertising an endpoint that is not listening.
- * It is a CLI-to-UI channel, not an operator-facing config knob — the operator
- * sets `server.mcp.http.enabled` (or `KOZOU_MCP_HTTP_ENABLED`, which
- * `loadConfig` honours) and this follows from it.
+ * `kozou dev` sets this from its own config on every run, so it is a CLI-to-UI
+ * channel, not an operator-facing knob — the operator sets
+ * `server.mcp.http.enabled` / `server.mcp.http.auth` (or
+ * `KOZOU_MCP_HTTP_ENABLED`, which `loadConfig` honours) and this follows.
  *
- * Absent means yes, on purpose: every other way of running the Admin UI
- * (standalone `node build/index.js`, the E2E suite, an older `kozou dev`)
- * leaves it unset and keeps the pre-existing behaviour of offering the page.
- * A malformed value reads as yes too — the safe direction is never to hide the
- * page for an endpoint that is in fact serving.
+ * Absent reads as `local`: every other way of running the Admin UI (standalone
+ * `node build/index.js`, the E2E suite, an older `kozou dev`) leaves it unset,
+ * and that is the posture such a run is in — a UI started by hand next to the
+ * default dev stack. It also keeps the pre-existing behaviour of offering the
+ * page rather than hiding an endpoint that is in fact serving.
+ *
+ * An unrecognized value reads as `unknown`, which still offers the page — the
+ * URL and both config snippets are posture-independent — but says nothing about
+ * authentication. That is the honest reading: the only way to get here is a CLI
+ * that speaks a posture this build was written before, and guessing `local`
+ * would assert "no authentication" about an endpoint that may well have some.
  */
-export function isMcpLinkOffered(raw: string | undefined): boolean {
-  return raw?.trim().toLowerCase() !== 'off';
+export function resolveMcpPosture(raw: string | undefined): McpPosture {
+  const value = raw?.trim().toLowerCase();
+  if (value === undefined || value === '') return 'local';
+  if (value === 'off' || value === 'local' || value === 'oauth') return value;
+  return 'unknown';
+}
+
+/**
+ * What to tell the operator about authentication, per posture. Lives here
+ * rather than in the template so it is unit-testable (this package has no
+ * component-test harness) and so the page stays declarative.
+ */
+export function describeMcpAuth(posture: ServedMcpPosture): string {
+  switch (posture) {
+    case 'oauth':
+      return (
+        'This endpoint is an OAuth 2.1 protected resource (server.mcp.http.auth): ' +
+        'your client discovers the authorization server from the endpoint itself and ' +
+        'sends you to your identity provider to sign in the first time it connects. ' +
+        'The URL and the config above are the same either way.'
+      );
+    case 'local':
+      return (
+        'The MCP HTTP server has no authentication and binds to loopback by default, ' +
+        'so anything that can reach the port can read your schema.'
+      );
+    case 'unknown':
+      return (
+        'This Admin UI could not tell how the endpoint authenticates — it is likely ' +
+        'older than the Kozou CLI serving it. Check server.mcp.http.auth in your ' +
+        'config before you expose the port.'
+      );
+  }
 }
 
 export function buildMcpConnectionInfo(input: {
@@ -63,8 +118,10 @@ export function buildMcpConnectionInfo(input: {
   requestUrl: URL;
   /** Port the co-located MCP HTTP server listens on. */
   mcpPort: number;
+  /** How that endpoint authenticates; decides the wording, nothing else. */
+  posture: ServedMcpPosture;
 }): McpConnectionInfo {
-  const { requestUrl, mcpPort } = input;
+  const { requestUrl, mcpPort, posture } = input;
   const httpUrl = `${requestUrl.protocol}//${requestUrl.hostname}:${mcpPort}${MCP_HTTP_PATH}`;
   const claudeCodeCommand = `claude mcp add --transport http kozou ${httpUrl}`;
   const jsonConfig = JSON.stringify(
@@ -72,5 +129,8 @@ export function buildMcpConnectionInfo(input: {
     null,
     2,
   );
-  return { httpUrl, claudeCodeCommand, jsonConfig };
+  // Deliberately identical across postures: an MCP client discovers the
+  // authorization server from the endpoint's RFC 9728 protected-resource
+  // metadata, so an OAuth deployment registers exactly the same URL and JSON.
+  return { httpUrl, claudeCodeCommand, jsonConfig, authNote: describeMcpAuth(posture) };
 }

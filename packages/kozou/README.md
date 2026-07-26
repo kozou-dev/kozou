@@ -130,8 +130,13 @@ startup rather than guessed at.
 The Admin UI follows suit when `kozou dev` spawns it: its "Connect
 an AI agent" page and both links to it are gone, so nothing hands
 out connection instructions for an endpoint that is not listening.
+The same channel carries how a live endpoint authenticates, so the
+page describes the posture it is actually in — with
+`server.mcp.http.auth` set it says the endpoint is an OAuth 2.1
+protected resource instead of claiming there is no authentication
+(the URL and client config are the same either way).
 (A UI you start yourself with `node build/index.js` never reads the
-config; pass `KOZOU_UI_MCP_LINK=off` to it directly, or it keeps
+config; pass `KOZOU_UI_MCP_POSTURE=off` to it directly, or it keeps
 advertising the default endpoint.) `${VAR}` and
 `${VAR:-default}` are expanded from the process environment at load
 time — expansion cannot set this one, since it yields a string and

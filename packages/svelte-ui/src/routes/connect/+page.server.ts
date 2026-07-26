@@ -10,16 +10,21 @@ import type { PageServerLoad } from './$types';
 
 import {
   buildMcpConnectionInfo,
-  isMcpLinkOffered,
   resolveMcpHttpPort,
+  resolveMcpPosture,
 } from '$lib/connect/mcp-connection.js';
 
 export const load: PageServerLoad = ({ url }) => {
+  // `kozou dev` reports which posture the endpoint runs in; the page has to
+  // describe the one it is actually in, because "no authentication" is false of
+  // an OAuth-protected resource and it is the sentence an operator would use to
+  // decide whether the port is safe to expose.
+  const posture = resolveMcpPosture(process.env.KOZOU_UI_MCP_POSTURE);
   // Hiding the two links is not enough: this URL is reachable directly, from a
   // bookmark or a shared link. Serving the page with no endpoint behind it
   // would hand the operator copy-paste config for a listener that is not
   // running, which is a worse failure than the page being absent.
-  if (!isMcpLinkOffered(process.env.KOZOU_UI_MCP_LINK)) {
+  if (posture === 'off') {
     error(
       404,
       'The MCP HTTP endpoint is turned off for this runtime (server.mcp.http.enabled: false), so there is nothing to connect an agent to.',
@@ -31,6 +36,6 @@ export const load: PageServerLoad = ({ url }) => {
   // default; the page tells the operator to adjust it for a proxy/remote host.
   const mcpPort = resolveMcpHttpPort(process.env.KOZOU_MCP_HTTP_PORT);
   return {
-    connection: buildMcpConnectionInfo({ requestUrl: url, mcpPort }),
+    connection: buildMcpConnectionInfo({ requestUrl: url, mcpPort, posture }),
   };
 };
