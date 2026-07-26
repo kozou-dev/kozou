@@ -81,11 +81,47 @@ describe('buildAdminUiEnv', () => {
       ...config,
       server: {
         ...config.server,
-        mcp: { ...config.server.mcp, http: { port: 9999, host: '127.0.0.1' } },
+        mcp: {
+          ...config.server.mcp,
+          http: { enabled: true, port: 9999, host: '127.0.0.1' },
+        },
       },
     };
     const env = buildAdminUiEnv(custom, 'http://localhost:3333', {});
     expect(env.KOZOU_MCP_HTTP_PORT).toBe('9999');
+    // The endpoint is on, so nothing tells the UI to hide the connection page.
+    expect(env.KOZOU_MCP_HTTP_ENABLED).toBeUndefined();
+  });
+
+  it('tells the UI the MCP endpoint is off, and drops the port', async () => {
+    const config = await makeConfig();
+    const custom: KozouConfig = {
+      ...config,
+      server: {
+        ...config.server,
+        mcp: {
+          ...config.server.mcp,
+          http: { enabled: false, port: 3334, host: '127.0.0.1' },
+        },
+      },
+    };
+    const env = buildAdminUiEnv(custom, 'http://localhost:3333', {});
+    // Explicit, not by omission: the page falls back to the default port when
+    // none is passed, so an absent port alone would leave it advertising 3334
+    // with nothing listening.
+    expect(env.KOZOU_MCP_HTTP_ENABLED).toBe('false');
+    expect(env.KOZOU_MCP_HTTP_PORT).toBeUndefined();
+  });
+
+  it('clears a stray inherited KOZOU_MCP_HTTP_ENABLED when the endpoint is on', async () => {
+    const config = await makeConfig();
+    // A parent environment claiming the endpoint is off must not hide a
+    // connection page for an endpoint this runtime is in fact serving.
+    const env = buildAdminUiEnv(config, 'http://localhost:3333', {
+      KOZOU_MCP_HTTP_ENABLED: 'false',
+    });
+    expect(env.KOZOU_MCP_HTTP_ENABLED).toBeUndefined();
+    expect(env.KOZOU_MCP_HTTP_PORT).toBe('3334');
   });
 
   it('carries the configured adapter url and UI host/port', async () => {

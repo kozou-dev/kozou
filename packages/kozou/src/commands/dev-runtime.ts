@@ -84,12 +84,27 @@ export function buildAdminUiEnv(
       delete env[key];
     }
   }
-  // The MCP Streamable HTTP server (commands/dev.ts) always comes up alongside
-  // the UI. Pass its port so the Admin UI's "Connect an AI agent" page can show
-  // a copy-paste config pointing at the live endpoint — the host comes from the
-  // UI's request URL (ORIGIN-bound), never a secret. Authoritative from config
-  // so a stray inherited value can't misstate the port.
-  env.KOZOU_MCP_HTTP_PORT = String(config.server.mcp.http.port);
+  // The MCP Streamable HTTP server (commands/dev.ts) comes up alongside the UI
+  // unless server.mcp.http.enabled turns it off. When it runs, pass its port so
+  // the Admin UI's "Connect an AI agent" page can show a copy-paste config
+  // pointing at the live endpoint — the host comes from the UI's request URL
+  // (ORIGIN-bound), never a secret. Authoritative from config so a stray
+  // inherited value can't misstate the port.
+  //
+  // When it does not run, say so explicitly rather than by omission: the page
+  // falls back to the documented default port when none is passed (it supports
+  // being run standalone), so dropping the port alone would leave it
+  // advertising 3334 with nothing listening. Both variables are set
+  // authoritatively — the off-flag is deleted when the endpoint is on, so a
+  // stray inherited KOZOU_MCP_HTTP_ENABLED=false cannot hide the page for an
+  // endpoint that is in fact serving.
+  if (config.server.mcp.http.enabled) {
+    env.KOZOU_MCP_HTTP_PORT = String(config.server.mcp.http.port);
+    delete env.KOZOU_MCP_HTTP_ENABLED;
+  } else {
+    env.KOZOU_MCP_HTTP_ENABLED = 'false';
+    delete env.KOZOU_MCP_HTTP_PORT;
+  }
   // Privilege-aware introspection (issue #99): pass the resolved role through to
   // the UI child so its introspection reflects what that role may do (hide
   // unreadable tables, lock non-updatable columns). Set it authoritatively from
