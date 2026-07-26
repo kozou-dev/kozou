@@ -5,7 +5,8 @@
 //     (`node <svelte-ui>/build/index.js` — the adapter-node standalone
 //     server, the same entry the svelte-ui E2E suite exercises);
 //   - the MCP Streamable HTTP server, run in-process via @kozou/mcp's
-//     startHttpServer.
+//     startHttpServer, unless server.mcp.http.enabled is false (then the
+//     Admin UI and REST come up alone and no MCP listener exists).
 //
 // Both bind loopback (127.0.0.1) by default because the UI and MCP listeners
 // have no authentication of their own; a container opts into 0.0.0.0 via
@@ -22,7 +23,7 @@
 import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 
-import { SchemaCache, startHttpServer, isLoopbackHost } from '@kozou/mcp';
+import { SchemaCache, startHttpServer, isLoopbackHost, type HttpServerHandle } from '@kozou/mcp';
 
 import {
   loadConfig,
@@ -148,6 +149,43 @@ function warnIfPublic(label: string, host: string, exposure: AdminUiExposure): v
   );
 }
 
+// Build the schema cache and start the in-process MCP HTTP server.
+// startHttpServer already warns on a non-loopback bind, so we do not
+// double-warn for it. A configured server.mcp.http.auth block is honoured here
+// too — the config declaring OAuth and `kozou dev` serving the endpoint open
+// would be a silent posture downgrade.
+async function startDevMcp(config: KozouConfig, apiActive: boolean): Promise<HttpServerHandle> {
+  // Privilege-aware annotation (issue #99) for the in-process MCP server, using
+  // the same resolved role the Admin UI child runs as, so describe_table /
+  // describe_view tell an agent what that role may touch. Off => schema-wide.
+  const privilegeRole = resolveDevPrivilegeRole(config, { apiActive, env: process.env });
+
+  const cache = new SchemaCache({
+    connection: config.database.url,
+    schemas: config.database.schemas,
+    ttlMs: config.cache.ttlMs,
+    // Same RPC exposure config as the API, so describe_functions advertises
+    // the same exposed set the /rpc/ surface serves (issue #103).
+    rpc: config.api.rpc,
+    ...(privilegeRole === undefined ? {} : { privilegeRole }),
+  });
+  if (privilegeRole !== undefined) {
+    process.stderr.write(
+      `${PREFIX} mcp privilege-aware context ON: describe tools annotate what role ` +
+        `"${privilegeRole}" may touch (advisory; enforcement stays in PostgreSQL)\n`,
+    );
+  }
+
+  const auth = resolveMcpAuthOptions(config);
+  return startHttpServer(cache, {
+    port: config.server.mcp.http.port,
+    host: config.server.mcp.http.host,
+    logPrefix: `${PREFIX} mcp`,
+    provenance: config.server.mcp.provenance,
+    ...(auth === undefined ? {} : { auth }),
+  });
+}
+
 export async function devCommand(opts: DevOptions = {}): Promise<void> {
   if (opts.adapter !== undefined && !(ADAPTER_KINDS as readonly string[]).includes(opts.adapter)) {
     throw new Error(
@@ -199,43 +237,17 @@ export async function devCommand(opts: DevOptions = {}): Promise<void> {
   }
   const apiToken = tokenResult?.token;
 
-  // Privilege-aware annotation (issue #99) for the in-process MCP server, using
-  // the same resolved role the Admin UI child runs as, so describe_table /
-  // describe_view tell an agent what that role may touch. Off => schema-wide.
-  const mcpPrivilegeRole = resolveDevPrivilegeRole(config, {
-    apiActive: api?.url !== undefined,
-    env: process.env,
-  });
-
-  const cache = new SchemaCache({
-    connection: config.database.url,
-    schemas: config.database.schemas,
-    ttlMs: config.cache.ttlMs,
-    // Same RPC exposure config as the API, so describe_functions advertises
-    // the same exposed set the /rpc/ surface serves (issue #103).
-    rpc: config.api.rpc,
-    ...(mcpPrivilegeRole === undefined ? {} : { privilegeRole: mcpPrivilegeRole }),
-  });
-  if (mcpPrivilegeRole !== undefined) {
+  // 1. MCP HTTP, in-process — unless the config opts out. With
+  //    server.mcp.http.enabled false no listener is started and no schema
+  //    cache is built (the cache exists only to serve MCP here), so the
+  //    endpoint is absent rather than merely bound somewhere unreachable.
+  //    The Admin UI and REST below are unaffected.
+  const mcp = config.server.mcp.http.enabled ? await startDevMcp(config, api?.url !== undefined) : null;
+  if (mcp === null) {
     process.stderr.write(
-      `${PREFIX} mcp privilege-aware context ON: describe tools annotate what role ` +
-        `"${mcpPrivilegeRole}" may touch (advisory; enforcement stays in PostgreSQL)\n`,
+      `${PREFIX} mcp HTTP endpoint disabled (server.mcp.http.enabled: false); Admin UI only\n`,
     );
   }
-
-  // 1. MCP HTTP, in-process. startHttpServer already warns on a
-  //    non-loopback bind, so we do not double-warn for it. A configured
-  //    server.mcp.http.auth block is honoured here too — the config
-  //    declaring OAuth and `kozou dev` serving the endpoint open would be a
-  //    silent posture downgrade.
-  const mcpAuth = resolveMcpAuthOptions(config);
-  const mcp = await startHttpServer(cache, {
-    port: config.server.mcp.http.port,
-    host: config.server.mcp.http.host,
-    logPrefix: `${PREFIX} mcp`,
-    provenance: config.server.mcp.provenance,
-    ...(mcpAuth === undefined ? {} : { auth: mcpAuth }),
-  });
 
   // 2. Admin UI, as a child process.
   warnIfPublic(
@@ -259,7 +271,7 @@ export async function devCommand(opts: DevOptions = {}): Promise<void> {
   // 3. Lifecycle: tear everything down together. Resolve the promise (and
   //    thus let the CLI exit) only once everything has stopped.
   const closeBackends = (): Promise<unknown> =>
-    Promise.allSettled([mcp.close(), api ? api.close() : Promise.resolve()]);
+    Promise.allSettled([mcp ? mcp.close() : Promise.resolve(), api ? api.close() : Promise.resolve()]);
 
   await new Promise<void>((resolve) => {
     let shuttingDown = false;

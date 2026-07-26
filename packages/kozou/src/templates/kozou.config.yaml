@@ -20,6 +20,12 @@ server:
     host: 127.0.0.1
   mcp:
     http:
+      # Serve the MCP Streamable HTTP endpoint at all. Set false to run the
+      # runtime as Admin UI + REST only: `kozou dev` then starts no MCP
+      # listener and `kozou mcp --http` refuses. Without an `auth` block the
+      # endpoint has no authentication of its own, so if you never point an
+      # agent at it, not running it beats keeping it on loopback.
+      enabled: true
       port: 3334
       host: 127.0.0.1
     stdio: false

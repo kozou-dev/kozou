@@ -34,6 +34,7 @@ describe('loadConfig', () => {
     expect(config.server.ui.port).toBe(3333);
     // No-auth surfaces bind loopback by default (a container opts into 0.0.0.0).
     expect(config.server.ui.host).toBe('127.0.0.1');
+    expect(config.server.mcp.http.enabled).toBe(true);
     expect(config.server.mcp.http.port).toBe(3334);
     expect(config.server.mcp.http.host).toBe('127.0.0.1');
     expect(config.server.mcp.stdio).toBe(false);
@@ -89,6 +90,45 @@ server:
     expect(config.server.mcp.execution.role).toBe('kozou_mcp_agent');
     expect(config.server.mcp.execution.claims).toEqual({ tenant_id: 'acme' });
     expect(config.server.mcp.execution.allow).toEqual(['public.approve_order']);
+  });
+
+  it('parses server.mcp.http.enabled false (endpoint opted out)', async () => {
+    const dir = await makeTempDir();
+    const file = await writeYaml(
+      dir,
+      `database:
+  url: postgres://u:p@host:5432/db
+server:
+  mcp:
+    http:
+      enabled: false
+`,
+    );
+    const config = await loadConfig({ path: file, env: {} });
+    expect(config.server.mcp.http.enabled).toBe(false);
+    // stdio is a separate transport and stays at its own default.
+    expect(config.server.mcp.stdio).toBe(false);
+  });
+
+  it('rejects server.mcp.http.auth under a disabled endpoint (dead config)', async () => {
+    const dir = await makeTempDir();
+    const file = await writeYaml(
+      dir,
+      `database:
+  url: postgres://u:p@host:5432/db
+server:
+  mcp:
+    http:
+      enabled: false
+      auth:
+        resource: https://example.test/mcp
+        authorizationServers:
+          - https://idp.example.test
+        jwt:
+          jwksUri: https://idp.example.test/jwks
+`,
+    );
+    await expect(loadConfig({ path: file, env: {} })).rejects.toBeInstanceOf(KozouConfigError);
   });
 
   it('rejects server.mcp.execution.enabled without a role', async () => {
