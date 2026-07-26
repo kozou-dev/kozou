@@ -10,7 +10,7 @@ import type { PageServerLoad } from './$types';
 
 import {
   buildMcpConnectionInfo,
-  isMcpHttpEnabled,
+  isMcpLinkOffered,
   resolveMcpHttpPort,
 } from '$lib/connect/mcp-connection.js';
 
@@ -19,7 +19,7 @@ export const load: PageServerLoad = ({ url }) => {
   // bookmark or a shared link. Serving the page with no endpoint behind it
   // would hand the operator copy-paste config for a listener that is not
   // running, which is a worse failure than the page being absent.
-  if (!isMcpHttpEnabled(process.env.KOZOU_MCP_HTTP_ENABLED)) {
+  if (!isMcpLinkOffered(process.env.KOZOU_UI_MCP_LINK)) {
     error(
       404,
       'The MCP HTTP endpoint is turned off for this runtime (server.mcp.http.enabled: false), so there is nothing to connect an agent to.',

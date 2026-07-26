@@ -40,18 +40,22 @@ export function resolveMcpHttpPort(raw: string | undefined): number {
 }
 
 /**
- * Whether an MCP HTTP endpoint exists to connect to, from
- * `KOZOU_MCP_HTTP_ENABLED`.
+ * Whether to offer the connection page at all, from `KOZOU_UI_MCP_LINK`.
  *
- * Absent means yes, on purpose. `kozou dev` sets this to `'false'` only when
- * `server.mcp.http.enabled` turns the endpoint off; every other way of running
- * the Admin UI (standalone `node build/index.js`, the E2E suite, an older
- * `kozou dev`) leaves it unset and keeps the pre-existing behaviour of offering
- * the connection page. Only the explicit opt-out hides it, so this stays
- * additive.
+ * `kozou dev` sets this to `'off'` when `server.mcp.http.enabled` turns the MCP
+ * endpoint off, so the UI stops advertising an endpoint that is not listening.
+ * It is a CLI-to-UI channel, not an operator-facing config knob — the operator
+ * sets `server.mcp.http.enabled` (or `KOZOU_MCP_HTTP_ENABLED`, which
+ * `loadConfig` honours) and this follows from it.
+ *
+ * Absent means yes, on purpose: every other way of running the Admin UI
+ * (standalone `node build/index.js`, the E2E suite, an older `kozou dev`)
+ * leaves it unset and keeps the pre-existing behaviour of offering the page.
+ * A malformed value reads as yes too — the safe direction is never to hide the
+ * page for an endpoint that is in fact serving.
  */
-export function isMcpHttpEnabled(raw: string | undefined): boolean {
-  return raw?.trim().toLowerCase() !== 'false';
+export function isMcpLinkOffered(raw: string | undefined): boolean {
+  return raw?.trim().toLowerCase() !== 'off';
 }
 
 export function buildMcpConnectionInfo(input: {

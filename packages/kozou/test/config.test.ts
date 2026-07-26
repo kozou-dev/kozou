@@ -223,6 +223,78 @@ cache:
     expect(config.server.mcp.http.host).toBe('0.0.0.0');
   });
 
+  it('KOZOU_MCP_HTTP_ENABLED turns the endpoint off with no file present', async () => {
+    // The scaffolded compose stack mounts no config file, so this env route is
+    // the only way to opt out in the deployment that actually publishes the
+    // endpoint. `${VAR}` expansion cannot serve here either: it would yield the
+    // string "false", which the boolean field rightly refuses.
+    const config = await loadConfig({
+      skipFile: true,
+      env: {
+        DATABASE_URL: 'postgres://u:p@localhost:5432/x',
+        KOZOU_MCP_HTTP_ENABLED: 'false',
+      },
+    });
+    expect(config.server.mcp.http.enabled).toBe(false);
+  });
+
+  it('KOZOU_MCP_HTTP_ENABLED can also re-enable an endpoint a file opted out of', async () => {
+    const dir = await makeTempDir();
+    const file = await writeYaml(
+      dir,
+      `database:
+  url: postgres://u:p@host:5432/db
+server:
+  mcp:
+    http:
+      enabled: false
+`,
+    );
+    const config = await loadConfig({ path: file, env: { KOZOU_MCP_HTTP_ENABLED: 'true' } });
+    expect(config.server.mcp.http.enabled).toBe(true);
+  });
+
+  it('applies the MCP host and enabled overrides together', async () => {
+    const config = await loadConfig({
+      skipFile: true,
+      env: {
+        DATABASE_URL: 'postgres://u:p@localhost:5432/x',
+        KOZOU_MCP_HTTP_HOST: '0.0.0.0',
+        KOZOU_MCP_HTTP_ENABLED: 'false',
+      },
+    });
+    expect(config.server.mcp.http.host).toBe('0.0.0.0');
+    expect(config.server.mcp.http.enabled).toBe(false);
+  });
+
+  it('an empty KOZOU_MCP_HTTP_ENABLED leaves the config value in place', async () => {
+    const config = await loadConfig({
+      skipFile: true,
+      env: {
+        DATABASE_URL: 'postgres://u:p@localhost:5432/x',
+        KOZOU_MCP_HTTP_ENABLED: '',
+      },
+    });
+    expect(config.server.mcp.http.enabled).toBe(true);
+  });
+
+  it('rejects a KOZOU_MCP_HTTP_ENABLED value it cannot read', async () => {
+    // Reading `0` / `off` / `no` as "on" would keep an unauthenticated listener
+    // up while the operator believes they turned it off — the silent posture
+    // change this control exists to prevent.
+    for (const raw of ['0', '1', 'off', 'no', 'yes', 'disabled']) {
+      await expect(
+        loadConfig({
+          skipFile: true,
+          env: {
+            DATABASE_URL: 'postgres://u:p@localhost:5432/x',
+            KOZOU_MCP_HTTP_ENABLED: raw,
+          },
+        }),
+      ).rejects.toBeInstanceOf(KozouConfigError);
+    }
+  });
+
   it('expands ${VAR} placeholders from env', async () => {
     const dir = await makeTempDir();
     const file = await writeYaml(

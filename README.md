@@ -141,6 +141,15 @@ stricter than REST: no anonymous access, no default role. See the deployment gui
 [Keycloak](https://kozou.org/guides/mcp-oauth-keycloak/) and
 [Auth0](https://kozou.org/guides/mcp-oauth-auth0/) recipes.
 
+If no agent will ever connect, you can also **not serve the endpoint at all**:
+`server.mcp.http.enabled: false` — or `KOZOU_MCP_HTTP_ENABLED=false`, which the
+scaffolded compose stack forwards, since that stack has no config file to edit.
+`kozou dev` then brings up the Admin UI and REST alone with no MCP listener,
+`kozou mcp --http` refuses rather than contradicting the config, and the Admin
+UI drops its "Connect an AI agent" page. Adding authentication needs an
+authorization server; declining to run an endpoint needs nothing, so for a
+runtime that only ever serves the Admin UI this is the cheaper posture.
+
 ## Requirements
 
 Runtime requirements for v1.16.0:

@@ -52,6 +52,13 @@ services:
       # They default to loopback when run outside a container.
       KOZOU_UI_HOST: 0.0.0.0
       KOZOU_MCP_HTTP_HOST: 0.0.0.0
+      # Whether to serve the MCP HTTP endpoint at all (empty = unset = on).
+      # This stack ships no kozou.config.yaml, so this is how you opt out here:
+      # set KOZOU_MCP_HTTP_ENABLED=false in .env to run Admin UI + REST only —
+      # no MCP listener, and the Admin UI drops its "Connect an AI agent" page.
+      # The port published below has no authentication of its own unless you
+      # configure server.mcp.http.auth.
+      KOZOU_MCP_HTTP_ENABLED: ${KOZOU_MCP_HTTP_ENABLED:-}
       # JWT auth (see .env.example). Compose reads .env for ${VAR}
       # interpolation only, so every variable must be forwarded here
       # explicitly to reach the container. An empty value means unset:

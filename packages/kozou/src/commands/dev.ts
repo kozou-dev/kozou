@@ -245,7 +245,8 @@ export async function devCommand(opts: DevOptions = {}): Promise<void> {
   const mcp = config.server.mcp.http.enabled ? await startDevMcp(config, api?.url !== undefined) : null;
   if (mcp === null) {
     process.stderr.write(
-      `${PREFIX} mcp HTTP endpoint disabled (server.mcp.http.enabled: false); Admin UI only\n`,
+      `${PREFIX} mcp HTTP endpoint disabled (server.mcp.http.enabled: false); ` +
+        `serving the Admin UI and REST only\n`,
     );
   }
 
