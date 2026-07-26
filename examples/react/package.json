@@ -15,7 +15,7 @@
     "@kozou/core": "workspace:*",
     "@kozou/introspect": "workspace:*",
     "@kozou/ui-core": "workspace:*",
-    "next": "^16.2.9",
+    "next": "^16.2.11",
     "pg": "^8.13.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0"
