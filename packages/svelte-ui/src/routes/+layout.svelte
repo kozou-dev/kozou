@@ -1,7 +1,9 @@
 <script lang="ts">
   import '../app.css';
 
-  let { data, children } = $props();
+  import type { LayoutProps } from './$types';
+
+  let { data, children }: LayoutProps = $props();
 </script>
 
 <div class="min-h-screen bg-background text-foreground">
