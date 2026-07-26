@@ -147,7 +147,7 @@ server:
   it('--http against a disabled endpoint throws and starts no listener', async () => {
     const file = await writeConfig(DISABLED);
     await expect(mcpCommand({ http: true, config: file })).rejects.toThrow(
-      /server\.mcp\.http\.enabled is false/,
+      /server\.mcp\.http\.enabled in the config, or KOZOU_MCP_HTTP_ENABLED/,
     );
     expect(startHttpServer).not.toHaveBeenCalled();
   });
@@ -155,7 +155,7 @@ server:
   it('a CLI --port does not re-enable a disabled endpoint', async () => {
     const file = await writeConfig(DISABLED);
     await expect(mcpCommand({ http: true, port: 9999, config: file })).rejects.toThrow(
-      /server\.mcp\.http\.enabled is false/,
+      /server\.mcp\.http\.enabled in the config, or KOZOU_MCP_HTTP_ENABLED/,
     );
     expect(startHttpServer).not.toHaveBeenCalled();
   });

@@ -1,8 +1,10 @@
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
 import { loadConfig, type KozouConfig } from '../src/config.js';
 import {
+  UI_MCP_LINK_ENV,
+  UI_MCP_LINK_OFF,
   buildAdminUiEnv,
   classifyAdminUiExposure,
   describeApiAuth,
@@ -243,6 +245,38 @@ describe('buildAdminUiEnv', () => {
     });
     expect(env.KOZOU_RPC_ALLOW_DEFINER).toBeUndefined();
     expect(env.KOZOU_RPC_ALLOW_PUBLIC_EXECUTE).toBeUndefined();
+  });
+});
+
+describe('the Admin UI link channel is a cross-package contract', () => {
+  // buildAdminUiEnv writes UI_MCP_LINK_ENV; the Admin UI reads that name in two
+  // server loads, in another package, and compares against UI_MCP_LINK_OFF.
+  // Nothing else connects the two — no shared type, and no test crosses the
+  // boundary — so a rename on one side alone would leave every unit test,
+  // typecheck and lint green while the connection page silently disappeared or
+  // came back. These assertions are what turn that into a failing test.
+  const READERS = [
+    '../../svelte-ui/src/routes/+layout.server.ts',
+    '../../svelte-ui/src/routes/connect/+page.server.ts',
+  ];
+
+  it('is the exact env name both Admin UI server loads read', () => {
+    // Anchored with a negative lookahead, not `toContain`: a substring check
+    // passes against a *longer* name (KOZOU_UI_MCP_LINK_RENAMED contains
+    // KOZOU_UI_MCP_LINK), which is exactly the rename this test exists to catch.
+    const reference = new RegExp(`process\\.env\\.${UI_MCP_LINK_ENV}(?![A-Za-z0-9_])`);
+    for (const rel of READERS) {
+      const src = readFileSync(new URL(rel, import.meta.url), 'utf8');
+      expect(src).toMatch(reference);
+    }
+  });
+
+  it('is the exact off value the Admin UI helper compares against', () => {
+    const helper = readFileSync(
+      new URL('../../svelte-ui/src/lib/connect/mcp-connection.ts', import.meta.url),
+      'utf8',
+    );
+    expect(helper).toContain(`!== '${UI_MCP_LINK_OFF}'`);
   });
 });
 

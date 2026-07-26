@@ -77,6 +77,18 @@ Required environment variables (Node 20+, pnpm 9+):
 - `KOZOU_ADAPTER_URL` — base URL of the backend the `DataAdapter`
   talks to (default `http://localhost:3000`).
 
+Optional, both concerning the "Connect an AI agent" page:
+
+- `KOZOU_MCP_HTTP_PORT` — port the co-located MCP Streamable HTTP
+  server listens on, used to build the copy-paste client config
+  (default `3334`). `kozou dev` sets this from its own config.
+- `KOZOU_UI_MCP_LINK` — set to `off` to drop the connection page and
+  both links to it (the header link and the dashboard card). `kozou
+  dev` sets it when `server.mcp.http.enabled` is false, so the UI
+  stops advertising an endpoint that is not listening; set it yourself
+  when you run this server standalone next to no MCP endpoint. Any
+  other value, or none, offers the page.
+
 ```bash
 # from the monorepo root
 pnpm install

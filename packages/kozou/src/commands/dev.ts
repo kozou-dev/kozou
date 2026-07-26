@@ -244,9 +244,15 @@ export async function devCommand(opts: DevOptions = {}): Promise<void> {
   //    The Admin UI and REST below are unaffected.
   const mcp = config.server.mcp.http.enabled ? await startDevMcp(config, api?.url !== undefined) : null;
   if (mcp === null) {
+    // Name what is still up, not a fixed list: on the external-REST opt-out
+    // kozou serves no REST of its own, so claiming it would be exactly as
+    // wrong as "Admin UI only" is on the default path. Name both config routes
+    // too — the value may have come from the environment, and pointing at a
+    // YAML key the operator never wrote is the confusion this control exists
+    // to avoid.
     process.stderr.write(
-      `${PREFIX} mcp HTTP endpoint disabled (server.mcp.http.enabled: false); ` +
-        `serving the Admin UI and REST only\n`,
+      `${PREFIX} mcp HTTP endpoint disabled (server.mcp.http.enabled / ` +
+        `KOZOU_MCP_HTTP_ENABLED); serving the Admin UI${api ? ' and REST' : ''} only\n`,
     );
   }
 

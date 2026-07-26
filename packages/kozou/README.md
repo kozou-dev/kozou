@@ -118,18 +118,21 @@ The full schema also accepts `server.ui.{port,host}`,
 `server.mcp.http.{enabled,port,host}`, `server.mcp.stdio`, and
 `cache.ttlMs` overrides; defaults match the template that
 `create-kozou` writes. `server.mcp.http.enabled: false` turns the
-MCP HTTP endpoint off entirely — `kozou dev` then serves the Admin
-UI and REST alone and starts no MCP listener, and `kozou mcp --http`
-refuses rather than contradicting the config (stdio is unaffected).
+MCP HTTP endpoint off entirely — `kozou dev` then starts no MCP
+listener and serves only the Admin UI and whichever data backend you
+configured, and `kozou mcp --http` refuses rather than contradicting
+the config (stdio is unaffected).
 It can also be set as `KOZOU_MCP_HTTP_ENABLED` in the environment,
 which is how the scaffolded compose stack reaches it — that stack
-mounts no config file. The value must be exactly `true` or `false`;
-anything else is refused at startup rather than guessed at.
+mounts no config file. The value must read as `true` or `false` (case and
+surrounding whitespace are ignored); anything else is refused at
+startup rather than guessed at.
 The Admin UI follows suit when `kozou dev` spawns it: its "Connect
 an AI agent" page and both links to it are gone, so nothing hands
 out connection instructions for an endpoint that is not listening.
 (A UI you start yourself with `node build/index.js` never reads the
-config, and still advertises the default endpoint.) `${VAR}` and
+config; pass `KOZOU_UI_MCP_LINK=off` to it directly, or it keeps
+advertising the default endpoint.) `${VAR}` and
 `${VAR:-default}` are expanded from the process environment at load
 time — expansion cannot set this one, since it yields a string and
 the field is a boolean.
