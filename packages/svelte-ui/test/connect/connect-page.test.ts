@@ -9,7 +9,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { load as layoutLoad } from '../../src/routes/+layout.server.js';
 import { load as connectLoad } from '../../src/routes/connect/+page.server.js';
 
-const ENV_KEY = 'KOZOU_MCP_HTTP_ENABLED';
+const ENV_KEY = 'KOZOU_UI_MCP_LINK';
 
 let saved: string | undefined;
 
@@ -35,7 +35,7 @@ describe('+layout.server.ts mcpEnabled', () => {
   });
 
   it('is false when kozou dev reports the endpoint off', () => {
-    process.env[ENV_KEY] = 'false';
+    process.env[ENV_KEY] = 'off';
     const data = layoutLoad(layoutEvent()) as { mcpEnabled: boolean };
     // Both entry points to /connect read this one value, so a single false
     // hides the header link and the dashboard card together.
@@ -50,7 +50,7 @@ describe('connect page load', () => {
   });
 
   it('404s when the MCP HTTP endpoint is turned off', () => {
-    process.env[ENV_KEY] = 'false';
+    process.env[ENV_KEY] = 'off';
     // Hiding the two links is not enough: this URL is reachable directly, from
     // a bookmark or a shared link. Handing over copy-paste config for a
     // listener that is not running is a worse failure than the page's absence.

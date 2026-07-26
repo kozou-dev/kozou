@@ -47,6 +47,11 @@ services:
       # the container so the loopback-published host ports below can reach them.
       KOZOU_UI_HOST: 0.0.0.0
       KOZOU_MCP_HTTP_HOST: 0.0.0.0
+      # Whether to serve the MCP HTTP endpoint at all (empty = unset = on).
+      # There is no kozou.config.yaml in this stack, so this is the way to opt
+      # out: KOZOU_MCP_HTTP_ENABLED=false runs Admin UI + REST only, with no
+      # MCP listener and no "Connect an AI agent" page in the Admin UI.
+      KOZOU_MCP_HTTP_ENABLED: ${KOZOU_MCP_HTTP_ENABLED:-}
     depends_on:
       postgres:
         condition: service_healthy

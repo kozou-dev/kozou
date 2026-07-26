@@ -541,15 +541,59 @@ function injectDatabaseUrlFromEnv(raw: unknown, env: NodeJS.ProcessEnv): unknown
   return obj;
 }
 
-// Bind-host overrides from the environment for the no-auth dev surfaces. They
-// default to loopback (see uiServerSchema / mcpHttpServerSchema); a container
-// sets KOZOU_UI_HOST / KOZOU_MCP_HTTP_HOST to 0.0.0.0 so a (loopback-published)
-// port mapping can reach them. Honoured even when there is no config file —
-// `${VAR}` expansion only reaches values written in the YAML.
-function injectServerHostsFromEnv(raw: unknown, env: NodeJS.ProcessEnv): unknown {
+// Read a boolean posture flag from the environment. Unset or empty means "no
+// override", the same shape as the host overrides below.
+//
+// An unreadable value is refused rather than defaulted. A flag that silently
+// read as "on" because it was spelled `0` or `off` would keep an
+// unauthenticated listener up while the operator believes they turned it off —
+// the exact silent posture change these controls exist to prevent, and the
+// reason `kozou mcp --http` errors instead of no-oping against a disabled
+// endpoint.
+function parseBooleanEnv(
+  name: string,
+  raw: string | undefined,
+  filePath: string | null,
+): boolean | undefined {
+  if (raw === undefined || raw.trim() === '') return undefined;
+  const value = raw.trim().toLowerCase();
+  if (value === 'true') return true;
+  if (value === 'false') return false;
+  throw new KozouConfigError(`Invalid ${name}: expected "true" or "false", got "${raw}"`, filePath, [
+    {
+      path: name,
+      message: 'must be "true" or "false" (unset it to leave the config value in place)',
+    },
+  ]);
+}
+
+// Server-level overrides from the environment for the no-auth dev surfaces.
+//
+// Bind hosts default to loopback (see uiServerSchema / mcpHttpServerSchema); a
+// container sets KOZOU_UI_HOST / KOZOU_MCP_HTTP_HOST to 0.0.0.0 so a
+// (loopback-published) port mapping can reach them. KOZOU_MCP_HTTP_ENABLED
+// turns the MCP HTTP endpoint off through the same route, and it needs one:
+// the scaffolded compose stack ships no config file to edit, so without an env
+// override the only control over whether an unauthenticated listener exists at
+// all would be unreachable in the very deployment that publishes it.
+//
+// All are honoured even when there is no config file — `${VAR}` expansion only
+// reaches values written in the YAML. For the boolean, expansion could not work
+// even then: it yields the string "false", which the schema rightly refuses for
+// a boolean field.
+function injectServerOverridesFromEnv(
+  raw: unknown,
+  env: NodeJS.ProcessEnv,
+  filePath: string | null,
+): unknown {
   const uiHost = env.KOZOU_UI_HOST;
   const mcpHost = env.KOZOU_MCP_HTTP_HOST;
-  if (!uiHost && !mcpHost) return raw;
+  const mcpEnabled = parseBooleanEnv(
+    'KOZOU_MCP_HTTP_ENABLED',
+    env.KOZOU_MCP_HTTP_ENABLED,
+    filePath,
+  );
+  if (!uiHost && !mcpHost && mcpEnabled === undefined) return raw;
   const asObj = (v: unknown): Record<string, unknown> =>
     v !== null && typeof v === 'object' ? { ...(v as Record<string, unknown>) } : {};
 
@@ -560,10 +604,11 @@ function injectServerHostsFromEnv(raw: unknown, env: NodeJS.ProcessEnv): unknown
     ui.host = uiHost;
     server.ui = ui;
   }
-  if (mcpHost) {
+  if (mcpHost || mcpEnabled !== undefined) {
     const mcp = asObj(server.mcp);
     const http = asObj(mcp.http);
-    http.host = mcpHost;
+    if (mcpHost) http.host = mcpHost;
+    if (mcpEnabled !== undefined) http.enabled = mcpEnabled;
     mcp.http = http;
     server.mcp = mcp;
   }
@@ -678,12 +723,13 @@ export async function loadConfig(opts: LoadConfigOptions = {}): Promise<KozouCon
   const expanded = expandEnvVars(withDbDefault, env);
   // Build `auth` from KOZOU_JWT_* env after expansion (env secrets verbatim).
   const withAuth = injectAuthFromEnv(expanded, env);
-  // Apply KOZOU_UI_HOST / KOZOU_MCP_HTTP_HOST overrides (e.g. a container that
-  // needs to bind 0.0.0.0), even with no config file.
-  const withHosts = injectServerHostsFromEnv(withAuth, env);
+  // Apply KOZOU_UI_HOST / KOZOU_MCP_HTTP_HOST / KOZOU_MCP_HTTP_ENABLED
+  // overrides (e.g. a container that needs to bind 0.0.0.0, or one that serves
+  // no MCP endpoint), even with no config file.
+  const withOverrides = injectServerOverridesFromEnv(withAuth, env, fileLoaded);
 
   try {
-    return configSchema.parse(withHosts);
+    return configSchema.parse(withOverrides);
   } catch (err) {
     if (err instanceof z.ZodError) {
       throw new KozouConfigError(

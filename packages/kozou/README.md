@@ -121,11 +121,18 @@ The full schema also accepts `server.ui.{port,host}`,
 MCP HTTP endpoint off entirely — `kozou dev` then serves the Admin
 UI and REST alone and starts no MCP listener, and `kozou mcp --http`
 refuses rather than contradicting the config (stdio is unaffected).
-The Admin UI follows suit: its "Connect an AI agent" page and both
-links to it are gone, so nothing hands out connection instructions
-for an endpoint that is not listening. `${VAR}` and
+It can also be set as `KOZOU_MCP_HTTP_ENABLED` in the environment,
+which is how the scaffolded compose stack reaches it — that stack
+mounts no config file. The value must be exactly `true` or `false`;
+anything else is refused at startup rather than guessed at.
+The Admin UI follows suit when `kozou dev` spawns it: its "Connect
+an AI agent" page and both links to it are gone, so nothing hands
+out connection instructions for an endpoint that is not listening.
+(A UI you start yourself with `node build/index.js` never reads the
+config, and still advertises the default endpoint.) `${VAR}` and
 `${VAR:-default}` are expanded from the process environment at load
-time.
+time — expansion cannot set this one, since it yields a string and
+the field is a boolean.
 
 ### Choosing a backend
 

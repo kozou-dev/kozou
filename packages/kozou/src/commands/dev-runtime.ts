@@ -94,15 +94,23 @@ export function buildAdminUiEnv(
   // When it does not run, say so explicitly rather than by omission: the page
   // falls back to the documented default port when none is passed (it supports
   // being run standalone), so dropping the port alone would leave it
-  // advertising 3334 with nothing listening. Both variables are set
-  // authoritatively — the off-flag is deleted when the endpoint is on, so a
-  // stray inherited KOZOU_MCP_HTTP_ENABLED=false cannot hide the page for an
-  // endpoint that is in fact serving.
+  // advertising 3334 with nothing listening.
+  //
+  // KOZOU_UI_MCP_LINK, deliberately not KOZOU_MCP_HTTP_ENABLED: this is a
+  // CLI-to-UI-child channel, not a config override. The KOZOU_MCP_HTTP_*
+  // namespace belongs to the operator — loadConfig honours those — and a name
+  // sitting in it that the config loader ignored would fail silently for anyone
+  // who set it in a compose file, which is the failure mode this feature exists
+  // to remove.
+  //
+  // Both are set authoritatively: the off-flag is deleted when the endpoint is
+  // on, so a stray inherited value cannot hide the page for an endpoint that is
+  // in fact serving.
   if (config.server.mcp.http.enabled) {
     env.KOZOU_MCP_HTTP_PORT = String(config.server.mcp.http.port);
-    delete env.KOZOU_MCP_HTTP_ENABLED;
+    delete env.KOZOU_UI_MCP_LINK;
   } else {
-    env.KOZOU_MCP_HTTP_ENABLED = 'false';
+    env.KOZOU_UI_MCP_LINK = 'off';
     delete env.KOZOU_MCP_HTTP_PORT;
   }
   // Privilege-aware introspection (issue #99): pass the resolved role through to

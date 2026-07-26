@@ -4,7 +4,7 @@
 
 import type { LayoutServerLoad } from './$types';
 
-import { isMcpHttpEnabled } from '$lib/connect/mcp-connection.js';
+import { isMcpLinkOffered } from '$lib/connect/mcp-connection.js';
 
 export const load: LayoutServerLoad = ({ locals }) => {
   return {
@@ -16,6 +16,6 @@ export const load: LayoutServerLoad = ({ locals }) => {
     // link and the dashboard card) need it — offering either one while
     // `kozou dev` runs with server.mcp.http.enabled false would send the
     // operator to a page describing an endpoint that is not listening.
-    mcpEnabled: isMcpHttpEnabled(process.env.KOZOU_MCP_HTTP_ENABLED),
+    mcpEnabled: isMcpLinkOffered(process.env.KOZOU_UI_MCP_LINK),
   };
 };
