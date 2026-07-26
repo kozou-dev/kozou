@@ -46,6 +46,7 @@ function makeRawIntrospection(): RawIntrospection {
         foreignKeys: [],
         checks: [],
         indexes: [],
+        rowCountEstimate: null,
       },
     ],
     views: [],

@@ -34,7 +34,7 @@
     "provenance": true
   },
   "scripts": {
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc -p tsconfig.test.json",
     "build": "tsc && node scripts/copy-templates.mjs",
     "prepublishOnly": "pnpm run build",
     "test": "vitest run --coverage",

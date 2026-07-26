@@ -187,6 +187,7 @@ describe('resolveMcpAnnotationRole — OAuth mode (per-token acting role)', () =
               authorizationServers: ['https://as.example.com'],
               scopes: { describe: 'mcp:describe', execute: 'mcp:execute', admin: 'mcp:admin' },
               adminRefresh: false,
+              allowInsecureHttp: false,
             },
           },
         },
