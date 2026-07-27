@@ -19,8 +19,8 @@
     rel="noreferrer">MCP</a
   >. It can then read what your tables, views, and columns
   <em>mean</em> — the descriptions you wrote in <code class="font-mono">COMMENT</code>
-  — through seven <strong>read-only</strong> tools. There is no data access and
-  no write path on this surface.
+  — through <strong>read-only</strong> tools. There is no data access and no
+  write path on this surface.
 </p>
 
 <section class="mb-8 max-w-3xl">

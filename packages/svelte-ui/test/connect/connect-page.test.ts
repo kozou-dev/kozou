@@ -12,6 +12,23 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { load as layoutLoad } from '../../src/routes/+layout.server.js';
 import { load as connectLoad } from '../../src/routes/connect/+page.server.js';
+import { describeMcpAuth } from '../../src/lib/connect/mcp-connection.js';
+
+/** Every posture whose wording reaches the page (`off` renders no page). */
+const POSTURES = ['local', 'oauth', 'unknown'] as const;
+
+/** A quantity next to the word "tool". Matched in both directions: the
+ *  original defect put the number first ("seven read-only tools"), but
+ *  "tools, eight of them" is the same claim and the likelier rewrite. The
+ *  vocabulary goes past twelve and includes "dozen" for the same reason. A
+ *  count in a separate sentence ("…tools. There are eight.") still slips
+ *  through; that is the documented limit, and it takes deliberate effort. */
+const COUNT = String.raw`(?:\d+|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|dozen)`;
+const TOOL = String.raw`tools?|tooling`;
+const QUANTIFIED_TOOLS = new RegExp(
+  `\\b${COUNT}\\b[^.]{0,40}\\b(?:${TOOL})\\b|\\b(?:${TOOL})\\b[^.]{0,40}\\b${COUNT}\\b`,
+  'i',
+);
 
 const ENV_KEY = 'KOZOU_UI_MCP_POSTURE';
 
@@ -132,6 +149,20 @@ describe('the connect template states no posture of its own', () => {
       'loopback',
     ]) {
       expect(text).not.toContain(claim);
+    }
+  });
+
+  it('does not count the MCP tools — that number belongs to another package', () => {
+    // "seven read-only tools" outlived search_schema shipping in v1.15.0
+    // because nothing here could see the count. This package does not depend
+    // on @kozou/mcp and should not start to for a sentence, so the fix is to
+    // state no number: a claim that cannot be made cannot go stale.
+    //
+    // Checked over everything the page renders, not just the template: the
+    // resolved auth note is interpolated into the same paragraph flow, so a
+    // count added there would reach the same reader with nothing to catch it.
+    for (const text of [renderedText(), ...POSTURES.map((p) => describeMcpAuth(p))]) {
+      expect(text).not.toMatch(QUANTIFIED_TOOLS);
     }
   });
 });
