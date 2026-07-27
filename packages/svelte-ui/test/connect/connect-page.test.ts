@@ -135,3 +135,39 @@ describe('the connect template states no posture of its own', () => {
     }
   });
 });
+
+describe('connect page load: the OAuth address', () => {
+  const RESOURCE_KEY = 'KOZOU_UI_MCP_RESOURCE';
+  let savedResource: string | undefined;
+
+  beforeEach(() => {
+    savedResource = process.env[RESOURCE_KEY];
+    delete process.env[RESOURCE_KEY];
+  });
+
+  afterEach(() => {
+    if (savedResource === undefined) delete process.env[RESOURCE_KEY];
+    else process.env[RESOURCE_KEY] = savedResource;
+  });
+
+  it('hands over the canonical resource URI the CLI reported, not the request host', () => {
+    process.env[ENV_KEY] = 'oauth';
+    process.env[RESOURCE_KEY] = 'https://mcp.example.com/mcp';
+    const data = connectLoad(connectEvent()) as {
+      connection: { httpUrl: string; jsonConfig: string; claudeCodeCommand: string };
+    };
+    // connectEvent() requests http://localhost:3333/connect, so before this the
+    // page handed out http://localhost:3334/mcp for an endpoint published at
+    // mcp.example.com — a config that cannot connect.
+    expect(data.connection.httpUrl).toBe('https://mcp.example.com/mcp');
+    expect(data.connection.jsonConfig).toContain('https://mcp.example.com/mcp');
+    expect(data.connection.claudeCodeCommand).toContain('https://mcp.example.com/mcp');
+  });
+
+  it('keeps the request-derived URL when the endpoint declared no resource', () => {
+    process.env[ENV_KEY] = 'local';
+    process.env[RESOURCE_KEY] = 'https://stale.example.com/mcp';
+    const data = connectLoad(connectEvent()) as { connection: { httpUrl: string } };
+    expect(data.connection.httpUrl).toBe('http://localhost:3334/mcp');
+  });
+});

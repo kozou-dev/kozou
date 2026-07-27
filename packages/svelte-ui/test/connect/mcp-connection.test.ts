@@ -51,8 +51,11 @@ describe('describeMcpAuth', () => {
     const note = describeMcpAuth('oauth');
     expect(note).not.toContain('no authentication');
     expect(note).toContain('OAuth 2.1 protected resource');
-    // The point of the page still holds under OAuth: nothing above it changes.
-    expect(note).toContain('the same either way');
+    // What still holds under OAuth is the *shape* — one URL, no client secret.
+    // It must not claim the URL is the same as in the other postures: in this
+    // posture it is the declared canonical resource, which is the whole point.
+    expect(note).not.toContain('the same either way');
+    expect(note).toContain('canonical');
   });
 
   it('hedges rather than asserting a posture it does not know', () => {
@@ -129,25 +132,78 @@ describe('buildMcpConnectionInfo', () => {
     expect(info.claudeCodeCommand).not.toContain('DATABASE_URL');
   });
 
-  it('registers the same URL and snippets whatever the posture', () => {
-    // The finding this page was wrong about: an MCP client discovers the
-    // authorization server from the endpoint's own RFC 9728 metadata, so an
-    // OAuth deployment registers exactly what an unauthenticated one does.
-    // Only the wording differs — if that ever stops holding, the page needs
-    // more than a different paragraph.
+  it('registers the same shape whatever the posture: one URL, no secret', () => {
+    // An MCP client discovers the authorization server from the endpoint's own
+    // RFC 9728 metadata, so no posture needs an extra field in the config — no
+    // client id, no token. If that ever stops holding, the page needs more than
+    // a different paragraph.
     const at = (posture: 'local' | 'oauth' | 'unknown') =>
       buildMcpConnectionInfo({
         requestUrl: new URL('https://kozou.example.com/connect'),
         mcpPort: 3334,
         posture,
+        resourceUrl: 'https://mcp.example.com/mcp',
       });
-    const local = at('local');
-    for (const posture of ['oauth', 'unknown'] as const) {
-      const other = at(posture);
-      expect(other.httpUrl).toBe(local.httpUrl);
-      expect(other.jsonConfig).toBe(local.jsonConfig);
-      expect(other.claudeCodeCommand).toBe(local.claudeCodeCommand);
-      expect(other.authNote).not.toBe(local.authNote);
+    for (const posture of ['local', 'oauth', 'unknown'] as const) {
+      const info = at(posture);
+      expect(JSON.parse(info.jsonConfig)).toEqual({
+        mcpServers: { kozou: { type: 'http', url: info.httpUrl } },
+      });
+      expect(info.claudeCodeCommand).toBe(
+        `claude mcp add --transport http kozou ${info.httpUrl}`,
+      );
+    }
+    // The URL is not posture-independent, and that is the fix: only `oauth` has
+    // a declared canonical address to prefer over the request host.
+    expect(at('oauth').httpUrl).toBe('https://mcp.example.com/mcp');
+    expect(at('local').httpUrl).toBe('https://kozou.example.com:3334/mcp');
+    expect(at('unknown').httpUrl).toBe('https://kozou.example.com:3334/mcp');
+  });
+
+  it('prefers the canonical resource URI in the OAuth posture, verbatim', () => {
+    // The deployment `resource` exists for: a proxy in front of the endpoint, so
+    // the browser's host and port say nothing about where a client should
+    // connect. Used verbatim — it identifies the endpoint, so no path is
+    // appended and no port is invented.
+    const info = buildMcpConnectionInfo({
+      requestUrl: new URL('https://admin.internal:3333/connect'),
+      mcpPort: 3334,
+      posture: 'oauth',
+      resourceUrl: 'https://mcp.example.com/mcp',
+    });
+    expect(info.httpUrl).toBe('https://mcp.example.com/mcp');
+    expect(info.claudeCodeCommand).toContain('https://mcp.example.com/mcp');
+    expect(info.jsonConfig).toContain('https://mcp.example.com/mcp');
+    expect(info.httpUrl).not.toContain('admin.internal');
+    expect(info.httpUrl).not.toContain('3334');
+  });
+
+  it('ignores a resource URI outside the OAuth posture', () => {
+    // Only `oauth` means the operator declared one; a value reaching the other
+    // postures is stale inheritance, not an address for this runtime.
+    for (const posture of ['local', 'unknown'] as const) {
+      const info = buildMcpConnectionInfo({
+        requestUrl: new URL('http://localhost:3333/'),
+        mcpPort: 3334,
+        posture,
+        resourceUrl: 'https://mcp.example.com/mcp',
+      });
+      expect(info.httpUrl).toBe('http://localhost:3334/mcp');
+    }
+  });
+
+  it('falls back to the request host when OAuth reports no resource', () => {
+    // The schema requires `resource` wherever an auth block exists, so this is
+    // unreachable through the CLI — but rendering nothing, or `undefined/mcp`,
+    // would be worse than the guess the other postures live with.
+    for (const resourceUrl of [undefined, '', '   ']) {
+      const info = buildMcpConnectionInfo({
+        requestUrl: new URL('http://localhost:3333/'),
+        mcpPort: 3334,
+        posture: 'oauth',
+        resourceUrl,
+      });
+      expect(info.httpUrl).toBe('http://localhost:3334/mcp');
     }
   });
 });

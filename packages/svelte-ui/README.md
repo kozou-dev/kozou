@@ -92,14 +92,23 @@ Optional, both concerning the "Connect an AI agent" page:
     MCP endpoint.
   - `local` — serving with no authentication (the loopback default).
   - `oauth` — serving as an OAuth 2.1 protected resource
-    (`server.mcp.http.auth`). The URL and both config snippets are
-    unchanged — a client discovers the authorization server from the
-    endpoint itself — so only the wording differs.
+    (`server.mcp.http.auth`). The config snippets keep the same shape —
+    one URL, no client secret, since a client discovers the
+    authorization server from the endpoint itself — but the URL comes
+    from `KOZOU_UI_MCP_RESOURCE` rather than the request host.
 
   Absent reads as `local`, which is the posture a standalone UI is in.
-  A value this build does not recognize (a newer CLI) still offers the
-  page, since the snippets do not depend on the posture, but says
-  nothing about authentication rather than guessing.
+  A value this build does not recognize (a typo, or a newer CLI) still
+  offers the page, with the request-derived URL, but says nothing about
+  authentication rather than guessing.
+
+- `KOZOU_UI_MCP_RESOURCE` — the canonical resource URI
+  (`server.mcp.http.auth.resource`) to hand out in the `oauth` posture,
+  used verbatim including its path. `kozou dev` sets it whenever that
+  block exists. Without it the page builds the endpoint from the
+  browser's request host and the MCP port, which is wrong behind the
+  proxy or tunnel that makes `resource` necessary in the first place.
+  Ignored in the other postures, where nothing declared a canonical URI.
 
 ```bash
 # from the monorepo root

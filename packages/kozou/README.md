@@ -133,8 +133,11 @@ out connection instructions for an endpoint that is not listening.
 The same channel carries how a live endpoint authenticates, so the
 page describes the posture it is actually in — with
 `server.mcp.http.auth` set it says the endpoint is an OAuth 2.1
-protected resource instead of claiming there is no authentication
-(the URL and client config are the same either way).
+protected resource instead of claiming there is no authentication,
+and it hands out that block's `resource` URI as the address to
+register instead of guessing one from the browser's host (which is
+wrong behind the proxy that `resource` exists for). The client config
+keeps the same shape either way: one URL, no secret.
 (A UI you start yourself with `node build/index.js` never reads the
 config; pass `KOZOU_UI_MCP_POSTURE=off` to it directly, or it keeps
 advertising the default endpoint.) `${VAR}` and
