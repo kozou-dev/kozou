@@ -104,7 +104,7 @@ export default async function globalSetup() {
   log(`postgrest ready at ${postgrestUrl}`);
 
   log(`spawning svelte-ui (node build/index.js) on ${SVELTE_UI_HOST}:${SVELTE_UI_PORT}`);
-  state.svelteUi = spawn('node', ['build/index.js'], {
+  const svelteUi = spawn('node', ['build/index.js'], {
     cwd: packageRoot,
     env: {
       ...process.env,
@@ -129,10 +129,11 @@ export default async function globalSetup() {
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
-  state.svelteUi.stdout.on('data', (b: Buffer) =>
+  state.svelteUi = svelteUi;
+  svelteUi.stdout.on('data', (b: Buffer) =>
     process.stdout.write(`[svelte-ui] ${b}`),
   );
-  state.svelteUi.stderr.on('data', (b: Buffer) =>
+  svelteUi.stderr.on('data', (b: Buffer) =>
     process.stderr.write(`[svelte-ui] ${b}`),
   );
 
