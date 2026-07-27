@@ -201,6 +201,101 @@ jobs:
           fi
           exit "$scan_status"
 
+      - name: OSV-Scanner (published container image)
+        # The container is a distribution channel alongside npm, and its OS
+        # layer was the one part of it nothing looked at: the blocking job
+        # scans the npm trees adopters install and the step above scans this
+        # repository's manifests, but neither sees the apk packages
+        # `node:24-alpine` brings in - musl, busybox, openssl, zlib,
+        # ca-certificates.
+        #
+        # Measured, not assumed: against a published image this yields 18
+        # packages, all ecosystem `Alpine:v3.24`, all from
+        # /lib/apk/db/installed. It does NOT cover the Node.js runtime or the
+        # bundled npm/corepack under /usr/local/lib/node_modules, which
+        # osv-scanner does not inventory from an image archive. Those remain
+        # unscanned; a tool that reads binaries (trivy, grype) is what would
+        # close that half.
+        #
+        # Report-only, deliberately. A base-layer CVE is not fixable here
+        # beyond rebuilding on a newer tag once upstream publishes one, so
+        # gating merges on it would leave the blocking job red for something
+        # nobody in this repo can clear - the desensitization the
+        # blocking/report split exists to avoid.
+        #
+        # Scans the *published* image rather than a fresh build: the question
+        # is what is currently distributed, which is what a rebuild would
+        # change. `docker save` + `--archive` keeps the Docker socket out of
+        # the scanner container.
+        #
+        # `if: always()` so a finding in the step above does not hide this
+        # one; the step's own failures are surfaced the same way as there.
+        if: always()
+        run: |
+          image=ghcr.io/kozou-dev/kozou:latest
+          pull_status=0
+          docker pull --quiet "$image" > "$RUNNER_TEMP/pull.log" 2>&1 || pull_status=$?
+          if [ "$pull_status" -ne 0 ]; then
+            {
+              echo '## Container base layer (non-blocking)'
+              echo
+              echo "Could not pull \`$image\`, so the base layer was NOT scanned."
+              echo 'The image has been published since v1.16.0, so this is a'
+              echo 'tooling or permissions failure rather than a clean scan:'
+              echo
+              echo '```'
+              cat "$RUNNER_TEMP/pull.log"
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "::error::Could not pull $image - the base layer was not scanned."
+            exit "$pull_status"
+          fi
+          digest=$(docker image inspect "$image" --format '{{index .RepoDigests 0}}' 2>/dev/null || echo "$image")
+          # Unguarded, this aborts the step under `bash -e` before the summary
+          # and the annotations below - a green run with no trace at all,
+          # which is the failure this step exists to make visible.
+          if ! docker save "$image" -o "$RUNNER_TEMP/image.tar" 2> "$RUNNER_TEMP/save.log"; then
+            {
+              echo '## Container base layer (non-blocking)'
+              echo
+              echo 'Could not export the image for scanning, so the base layer'
+              echo 'was NOT scanned:'
+              echo
+              echo '```'
+              cat "$RUNNER_TEMP/save.log"
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "::error::docker save failed - the base layer was not scanned."
+            exit 1
+          fi
+          image_status=0
+          docker run --rm -v "$RUNNER_TEMP:/out" \
+            ghcr.io/google/osv-scanner:v2.4.0@sha256:5116601dedc01c1c580eb92371883ec052fc4c13c3fbc109d621a63ac416d475 \
+            scan image --archive /out/image.tar \
+            --format markdown --output-file /out/image-report.md || image_status=$?
+          {
+            echo '## Container base layer (non-blocking)'
+            echo
+            echo "Scanned \`$image\` at digest \`$digest\` (linux/amd64 - the"
+            echo 'runner pulls one platform of the multi-arch index). Covers the'
+            echo 'apk packages the base layer brings in, not the Node.js runtime'
+            echo 'or the bundled npm. These are cleared by rebuilding on a newer'
+            echo 'base tag, not by a change in this repository.'
+            echo
+            if [ -f "$RUNNER_TEMP/image-report.md" ]; then
+              cat "$RUNNER_TEMP/image-report.md"
+            else
+              echo 'No report produced - the scanner did not run to completion.'
+              echo 'See the step log; this is a tooling failure, not a clean scan.'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [ ! -f "$RUNNER_TEMP/image-report.md" ]; then
+            echo "::error::OSV-Scanner produced no image report - tooling failure, not a clean scan."
+          elif [ "$image_status" -ne 0 ]; then
+            echo "::warning::Findings in the published image. See the job summary."
+          fi
+          exit "$image_status"
+
   codeql:
     name: CodeQL (JavaScript/TypeScript)
     runs-on: ubuntu-latest
