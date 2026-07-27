@@ -194,6 +194,195 @@ describe('resolveMcpHttpAuth', () => {
       'http://keycloak.internal:8080/realms/kozou',
     ]);
   });
+
+  // Advertise-vs-verify: the protected-resource metadata names an
+  // authorization server and a resource URI; jwt.issuer / jwt.audience decide
+  // what is actually honoured. Every consequence asserted below was measured
+  // against the pinned jose — notably that `aud` is *intersected* with the
+  // expected list, so a multi-audience token minted for the advertised
+  // resource is accepted even when the expected list does not name it.
+  const AS2 = 'https://as2.example.com/realms/kozou';
+  const OTHER_AS = 'https://other.example.com/realms/kozou';
+  const signals = (jwt: {
+    secret: string;
+    issuer?: string | string[];
+    audience?: string | string[];
+  }, over: Partial<typeof base> = {}) => {
+    const auth = resolveMcpHttpAuth({ ...base, ...over, jwt }, '/mcp');
+    return { divergences: auth.advertisementDivergences, notes: auth.advertisementNotes, auth };
+  };
+
+  it('says nothing when issuer and audience take their defaults', () => {
+    for (const authorizationServers of [ISSUERS, [...ISSUERS, AS2]]) {
+      const auth = resolveMcpHttpAuth({ ...base, authorizationServers }, '/mcp');
+      expect(auth.advertisementDivergences).toEqual([]);
+      expect(auth.advertisementNotes).toEqual([]);
+    }
+  });
+
+  it('says nothing when explicit values restate what is advertised', () => {
+    const { divergences, notes } = signals({
+      secret: SECRET,
+      issuer: ISSUERS[0],
+      audience: RESOURCE,
+    });
+    expect(divergences).toEqual([]);
+    expect(notes).toEqual([]);
+  });
+
+  it('warns in both directions when the accepted issuer is not the advertised one', () => {
+    const { divergences, notes, auth } = signals({ secret: SECRET, issuer: OTHER_AS });
+    // Full sentences, consequence clause included: the whole feature is what
+    // these say, and a swap of the two consequences is the easiest wrong edit.
+    expect(divergences).toEqual([
+      `auth.jwt.issuer accepts "${OTHER_AS}", which auth.authorizationServers does not advertise: ` +
+        `a token from an issuer this server never told its clients about is honoured.`,
+      `auth.authorizationServers advertises "${ISSUERS[0]}", which auth.jwt.issuer does not ` +
+        `accept: a token whose "iss" is exactly that is rejected. If that server mints a ` +
+        `different spelling — a trailing slash is the usual one — advertise the form it issues.`,
+    ]);
+    expect(notes).toEqual([]);
+    // Startup output, not a startup error: the escape hatch survives.
+    expect(auth.authenticator).toBeDefined();
+  });
+
+  it('reports one bullet per mismatched value, in whichever direction it falls', () => {
+    // Accepts everything advertised, plus one nobody was told about.
+    expect(signals({ secret: SECRET, issuer: [ISSUERS[0], OTHER_AS] }).divergences).toEqual([
+      expect.stringContaining(`auth.jwt.issuer accepts "${OTHER_AS}"`),
+    ]);
+    // Advertises two, accepts one: a client sent to the other is refused. Two
+    // unaccepted entries produce two bullets — no "that server(s)" agreement
+    // to get wrong.
+    const partial = signals({ secret: SECRET, issuer: ISSUERS[0] }, {
+      authorizationServers: [...ISSUERS, AS2, 'https://as3.example.com/realms/kozou'],
+    });
+    expect(partial.divergences).toEqual([
+      expect.stringContaining(`auth.authorizationServers advertises "${AS2}"`),
+      expect.stringContaining('auth.authorizationServers advertises "https://as3.example.com'),
+    ]);
+  });
+
+  it('states what an empty string really does: no comparison, but the claim is now mandatory', () => {
+    // Measured, and the trap in it: jose gates the *presence* check on the
+    // option being defined and the *value* check on it being truthy. So ''
+    // is not "no check" — it is stricter than omitting the option (a token
+    // with no `iss` at all is rejected) and weaker than naming an issuer.
+    // Saying "no check runs" would be a false promise about kozou's own
+    // service tokens, which carry no `iss` unless one is configured.
+    expect(signals({ secret: SECRET, issuer: '' }).divergences).toEqual([
+      'auth.jwt.issuer is an empty string: every "iss" value is accepted, and a token carrying ' +
+        'no "iss" claim at all is rejected. That is stricter than leaving the option out and ' +
+        'weaker than naming an issuer — almost certainly not what was meant.',
+    ]);
+    expect(signals({ secret: SECRET, audience: '' }).divergences).toEqual([
+      'auth.jwt.audience is an empty string: a token minted for any resource is accepted here, ' +
+        'and one carrying no "aud" claim at all is rejected. That is stricter than leaving the ' +
+        'option out and weaker than naming an audience — almost certainly not what was meant.',
+    ]);
+  });
+
+  it('distinguishes an empty list from a list of empty strings, on both claims', () => {
+    // Full sentences: the two branches differ only in why nothing matches,
+    // and both end in the same clause, so a substring assertion would let
+    // them be swapped. `audience: []` reaches this from a plain config file
+    // — the CLI schema's array branch has no .min(1).
+    expect(signals({ secret: SECRET, issuer: [] }).divergences).toEqual([
+      'auth.jwt.issuer is an empty list, which no "iss" can match: every request is rejected, ' +
+        'whichever authorization server the client went to.',
+    ]);
+    expect(signals({ secret: SECRET, audience: [] }).divergences).toEqual([
+      'auth.jwt.audience is an empty list, which no "aud" can match: every request is rejected.',
+    ]);
+    expect(signals({ secret: SECRET, issuer: [''] }).divergences).toEqual([
+      'auth.jwt.issuer lists nothing but empty strings, which only a literally empty "iss" ' +
+        'claim matches: no token an authorization server would mint is accepted.',
+    ]);
+    // Measured: audience [''] rejects a token minted for the advertised
+    // resource. Before this it was classified as the documented escape hatch
+    // and announced as a supported shape.
+    const emptyEntry = signals({ secret: SECRET, audience: [''] });
+    expect(emptyEntry.notes).toEqual([]);
+    expect(emptyEntry.divergences).toEqual([
+      'auth.jwt.audience lists nothing but empty strings, which only a literally empty "aud" ' +
+        'claim matches: no token an authorization server would mint is accepted.',
+    ]);
+  });
+
+  it('does not repeat itself when a config list repeats a value', () => {
+    // Both config lists accept duplicates, and one bullet per value turned a
+    // duplicated entry into a duplicated paragraph on stderr.
+    expect(signals({ secret: SECRET, issuer: [OTHER_AS, OTHER_AS] }).divergences).toHaveLength(2);
+    expect(
+      signals({ secret: SECRET, issuer: OTHER_AS }, { authorizationServers: [...ISSUERS, ...ISSUERS] })
+        .divergences,
+    ).toEqual([
+      expect.stringContaining(`auth.jwt.issuer accepts "${OTHER_AS}"`),
+      expect.stringContaining(`auth.authorizationServers advertises "${ISSUERS[0]}"`),
+    ]);
+    expect(
+      signals({ secret: SECRET, audience: [RESOURCE, 'x', 'x'] }).divergences,
+    ).toHaveLength(1);
+  });
+
+  it('treats the documented audience escape hatch as a note, not a warning', () => {
+    // The operator guide tells anyone whose IdP cannot mint the resource URI
+    // as `aud` to set jwt.audience to what it does issue. That deployment
+    // must not boot into a permanent WARNING, so it is a note — and the note
+    // states the real consequence, which depends on jose intersecting the
+    // lists rather than comparing them whole.
+    const { divergences, notes } = signals({ secret: SECRET, audience: 'kozou-rest-client-id' });
+    expect(divergences).toEqual([]);
+    expect(notes).toEqual([
+      `auth.jwt.audience expects "kozou-rest-client-id", not the advertised auth.resource ` +
+        `"${RESOURCE}": a token carrying any of those audiences is accepted, which is what the ` +
+        `setting is for. A token whose only audience is the advertised resource is rejected; one ` +
+        `carrying both passes, because the two lists are intersected rather than compared whole.`,
+    ]);
+  });
+
+  it('the escape-hatch note leads with the shape that deployment actually mints', () => {
+    // Measured: with audience "rest-id", a token whose *only* audience is
+    // "rest-id" — no resource URI anywhere — is accepted. That is the normal
+    // case, since the whole premise is an IdP that cannot mint the resource
+    // URI. A note that mentions only the both-audiences token reads as "your
+    // IdP must mint both", which is the opposite of why the option was set.
+    const [note] = signals({ secret: SECRET, audience: ['a', 'b'] }).notes;
+    expect(note).toContain('a token carrying any of those audiences is accepted');
+    // ...and it must not be phrased as "both", which is wrong for two values.
+    expect(note).toContain('"a", "b"');
+    expect(note).not.toMatch(/carrying both is accepted/);
+  });
+
+  it('warns when the accepted audience reaches beyond the advertised resource', () => {
+    // Not the escape hatch: this endpoint honours a token minted for another
+    // resource, which is the confused-deputy case the audience binding exists
+    // to prevent. Measured: with audience [resource, "other"], a token whose
+    // only `aud` is "other" is accepted.
+    const { divergences, notes } = signals({
+      secret: SECRET,
+      audience: [RESOURCE, 'https://legacy.example.com/mcp'],
+    });
+    expect(divergences).toEqual([
+      `auth.jwt.audience accepts "https://legacy.example.com/mcp" as well as the advertised ` +
+        `auth.resource: a token minted for "https://legacy.example.com/mcp" is honoured here, ` +
+        `so this endpoint answers for a resource it does not advertise.`,
+    ]);
+    expect(notes).toEqual([]);
+  });
+
+  it('reports a divergence and a note together when both apply', () => {
+    // The two channels are independent: an escape-hatch audience does not
+    // suppress an issuer problem, and an issuer problem does not swallow the
+    // note the operator boots with every day.
+    const { divergences, notes } = signals({
+      secret: SECRET,
+      issuer: OTHER_AS,
+      audience: 'kozou-rest-client-id',
+    });
+    expect(divergences).toHaveLength(2);
+    expect(notes).toHaveLength(1);
+  });
 });
 
 describe('extractScopes', () => {

@@ -230,6 +230,33 @@ function nonLoopbackWarning(host: string, prefix: string, executionRole?: string
   return head + `${prefix} Anyone who can reach ${host} can read this database's schema metadata.\n` + tail;
 }
 
+/** Divergences between the advertised `iss` / `aud` contract and the one
+ *  actually verified, formatted for a startup warning. Scoped to those two
+ *  claims on purpose — the verification key (`jwt.jwksUri`) can point
+ *  somewhere else again, and nothing here checks that. */
+function advertisementDivergenceWarning(divergences: string[], prefix: string): string {
+  return (
+    `${prefix} WARNING: the token issuer/audience this server accepts is not the one it\n` +
+    `${prefix} advertises in its protected-resource metadata.\n` +
+    divergences.map((divergence) => `${prefix}   - ${divergence}\n`).join('') +
+    `${prefix} Make auth.jwt and the advertised values agree — whichever side is the wrong\n` +
+    `${prefix} one — unless every line above is deliberate.\n`
+  );
+}
+
+/** The audience escape hatch, formatted for a startup note. Deliberately not
+ *  a warning: the operator guide tells an operator whose IdP cannot mint the
+ *  resource URI as `aud` to configure exactly this, so a deployment that
+ *  followed the documentation must not boot into a permanent WARNING. The
+ *  note states what follows from it, so the choice stays a conscious one. */
+function advertisementNote(notes: string[], prefix: string): string {
+  return (
+    `${prefix} NOTE: this server accepts an audience other than the resource URI it\n` +
+    `${prefix} advertises — the supported shape when an IdP cannot mint that URI as \`aud\`.\n` +
+    notes.map((note) => `${prefix}   - ${note}\n`).join('')
+  );
+}
+
 /**
  * Start the MCP server over Streamable HTTP, bound to the given
  * SchemaCache. Resolves once the server is listening.
@@ -256,6 +283,14 @@ export async function startHttpServer(
       `${prefix} WARNING: allowInsecureHttp is set — advertising plaintext http URL(s) ` +
         `${auth.insecureHttpUrls.join(', ')}; bearer tokens cross the network unencrypted.\n`,
     );
+  }
+
+  if (auth !== undefined && auth.advertisementDivergences.length > 0) {
+    process.stderr.write(advertisementDivergenceWarning(auth.advertisementDivergences, prefix));
+  }
+
+  if (auth !== undefined && auth.advertisementNotes.length > 0) {
+    process.stderr.write(advertisementNote(auth.advertisementNotes, prefix));
   }
 
   if (opts.execution !== undefined) {
