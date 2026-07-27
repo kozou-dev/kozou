@@ -7,7 +7,14 @@
 
 import type { StartedPostgreSqlContainer } from '@testcontainers/postgresql';
 import type { StartedNetwork, StartedTestContainer } from 'testcontainers';
-import type { ChildProcessWithoutNullStreams } from 'node:child_process';
+import type { ChildProcessByStdio } from 'node:child_process';
+import type { Readable } from 'node:stream';
+
+/** What `spawn(..., { stdio: ['ignore', 'pipe', 'pipe'] })` actually returns:
+ *  no stdin, both output streams piped. `ChildProcessWithoutNullStreams` —
+ *  the previous annotation — promises a writable stdin these processes do
+ *  not have, which is why assigning to it never typechecked. */
+type DevProcess = ChildProcessByStdio<null, Readable, Readable>;
 
 export interface E2EState {
   network?: StartedNetwork;
@@ -15,9 +22,14 @@ export interface E2EState {
   // The REST-adapter sidecar container (a SQL-to-REST gateway image).
   adapter?: StartedTestContainer;
   // The `kozou dev` process under test (Admin UI child + in-process MCP).
-  kozouDev?: ChildProcessWithoutNullStreams;
+  kozouDev?: DevProcess;
   // Temp dir holding the generated kozou.config.yaml.
   configDir?: string;
+  // A second `kozou dev` against the same backend with
+  // `server.mcp.http.enabled: false` — the opted-out runtime, which has no
+  // MCP listener and whose Admin UI drops the "Connect an AI agent" page.
+  kozouDevMcpOff?: DevProcess;
+  configDirMcpOff?: string;
 }
 
 export const state: E2EState = {};

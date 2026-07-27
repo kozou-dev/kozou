@@ -7,6 +7,8 @@
 // signal handling works; otherwise we SIGKILL and warn. Container stops
 // are each wrapped in a guard so one failure does not strand the rest.
 
+import { rmSync } from 'node:fs';
+
 import { state } from './state.js';
 
 async function safe(label: string, action: () => Promise<unknown> | unknown) {
@@ -19,15 +21,18 @@ async function safe(label: string, action: () => Promise<unknown> | unknown) {
 
 // Send SIGTERM to `kozou dev` and resolve once it exits, or after
 // timeoutMs (SIGKILL fallback). Resolves immediately if it already exited.
-function stopKozouDev(timeoutMs: number): Promise<void> {
-  const child = state.kozouDev;
+function stopKozouDev(
+  child: typeof state.kozouDev,
+  label: string,
+  timeoutMs: number,
+): Promise<void> {
   if (!child || child.exitCode !== null || child.signalCode !== null) {
     return Promise.resolve();
   }
   return new Promise<void>((resolve) => {
     const timer = setTimeout(() => {
       console.warn(
-        `[kozou-e2e teardown] kozou dev did not exit within ${timeoutMs}ms; sending SIGKILL`,
+        `[kozou-e2e teardown] ${label} did not exit within ${timeoutMs}ms; sending SIGKILL`,
       );
       child.kill('SIGKILL');
       resolve();
@@ -35,7 +40,7 @@ function stopKozouDev(timeoutMs: number): Promise<void> {
     child.on('exit', (code, signal) => {
       clearTimeout(timer);
       console.log(
-        `[kozou-e2e teardown] kozou dev exited gracefully ` +
+        `[kozou-e2e teardown] ${label} exited gracefully ` +
           `(code=${code ?? 'null'}, signal=${signal ?? 'null'})`,
       );
       resolve();
@@ -47,7 +52,18 @@ function stopKozouDev(timeoutMs: number): Promise<void> {
 export default async function globalTeardown() {
   console.log('[kozou-e2e teardown] stopping services');
 
-  await safe('kozou dev', () => stopKozouDev(10_000));
+  await safe('kozou dev', () => stopKozouDev(state.kozouDev, 'kozou dev', 10_000));
+  await safe('kozou dev (mcp off)', () =>
+    stopKozouDev(state.kozouDevMcpOff, 'kozou dev (mcp off)', 10_000),
+  );
+  // The generated configs live in mkdtemp directories; without this each run
+  // leaves one behind in $TMPDIR, and `state.configDir*` would be written and
+  // never read.
+  await safe('temp config dirs', () => {
+    for (const dir of [state.configDir, state.configDirMcpOff]) {
+      if (dir !== undefined) rmSync(dir, { recursive: true, force: true });
+    }
+  });
   await safe('adapter', () => state.adapter?.stop());
   await safe('postgres', () => state.postgres?.stop());
   await safe('network', () => state.network?.stop());
