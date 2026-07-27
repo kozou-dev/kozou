@@ -246,10 +246,34 @@ const introspectionSchema = z
   })
   .prefault({});
 
-const databaseSchema = z.object({
-  url: z.string().min(1, 'database.url is required (set DATABASE_URL or kozou.config.yaml)'),
-  schemas: z.array(z.string().min(1)).default(['public']),
-});
+const DATABASE_URL_REQUIRED =
+  'database.url is required (set DATABASE_URL or kozou.config.yaml)';
+
+const databaseSchema = z
+  .object({
+    // The message is attached to the type as well as to `min(1)`: `min` only
+    // runs on a string that is present, so an absent `url` reported
+    // "expected string, received undefined" and never named DATABASE_URL. A
+    // value that IS present but not a string is a different mistake, and saying
+    // "required" about it would be its own false lead.
+    url: z
+      .string({
+        error: (issue) =>
+          issue.input === undefined
+            ? DATABASE_URL_REQUIRED
+            : 'database.url must be a connection string',
+      })
+      .min(1, DATABASE_URL_REQUIRED),
+    schemas: z.array(z.string().min(1)).default(['public']),
+  })
+  // Every other section prefaults to `{}`; this one cannot, because `url` is
+  // required and `.prefault` type-checks its argument as a full input. The empty
+  // string is a placeholder that `min(1)` immediately refuses — which is the
+  // point: an absent `database` block now fails at `database.url` with the
+  // message that names DATABASE_URL, instead of failing one level up with
+  // "expected object, received undefined". That is the first error a new adopter
+  // meets (no config file, DATABASE_URL unset) and their whole diagnostic.
+  .prefault({ url: '' });
 
 // Opt-in RPC exposure of Postgres functions (issue #103). A function is exposed
 // only when its COMMENT carries `@expose: rpc`; these lists are the additional
@@ -355,11 +379,26 @@ export type KozouConfigIssue = { path: string; message: string };
 export class KozouConfigError extends Error {
   readonly issues: KozouConfigIssue[];
   readonly filePath: string | null;
-  constructor(message: string, filePath: string | null, issues: KozouConfigIssue[]) {
+  /**
+   * Environment variables that fed values into the config this error is about
+   * (empty when none did). Schema validation runs on the merged result, so an
+   * issue's path cannot be attributed to the file or to the environment — but
+   * naming a file while an env var supplied the offending value sends the
+   * operator to a file whose contents contradict the message. Reporting both
+   * sources is what keeps the location honest.
+   */
+  readonly envSources: string[];
+  constructor(
+    message: string,
+    filePath: string | null,
+    issues: KozouConfigIssue[],
+    envSources: string[] = [],
+  ) {
     super(message);
     this.name = 'KozouConfigError';
     this.filePath = filePath;
     this.issues = issues;
+    this.envSources = envSources;
   }
 }
 
@@ -522,7 +561,19 @@ function expandEnvVars(value: unknown, env: NodeJS.ProcessEnv): unknown {
   return value;
 }
 
-function injectDatabaseUrlFromEnv(raw: unknown, env: NodeJS.ProcessEnv): unknown {
+// `envUsed` is a provenance sink: every injector below appends the env vars it
+// actually took a value from, so a validation failure can report what fed the
+// config instead of naming only the file (see KozouConfigError.envSources). A
+// var that is merely set but ignored — DATABASE_URL when the file supplies a url
+// — must not be recorded, or the report becomes a false lead of its own.
+//
+// `${VAR}` expansion is deliberately not recorded: the placeholder is written in
+// the file, so naming the file is already correct for those.
+function injectDatabaseUrlFromEnv(
+  raw: unknown,
+  env: NodeJS.ProcessEnv,
+  envUsed: string[],
+): unknown {
   if (raw === null || typeof raw !== 'object') return raw;
   const obj = raw as Record<string, unknown>;
   const envUrl = env.DATABASE_URL;
@@ -530,11 +581,13 @@ function injectDatabaseUrlFromEnv(raw: unknown, env: NodeJS.ProcessEnv): unknown
 
   const existing = obj.database;
   if (existing === undefined) {
+    envUsed.push('DATABASE_URL');
     return { ...obj, database: { url: envUrl } };
   }
   if (existing !== null && typeof existing === 'object') {
     const db = existing as Record<string, unknown>;
     if (db.url === undefined || db.url === '') {
+      envUsed.push('DATABASE_URL');
       return { ...obj, database: { ...db, url: envUrl } };
     }
   }
@@ -581,7 +634,11 @@ function parseBooleanEnv(name: string, raw: string | undefined): boolean | undef
 // reaches values written in the YAML. For the boolean, expansion could not work
 // even then: it yields the string "false", which the schema rightly refuses for
 // a boolean field.
-function injectServerOverridesFromEnv(raw: unknown, env: NodeJS.ProcessEnv): unknown {
+function injectServerOverridesFromEnv(
+  raw: unknown,
+  env: NodeJS.ProcessEnv,
+  envUsed: string[],
+): unknown {
   const uiHost = env.KOZOU_UI_HOST;
   const mcpHost = env.KOZOU_MCP_HTTP_HOST;
   const mcpEnabled = parseBooleanEnv('KOZOU_MCP_HTTP_ENABLED', env.KOZOU_MCP_HTTP_ENABLED);
@@ -595,12 +652,19 @@ function injectServerOverridesFromEnv(raw: unknown, env: NodeJS.ProcessEnv): unk
     const ui = asObj(server.ui);
     ui.host = uiHost;
     server.ui = ui;
+    envUsed.push('KOZOU_UI_HOST');
   }
   if (mcpHost || mcpEnabled !== undefined) {
     const mcp = asObj(server.mcp);
     const http = asObj(mcp.http);
-    if (mcpHost) http.host = mcpHost;
-    if (mcpEnabled !== undefined) http.enabled = mcpEnabled;
+    if (mcpHost) {
+      http.host = mcpHost;
+      envUsed.push('KOZOU_MCP_HTTP_HOST');
+    }
+    if (mcpEnabled !== undefined) {
+      http.enabled = mcpEnabled;
+      envUsed.push('KOZOU_MCP_HTTP_ENABLED');
+    }
     mcp.http = http;
     server.mcp = mcp;
   }
@@ -620,7 +684,7 @@ function splitList(value: string | undefined): string[] | undefined {
 // Build the optional `auth` section from KOZOU_JWT_* env vars when the config
 // file did not declare one. Runs AFTER ${VAR} expansion so an env-provided
 // secret / key is taken verbatim and is never re-scanned for placeholders.
-function injectAuthFromEnv(raw: unknown, env: NodeJS.ProcessEnv): unknown {
+function injectAuthFromEnv(raw: unknown, env: NodeJS.ProcessEnv, envUsed: string[]): unknown {
   if (raw === null || typeof raw !== 'object') return raw;
   const obj = raw as Record<string, unknown>;
   if (obj.auth !== undefined) return obj; // an explicit config section wins
@@ -630,31 +694,77 @@ function injectAuthFromEnv(raw: unknown, env: NodeJS.ProcessEnv): unknown {
   const jwksUri = env.KOZOU_JWT_JWKS_URI;
   if (!secret && !publicKey && !jwksUri) return obj; // no auth env -> stay unauthenticated
 
+  // Each assignment records its own variable (see the provenance sink above):
+  // KOZOU_JWT_ALGORITHMS is the one var here that can inject a value the schema
+  // refuses, and the resulting issue path (auth.jwt.algorithms.0) exists in no
+  // config file.
   const jwt: Record<string, unknown> = {};
-  if (secret) jwt.secret = secret;
-  if (publicKey) jwt.publicKey = publicKey;
-  if (jwksUri) jwt.jwksUri = jwksUri;
+  if (secret) {
+    jwt.secret = secret;
+    envUsed.push('KOZOU_JWT_SECRET');
+  }
+  if (publicKey) {
+    jwt.publicKey = publicKey;
+    envUsed.push('KOZOU_JWT_PUBLIC_KEY');
+  }
+  if (jwksUri) {
+    jwt.jwksUri = jwksUri;
+    envUsed.push('KOZOU_JWT_JWKS_URI');
+  }
   const algorithms = splitList(env.KOZOU_JWT_ALGORITHMS);
-  if (algorithms) jwt.algorithms = algorithms;
-  if (env.KOZOU_JWT_ISSUER) jwt.issuer = env.KOZOU_JWT_ISSUER;
-  if (env.KOZOU_JWT_AUDIENCE) jwt.audience = env.KOZOU_JWT_AUDIENCE;
+  if (algorithms) {
+    jwt.algorithms = algorithms;
+    envUsed.push('KOZOU_JWT_ALGORITHMS');
+  }
+  if (env.KOZOU_JWT_ISSUER) {
+    jwt.issuer = env.KOZOU_JWT_ISSUER;
+    envUsed.push('KOZOU_JWT_ISSUER');
+  }
+  if (env.KOZOU_JWT_AUDIENCE) {
+    jwt.audience = env.KOZOU_JWT_AUDIENCE;
+    envUsed.push('KOZOU_JWT_AUDIENCE');
+  }
 
   const auth: Record<string, unknown> = { jwt };
-  if (env.KOZOU_JWT_ROLE_CLAIM) auth.roleClaim = env.KOZOU_JWT_ROLE_CLAIM;
+  if (env.KOZOU_JWT_ROLE_CLAIM) {
+    auth.roleClaim = env.KOZOU_JWT_ROLE_CLAIM;
+    envUsed.push('KOZOU_JWT_ROLE_CLAIM');
+  }
   const allowedRoles = splitList(env.KOZOU_JWT_ALLOWED_ROLES);
-  if (allowedRoles) auth.allowedRoles = allowedRoles;
-  if (env.KOZOU_JWT_DEFAULT_ROLE) auth.defaultRole = env.KOZOU_JWT_DEFAULT_ROLE;
-  if (env.KOZOU_JWT_ANON_ROLE) auth.anonRole = env.KOZOU_JWT_ANON_ROLE;
-  if (env.KOZOU_JWT_CLAIMS_GUC) auth.claimsGuc = env.KOZOU_JWT_CLAIMS_GUC;
+  if (allowedRoles) {
+    auth.allowedRoles = allowedRoles;
+    envUsed.push('KOZOU_JWT_ALLOWED_ROLES');
+  }
+  if (env.KOZOU_JWT_DEFAULT_ROLE) {
+    auth.defaultRole = env.KOZOU_JWT_DEFAULT_ROLE;
+    envUsed.push('KOZOU_JWT_DEFAULT_ROLE');
+  }
+  if (env.KOZOU_JWT_ANON_ROLE) {
+    auth.anonRole = env.KOZOU_JWT_ANON_ROLE;
+    envUsed.push('KOZOU_JWT_ANON_ROLE');
+  }
+  if (env.KOZOU_JWT_CLAIMS_GUC) {
+    auth.claimsGuc = env.KOZOU_JWT_CLAIMS_GUC;
+    envUsed.push('KOZOU_JWT_CLAIMS_GUC');
+  }
 
   // How the bundled Admin UI authenticates: KOZOU_UI_ROLE names the role the
   // CLI mints an HS256 token for; KOZOU_UI_CLAIMS is a JSON object of extra
   // claims to mint into it; KOZOU_ADAPTER_TOKEN supplies a ready-made token
   // (RS256 / external IdP, where the CLI cannot mint).
   const ui: Record<string, unknown> = {};
-  if (env.KOZOU_UI_ROLE) ui.role = env.KOZOU_UI_ROLE;
-  if (env.KOZOU_UI_CLAIMS) ui.claims = parseUiClaimsEnv(env.KOZOU_UI_CLAIMS);
-  if (env.KOZOU_ADAPTER_TOKEN) ui.token = env.KOZOU_ADAPTER_TOKEN;
+  if (env.KOZOU_UI_ROLE) {
+    ui.role = env.KOZOU_UI_ROLE;
+    envUsed.push('KOZOU_UI_ROLE');
+  }
+  if (env.KOZOU_UI_CLAIMS) {
+    ui.claims = parseUiClaimsEnv(env.KOZOU_UI_CLAIMS);
+    envUsed.push('KOZOU_UI_CLAIMS');
+  }
+  if (env.KOZOU_ADAPTER_TOKEN) {
+    ui.token = env.KOZOU_ADAPTER_TOKEN;
+    envUsed.push('KOZOU_ADAPTER_TOKEN');
+  }
   if (Object.keys(ui).length > 0) auth.ui = ui;
   return { ...obj, auth };
 }
@@ -712,15 +822,19 @@ export async function loadConfig(opts: LoadConfigOptions = {}): Promise<KozouCon
     fileLoaded = absPath;
   }
 
+  // Which env vars actually supplied a value, in the order they were applied.
+  // Carried on a validation failure so the report names every source that fed
+  // the config, not just the file.
+  const envUsed: string[] = [];
   // Fall back to DATABASE_URL env if database.url is not set in the file.
-  const withDbDefault = injectDatabaseUrlFromEnv(raw, env);
+  const withDbDefault = injectDatabaseUrlFromEnv(raw, env, envUsed);
   const expanded = expandEnvVars(withDbDefault, env);
   // Build `auth` from KOZOU_JWT_* env after expansion (env secrets verbatim).
-  const withAuth = injectAuthFromEnv(expanded, env);
+  const withAuth = injectAuthFromEnv(expanded, env, envUsed);
   // Apply KOZOU_UI_HOST / KOZOU_MCP_HTTP_HOST / KOZOU_MCP_HTTP_ENABLED
   // overrides (e.g. a container that needs to bind 0.0.0.0, or one that serves
   // no MCP endpoint), even with no config file.
-  const withOverrides = injectServerOverridesFromEnv(withAuth, env);
+  const withOverrides = injectServerOverridesFromEnv(withAuth, env, envUsed);
 
   try {
     return configSchema.parse(withOverrides);
@@ -733,6 +847,12 @@ export async function loadConfig(opts: LoadConfigOptions = {}): Promise<KozouCon
           path: i.path.join('.') || '<root>',
           message: i.message,
         })),
+        // Validation runs on file + environment merged, so an issue path alone
+        // can point at something no config file contains (a schema-refused
+        // KOZOU_JWT_ALGORITHMS, or a superRefine complaint about a combination
+        // KOZOU_MCP_HTTP_ENABLED produced). Naming the file without these turns
+        // the location into a false lead.
+        envUsed,
       );
     }
     throw err;
