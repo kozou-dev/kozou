@@ -473,7 +473,12 @@ export function hasReadyMadeToken(config: KozouConfig, env: NodeJS.ProcessEnv): 
  *  downstream default when unset), and inheriting the REST value would
  *  accept REST-audience tokens on the MCP surface. `defaultRole` /
  *  `anonRole` never carry over — the option type has no such fields, so a
- *  role-claim-less token and a token-less request stay rejections. */
+ *  role-claim-less token and a token-less request stay rejections.
+ *
+ *  Note that an inherited `jwt.issuer` is the REST surface's issuer: when the
+ *  MCP endpoint advertises a different authorization server, this server
+ *  would advertise one contract and verify another. That is legal but rarely
+ *  intended, so `@kozou/mcp` warns about it at startup. */
 export function resolveMcpAuthOptions(config: KozouConfig): McpHttpAuthOptions | undefined {
   const mcpAuth = config.server.mcp.http.auth;
   if (mcpAuth === undefined) return undefined;

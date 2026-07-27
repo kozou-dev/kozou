@@ -187,6 +187,112 @@ describe('startHttpServer routing (no database required)', () => {
   });
 });
 
+describe('startHttpServer OAuth advertise-vs-verify startup warning', () => {
+  const SECRET = 'startup-warning-secret-0123456789abcdef';
+  const RESOURCE = 'http://127.0.0.1:3334/mcp';
+  const AUTHORIZATION_SERVER = 'http://127.0.0.1:8080/realms/kozou';
+
+  /** Start (and immediately stop) a resource-server-mode server, returning
+   *  everything it wrote to stderr while booting. */
+  async function bootStderr(jwt: {
+    secret: string;
+    issuer?: string | string[];
+    audience?: string | string[];
+  }): Promise<string> {
+    const writes: string[] = [];
+    const spy = vi.spyOn(process.stderr, 'write').mockImplementation((chunk: unknown) => {
+      writes.push(String(chunk));
+      return true;
+    });
+    const cache = new SchemaCache({ connection: 'postgres://invalid:5432/none' });
+    let handle: HttpServerHandle;
+    try {
+      handle = await startHttpServer(cache, {
+        port: 0,
+        host: '127.0.0.1',
+        auth: { resource: RESOURCE, authorizationServers: [AUTHORIZATION_SERVER], jwt },
+      });
+    } finally {
+      spy.mockRestore();
+    }
+    await handle.close();
+    return writes.join('');
+  }
+
+  it('stays quiet when the accepted issuer and audience are the advertised ones', async () => {
+    const out = await bootStderr({ secret: SECRET });
+    expect(out).not.toContain('WARNING: the token issuer/audience');
+    expect(out).not.toContain('NOTE: this server accepts an audience');
+  });
+
+  it('warns about an issuer divergence, and says what to align', async () => {
+    const out = await bootStderr({ secret: SECRET, issuer: 'http://127.0.0.1:9999/realms/other' });
+    expect(out).toContain(
+      'WARNING: the token issuer/audience this server accepts is not the one it',
+    );
+    // Both values, so an operator does not have to re-read the config.
+    expect(out).toContain('http://127.0.0.1:9999/realms/other');
+    expect(out).toContain(AUTHORIZATION_SERVER);
+    // The closing instruction is the actionable half of the block; without it
+    // the operator is told there is a problem and nothing else. It must not
+    // name a side, either: one of the bullets above tells the operator to
+    // change the advertised list rather than auth.jwt, and a footer that says
+    // "align auth.jwt with the advertised values" contradicts it.
+    expect(out).toContain('Make auth.jwt and the advertised values agree');
+    expect(out).toContain('unless every line above is deliberate');
+  });
+
+  it('prints the note alongside a warning, not instead of it', async () => {
+    // An escape-hatch deployment that also has an issuer divergence must not
+    // silently lose the note it boots with every day.
+    const out = await bootStderr({
+      secret: SECRET,
+      issuer: 'http://127.0.0.1:9999/realms/other',
+      audience: 'rest-client-id',
+    });
+    expect(out).toContain('WARNING: the token issuer/audience');
+    expect(out).toContain('NOTE: this server accepts an audience other than the resource URI it');
+    expect(out).toContain('the supported shape when an IdP cannot mint that URI as `aud`');
+  });
+
+  it('prints a lone divergence too — one bullet is already wrong', async () => {
+    // Accepts everything advertised plus one more, so exactly one bullet is
+    // produced. Nothing about the block may depend on there being several.
+    const out = await bootStderr({
+      secret: SECRET,
+      issuer: [AUTHORIZATION_SERVER, 'http://127.0.0.1:9999/realms/other'],
+    });
+    expect(out).toContain('WARNING: the token issuer/audience');
+    expect(out).toContain('http://127.0.0.1:9999/realms/other');
+  });
+
+  it('prints the documented audience escape hatch as a NOTE, with no warning', async () => {
+    // The single-divergence path, and the one an operator following the guide
+    // actually lands on: a WARNING here would fire on every boot of a
+    // supported deployment.
+    const out = await bootStderr({ secret: SECRET, audience: 'rest-client-id' });
+    expect(out).toContain('NOTE: this server accepts an audience other than the resource URI it');
+    // Both header lines: the second one carries the reassurance that this is
+    // a supported shape, which is the reason it is a NOTE at all.
+    expect(out).toContain('advertises — the supported shape when an IdP cannot mint that URI');
+    expect(out).toContain('rest-client-id');
+    expect(out).toContain(RESOURCE);
+    expect(out).not.toContain('WARNING: the token issuer/audience');
+  });
+
+  it('carries no documentation URL into a library log line', async () => {
+    const out = await bootStderr({
+      secret: SECRET,
+      issuer: 'http://127.0.0.1:9999/realms/other',
+      audience: 'rest-client-id',
+    });
+    // Nothing else this package logs at runtime links out, and an embedder
+    // ships these lines inside a product that is not kozou.org.
+    expect(out).not.toContain('kozou.org');
+    expect(out).not.toMatch(/https?:\/\/(?!127\.0\.0\.1)/);
+  });
+});
+
 describe('startHttpServer DNS-rebinding guard on a bind-all address', () => {
   let handle: HttpServerHandle;
 

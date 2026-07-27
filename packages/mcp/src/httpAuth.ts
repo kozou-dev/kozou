@@ -105,6 +105,18 @@ export type McpHttpAuth = {
   /** Non-loopback plaintext http URLs the operator explicitly waved through
    *  with `allowInsecureHttp` — surfaced so the server logs a warning. */
   insecureHttpUrls: string[];
+  /** Ways the accepted-token config contradicts the protected-resource
+   *  metadata this server publishes, in a shape no deployment wants —
+   *  surfaced so the server logs a startup warning. Empty for every
+   *  deployment that lets `jwt.issuer` / `jwt.audience` default to the
+   *  advertised values. */
+  advertisementDivergences: string[];
+  /** Consequences of the documented audience escape hatch (`jwt.audience`
+   *  set to whatever the IdP can actually mint, because it cannot mint the
+   *  resource URI). Surfaced as a startup *note*, not a warning: the
+   *  operator guide tells operators to configure exactly this, so a
+   *  deployment that follows it must not boot into a permanent warning. */
+  advertisementNotes: string[];
   /** The configured role allowlist, surfaced for the dispatch-level check in
    *  `createMcpServer` (the authenticator already enforces it per request). */
   allowedRoles?: string[];
@@ -188,6 +200,18 @@ export function resolveMcpHttpAuth(opts: McpHttpAuthOptions, mcpPath: string): M
         ? opts.authorizationServers[0]
         : opts.authorizationServers;
   }
+  // The metadata document tells clients which authorization server to go to
+  // and which resource URI to ask a token for; `jwt.issuer` / `jwt.audience`
+  // decide what is actually accepted. The defaults above keep the two sides
+  // identical — an explicit value can pull them apart, and then this server
+  // advertises one contract and enforces another, which the MCP
+  // authorization spec's resource-server model does not expect. It stays
+  // legal (the audience escape hatch exists because some IdPs cannot mint
+  // the resource URI as `aud`), so this is startup output, never a startup
+  // error.
+  const { divergences: advertisementDivergences, notes: advertisementNotes } =
+    collectAdvertisementSignals(opts, jwt);
+
   const authenticator = createAuthenticator(
     {
       jwt,
@@ -236,8 +260,152 @@ export function resolveMcpHttpAuth(opts: McpHttpAuthOptions, mcpPath: string): M
     resourceMetadataUrl,
     adminRefresh: opts.adminRefresh ?? false,
     insecureHttpUrls,
+    advertisementDivergences,
+    advertisementNotes,
     ...(opts.allowedRoles === undefined ? {} : { allowedRoles: opts.allowedRoles }),
   };
+}
+
+/** How jose will treat a resolved `iss` / `aud` constraint, measured against
+ *  the pinned version rather than inferred from the option's shape.
+ *
+ *  The presence check and the value check are gated differently: jose puts
+ *  the claim on its mandatory-presence list whenever the option is not
+ *  `undefined`, but only compares values when the option is *truthy*. So an
+ *  empty string is not "no check" — it drops the comparison while adding a
+ *  requirement that the claim exist at all, which leaving the option out
+ *  would not impose. An empty list is truthy, so it compares and matches
+ *  nothing. An empty string *inside* a list matches only a literally empty
+ *  claim. Four behaviours, none of them each other. */
+function describeConstraint(value: string | string[] | undefined): {
+  /** Empty string: jose requires the claim and compares nothing. */
+  presenceOnly: boolean;
+  /** Usable values, de-duplicated — a repeated entry would otherwise print
+   *  the same paragraph twice, and both config lists accept duplicates. */
+  values: string[];
+  /** Entries that match only a literally empty claim. */
+  emptyEntries: number;
+} {
+  if (value === undefined || value === '') {
+    return { presenceOnly: value === '', values: [], emptyEntries: 0 };
+  }
+  const raw = typeof value === 'string' ? [value] : value;
+  const usable = raw.filter((entry) => entry !== '');
+  return {
+    presenceOnly: false,
+    values: [...new Set(usable)],
+    emptyEntries: raw.length - usable.length,
+  };
+}
+
+/** Compare what the protected-resource metadata advertises against what the
+ *  resolved JWT config accepts, split by what an operator should do about it:
+ *  `divergences` is startup-warning material (nobody wants that shape),
+ *  `notes` is the documented audience escape hatch spelling out its own
+ *  consequences.
+ *
+ *  Every consequence stated here was measured against the pinned jose, not
+ *  inferred: `iss` is compared to the expected list by membership, while
+ *  `aud` is *intersected* with it — a token carrying several audiences is
+ *  accepted when any one of them matches. That asymmetry is why the audience
+ *  wording is about a token whose *only* audience is the advertised
+ *  resource.
+ *
+ *  The degenerate shapes are not all API-only: `audience: []` passes the
+ *  kozou CLI's schema (the array branch carries no `.min(1)`), and both
+ *  config lists accept duplicate entries, so a plain config file can reach
+ *  the empty-list and duplicate paths. */
+function collectAdvertisementSignals(
+  opts: McpHttpAuthOptions,
+  jwt: AuthConfig['jwt'],
+): { divergences: string[]; notes: string[] } {
+  const divergences: string[] = [];
+  const notes: string[] = [];
+  const quote = (values: string[]): string => values.map((v) => `"${v}"`).join(', ');
+
+  const issuer = describeConstraint(jwt.issuer);
+  if (issuer.presenceOnly) {
+    divergences.push(
+      'auth.jwt.issuer is an empty string: every "iss" value is accepted, and a token carrying ' +
+        'no "iss" claim at all is rejected. That is stricter than leaving the option out and ' +
+        'weaker than naming an issuer — almost certainly not what was meant.',
+    );
+  } else if (issuer.values.length === 0) {
+    divergences.push(
+      issuer.emptyEntries > 0
+        ? 'auth.jwt.issuer lists nothing but empty strings, which only a literally empty "iss" ' +
+            'claim matches: no token an authorization server would mint is accepted.'
+        : 'auth.jwt.issuer is an empty list, which no "iss" can match: every request is ' +
+            'rejected, whichever authorization server the client went to.',
+    );
+  } else {
+    if (issuer.emptyEntries > 0) {
+      divergences.push(
+        'auth.jwt.issuer contains an empty entry, which matches only a literally empty "iss" ' +
+          'claim: it widens nothing and is almost certainly a stray list item.',
+      );
+    }
+    for (const accepted of issuer.values) {
+      if (opts.authorizationServers.includes(accepted)) continue;
+      divergences.push(
+        `auth.jwt.issuer accepts "${accepted}", which auth.authorizationServers does not ` +
+          `advertise: a token from an issuer this server never told its clients about is honoured.`,
+      );
+    }
+    for (const advertised of new Set(opts.authorizationServers)) {
+      if (issuer.values.includes(advertised)) continue;
+      divergences.push(
+        `auth.authorizationServers advertises "${advertised}", which auth.jwt.issuer does not ` +
+          `accept: a token whose "iss" is exactly that is rejected. If that server mints a ` +
+          `different spelling — a trailing slash is the usual one — advertise the form it issues.`,
+      );
+    }
+  }
+
+  const audience = describeConstraint(jwt.audience);
+  if (audience.presenceOnly) {
+    divergences.push(
+      'auth.jwt.audience is an empty string: a token minted for any resource is accepted here, ' +
+        'and one carrying no "aud" claim at all is rejected. That is stricter than leaving the ' +
+        'option out and weaker than naming an audience — almost certainly not what was meant.',
+    );
+  } else if (audience.values.length === 0) {
+    divergences.push(
+      audience.emptyEntries > 0
+        ? 'auth.jwt.audience lists nothing but empty strings, which only a literally empty "aud" ' +
+            'claim matches: no token an authorization server would mint is accepted.'
+        : 'auth.jwt.audience is an empty list, which no "aud" can match: every request is rejected.',
+    );
+  } else if (audience.values.includes(opts.resource)) {
+    // Accepting the advertised resource *and* something else is the shape the
+    // escape hatch does not cover: the endpoint answers for a resource it
+    // never advertised, which is the confused-deputy case the MCP
+    // authorization spec's audience binding exists to prevent.
+    for (const extra of audience.values) {
+      if (extra === opts.resource) continue;
+      divergences.push(
+        `auth.jwt.audience accepts "${extra}" as well as the advertised auth.resource: a token ` +
+          `minted for "${extra}" is honoured here, so this endpoint answers for a resource it ` +
+          `does not advertise.`,
+      );
+    }
+  } else {
+    if (audience.emptyEntries > 0) {
+      divergences.push(
+        'auth.jwt.audience contains an empty entry, which matches only a literally empty "aud" ' +
+          'claim: it widens nothing and is almost certainly a stray list item.',
+      );
+    }
+    notes.push(
+      `auth.jwt.audience expects ${quote(audience.values)}, not the advertised auth.resource ` +
+        `"${opts.resource}": a token carrying any of those audiences is accepted, which is what ` +
+        `the setting is for. A token whose only audience is the advertised resource is rejected; ` +
+        `one carrying both passes, because the two lists are intersected rather than compared ` +
+        `whole.`,
+    );
+  }
+
+  return { divergences, notes };
 }
 
 /** Loopback per the RFC 8252 native-app convention: `localhost`, any
