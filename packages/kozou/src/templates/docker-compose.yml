@@ -86,9 +86,14 @@ services:
     # The client (your browser / MCP client) runs on this host and reaches them
     # at 127.0.0.1. To expose them beyond this host, put an authenticating proxy
     # in front and change the bind deliberately — do not publish them unguarded.
+    # Compose has no conditional `ports`, so the MCP mapping is listed even when
+    # KOZOU_MCP_HTTP_ENABLED=false. No MCP endpoint is served then — but the
+    # mapping is not free: Docker still holds host port 3334, so a `kozou dev`
+    # on the host cannot bind it while this stack is up. The label carries the
+    # condition because this file cannot drop the line.
     ports:
       - "127.0.0.1:3333:3333"   # Admin UI (no auth by default)
-      - "127.0.0.1:3334:3334"   # MCP HTTP (no auth)
+      - "127.0.0.1:3334:3334"   # MCP HTTP (no auth; not served if opted out)
 
 # --- PostgREST opt-out -------------------------------------------------------
 # Kozou serves REST in-process by default. To use an external PostgREST
