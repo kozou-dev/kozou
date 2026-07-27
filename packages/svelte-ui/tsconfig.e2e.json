@@ -1,0 +1,13 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "rootDir": "."
+  },
+  "include": [
+    "e2e/**/*.ts",
+    "e2e-api/**/*.ts",
+    "playwright.config.ts",
+    "playwright.kozou-api.config.ts"
+  ]
+}

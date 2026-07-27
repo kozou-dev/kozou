@@ -6,15 +6,22 @@
 // down in reverse order.
 
 import type { StartedPostgreSqlContainer } from '@testcontainers/postgresql';
-import type { ChildProcessWithoutNullStreams } from 'node:child_process';
+import type { ChildProcessByStdio } from 'node:child_process';
+import type { Readable } from 'node:stream';
 import type { Pool } from 'pg';
 import type { ApiServerHandle } from '@kozou/api';
+
+/** What `spawn(..., { stdio: ['ignore', 'pipe', 'pipe'] })` actually returns:
+ *  no stdin, both output streams piped. `ChildProcessWithoutNullStreams` —
+ *  the previous annotation — promises a writable stdin these processes do
+ *  not have, which is why assigning to it never typechecked. */
+type DevProcess = ChildProcessByStdio<null, Readable, Readable>;
 
 export interface E2EApiState {
   postgres?: StartedPostgreSqlContainer;
   pool?: Pool;
   api?: ApiServerHandle;
-  svelteUi?: ChildProcessWithoutNullStreams;
+  svelteUi?: DevProcess;
 }
 
 export const state: E2EApiState = {};

@@ -36,7 +36,7 @@
     "preview": "vite preview",
     "prepare": "svelte-kit sync || echo ''",
     "prepublishOnly": "pnpm run build",
-    "typecheck": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
+    "typecheck": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json && tsc -p tsconfig.e2e.json",
     "test": "vitest run",
     "test:e2e": "playwright test",
     "test:e2e:api": "playwright test --config playwright.kozou-api.config.ts"

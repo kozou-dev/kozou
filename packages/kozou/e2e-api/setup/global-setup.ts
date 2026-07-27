@@ -117,7 +117,7 @@ export default async function globalSetup() {
   state.configDir = configDir;
 
   log(`spawning kozou dev (default api backend) — UI ${HOST}:${UI_PORT}, API ${HOST}:${API_PORT}`);
-  state.kozouDev = spawn(
+  const kozouDev = spawn(
     'node',
     [CLI_ENTRY, 'dev', '--config', configPath, '--api-port', String(API_PORT)],
     {
@@ -126,8 +126,9 @@ export default async function globalSetup() {
       stdio: ['ignore', 'pipe', 'pipe'],
     },
   );
-  state.kozouDev.stdout.on('data', (b: Buffer) => process.stdout.write(`[kozou dev] ${b}`));
-  state.kozouDev.stderr.on('data', (b: Buffer) => process.stderr.write(`[kozou dev] ${b}`));
+  state.kozouDev = kozouDev;
+  kozouDev.stdout.on('data', (b: Buffer) => process.stdout.write(`[kozou dev] ${b}`));
+  kozouDev.stderr.on('data', (b: Buffer) => process.stderr.write(`[kozou dev] ${b}`));
 
   log(`waiting for Admin UI at ${ORIGIN}/`);
   await waitForHttp(`${ORIGIN}/`, 60_000);
