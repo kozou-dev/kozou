@@ -59,6 +59,11 @@ describe('describeMcpAuth', () => {
     const note = describeMcpAuth('unknown');
     expect(note).not.toContain('no authentication');
     expect(note).toContain('server.mcp.http.auth');
+    // Points at the likelier cause of all: a typo in a value the README tells
+    // operators to set by hand. Blaming version skew alone sent them looking
+    // for a mismatch that a standalone UI (no CLI at all) cannot have.
+    expect(note).toContain('KOZOU_UI_MCP_POSTURE');
+    expect(note).toContain('typo');
   });
 });
 

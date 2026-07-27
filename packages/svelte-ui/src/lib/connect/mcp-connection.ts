@@ -25,9 +25,9 @@ export const MCP_HTTP_PATH = '/mcp';
  *   - `local`   — serving with no authentication (the loopback-default posture);
  *   - `oauth`   — serving as an OAuth 2.1 protected resource
  *                 (`server.mcp.http.auth`);
- *   - `unknown` — a value this build does not recognize, i.e. a CLI newer than
- *                 this Admin UI. Never emitted by the CLI; see
- *                 {@link resolveMcpPosture}.
+ *   - `unknown` — a value this build does not recognize: a typo in a
+ *                 hand-written value, or a CLI newer than this Admin UI. Never
+ *                 emitted by the CLI itself; see {@link resolveMcpPosture}.
  */
 export type McpPosture = 'off' | 'local' | 'oauth' | 'unknown';
 
@@ -74,9 +74,12 @@ export function resolveMcpHttpPort(raw: string | undefined): number {
  *
  * An unrecognized value reads as `unknown`, which still offers the page — the
  * URL and both config snippets are posture-independent — but says nothing about
- * authentication. That is the honest reading: the only way to get here is a CLI
- * that speaks a posture this build was written before, and guessing `local`
- * would assert "no authentication" about an endpoint that may well have some.
+ * authentication. Guessing `local` would assert "no authentication" about an
+ * endpoint that may well have some, which is the defect this channel exists to
+ * remove; resolving to `off` would hide a page for an endpoint that is in fact
+ * serving. Two ways to get here: a value written by hand (the README documents
+ * setting `off` for a standalone UI, and `of` / `none` / `false` are the typos
+ * that follow), or a CLI newer than this build.
  */
 export function resolveMcpPosture(raw: string | undefined): McpPosture {
   const value = raw?.trim().toLowerCase();
@@ -106,9 +109,9 @@ export function describeMcpAuth(posture: ServedMcpPosture): string {
       );
     case 'unknown':
       return (
-        'This Admin UI could not tell how the endpoint authenticates — it is likely ' +
-        'older than the Kozou CLI serving it. Check server.mcp.http.auth in your ' +
-        'config before you expose the port.'
+        'Kozou reported an MCP posture this Admin UI does not recognize, so it cannot ' +
+        'tell you how this endpoint authenticates — check KOZOU_UI_MCP_POSTURE for a ' +
+        'typo, and server.mcp.http.auth in your config, before you expose the port.'
       );
   }
 }
