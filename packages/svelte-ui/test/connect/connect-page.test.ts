@@ -107,11 +107,31 @@ describe('the connect template states no posture of its own', () => {
   // template must bind it — and must not grow a claim of its own again.
   const template = () => readFileSync(TEMPLATE_PATH, 'utf8');
 
+  // Tags stripped and whitespace collapsed before matching. A raw-source check
+  // is defeated by markup: `no <strong>authentication</strong>` renders the
+  // forbidden sentence while containing none of it — and emphasising a word in
+  // that sentence is the likeliest edit anyone makes to it.
+  const renderedText = () =>
+    template()
+      .replace(/<[^>]*>/g, ' ')
+      .replace(/\s+/g, ' ');
+
   it('binds the resolved auth note', () => {
     expect(template()).toContain('data.connection.authNote');
   });
 
-  it('asserts nothing about authentication itself', () => {
-    expect(template()).not.toContain('no authentication');
+  it('asserts nothing about authentication or bind posture itself', () => {
+    const text = renderedText();
+    // Paraphrases too: the defect was a fixed claim, not a fixed wording.
+    for (const claim of [
+      'no authentication',
+      'unauthenticated',
+      'without authentication',
+      'requires authentication',
+      'protected resource',
+      'loopback',
+    ]) {
+      expect(text).not.toContain(claim);
+    }
   });
 });
