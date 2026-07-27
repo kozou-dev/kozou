@@ -46,6 +46,19 @@ export type UiMcpPosture =
   | typeof UI_MCP_POSTURE_LOCAL
   | typeof UI_MCP_POSTURE_OAUTH;
 
+/**
+ * The canonical resource URI (`server.mcp.http.auth.resource`) for the OAuth
+ * posture, on the same CLI-to-UI channel as the posture itself.
+ *
+ * The page would otherwise build the endpoint from the browser's request host,
+ * which is wrong in exactly the deployment `resource` exists for: the field is
+ * explicit and never derived from a Host header because a proxy or tunnel sits
+ * in front of the endpoint. Set only in the OAuth posture — the other postures
+ * have no declared URI to prefer over the request host — and deleted otherwise,
+ * so an inherited value cannot address a runtime it does not belong to.
+ */
+export const UI_MCP_RESOURCE_ENV = 'KOZOU_UI_MCP_RESOURCE';
+
 // Resolve the Admin UI's adapter-node standalone server entry. The
 // `build/` directory ships in @kozou/svelte-ui's published `files`, and
 // resolving the package's own package.json works whether kozou runs from
@@ -155,13 +168,23 @@ export function buildAdminUiEnv(
   // Always set, never merely deleted: a stray inherited value cannot hide a page
   // for an endpoint that is in fact serving, nor describe a posture this runtime
   // is not in.
+  const mcpAuth = config.server.mcp.http.auth;
   if (config.server.mcp.http.enabled) {
     env.KOZOU_MCP_HTTP_PORT = String(config.server.mcp.http.port);
     env[UI_MCP_POSTURE_ENV] =
-      config.server.mcp.http.auth === undefined ? UI_MCP_POSTURE_LOCAL : UI_MCP_POSTURE_OAUTH;
+      mcpAuth === undefined ? UI_MCP_POSTURE_LOCAL : UI_MCP_POSTURE_OAUTH;
   } else {
     env[UI_MCP_POSTURE_ENV] = UI_MCP_POSTURE_OFF;
     delete env.KOZOU_MCP_HTTP_PORT;
+  }
+  // The address to register, when there is a declared one (the schema requires
+  // `resource` wherever an auth block exists, so the OAuth posture always has
+  // it). Authoritative like the posture: deleted, not merely left alone, when
+  // this runtime has none.
+  if (config.server.mcp.http.enabled && mcpAuth !== undefined) {
+    env[UI_MCP_RESOURCE_ENV] = mcpAuth.resource;
+  } else {
+    delete env[UI_MCP_RESOURCE_ENV];
   }
   // Privilege-aware introspection (issue #99): pass the resolved role through to
   // the UI child so its introspection reflects what that role may do (hide

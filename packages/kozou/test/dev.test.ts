@@ -11,6 +11,7 @@ import {
   UI_MCP_POSTURE_LOCAL,
   UI_MCP_POSTURE_OAUTH,
   UI_MCP_POSTURE_OFF,
+  UI_MCP_RESOURCE_ENV,
   buildAdminUiEnv,
   classifyAdminUiExposure,
   describeApiAuth,
@@ -138,6 +139,41 @@ describe('buildAdminUiEnv', () => {
     // this the page asserts "no authentication" about a protected resource.
     expect(env.KOZOU_UI_MCP_POSTURE).toBe('oauth');
     expect(env.KOZOU_MCP_HTTP_PORT).toBe('3334');
+  });
+
+  it('passes the canonical resource URI in the OAuth posture', async () => {
+    const config = await makeOauthMcpConfig();
+    const env = buildAdminUiEnv(config, 'http://localhost:3333', {});
+    // The page would otherwise build the endpoint from the browser's host, which
+    // is wrong in the deployment `resource` exists for (a proxy in front of it).
+    expect(env.KOZOU_UI_MCP_RESOURCE).toBe('https://mcp.example.com/mcp');
+  });
+
+  it('passes no resource, and clears an inherited one, without an auth block', async () => {
+    const config = await makeConfig();
+    const env = buildAdminUiEnv(config, 'http://localhost:3333', {
+      KOZOU_UI_MCP_RESOURCE: 'https://stale.example.com/mcp',
+    });
+    // A stale value must not address a runtime that declared no canonical URI.
+    expect(env.KOZOU_UI_MCP_RESOURCE).toBeUndefined();
+  });
+
+  it('clears an inherited resource when the endpoint is off', async () => {
+    const config = await makeConfig();
+    const custom: KozouConfig = {
+      ...config,
+      server: {
+        ...config.server,
+        mcp: {
+          ...config.server.mcp,
+          http: { enabled: false, port: 3334, host: '127.0.0.1' },
+        },
+      },
+    };
+    const env = buildAdminUiEnv(custom, 'http://localhost:3333', {
+      KOZOU_UI_MCP_RESOURCE: 'https://stale.example.com/mcp',
+    });
+    expect(env.KOZOU_UI_MCP_RESOURCE).toBeUndefined();
   });
 
   it('tells the UI the MCP endpoint is off, and drops the port', async () => {
@@ -326,6 +362,17 @@ describe('the Admin UI posture channel is a cross-package contract', () => {
       const src = readFileSync(new URL(rel, import.meta.url), 'utf8');
       expect(src).toMatch(reference);
     }
+  });
+
+  it('is the exact env name the connection page reads the resource URI from', () => {
+    // Same contract, and a quieter failure if it breaks: the page would fall
+    // back to the request host and hand out an address that cannot connect,
+    // with no error anywhere.
+    const src = readFileSync(
+      new URL('../../svelte-ui/src/routes/connect/+page.server.ts', import.meta.url),
+      'utf8',
+    );
+    expect(src).toMatch(new RegExp(`process\\.env\\.${UI_MCP_RESOURCE_ENV}(?![A-Za-z0-9_])`));
   });
 
   it('are the exact posture values the Admin UI helper matches on', () => {

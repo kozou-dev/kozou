@@ -10,6 +10,11 @@
 // local-dev / Docker stack that yields the correct `localhost:<port>/mcp`; an
 // operator who reaches the UI through a different host (proxy/remote) adjusts
 // the host (the page says so).
+//
+// In the OAuth posture that guess is replaced by the canonical resource URI the
+// operator declared (`server.mcp.http.auth.resource`) — see
+// {@link buildMcpConnectionInfo}. Guessing there would be wrong in the exact
+// deployment that field exists for.
 
 /** Default MCP HTTP port (matches `kozou dev` / `kozou mcp --http`). */
 export const DEFAULT_MCP_HTTP_PORT = 3334;
@@ -72,8 +77,8 @@ export function resolveMcpHttpPort(raw: string | undefined): number {
  * default dev stack. It also keeps the pre-existing behaviour of offering the
  * page rather than hiding an endpoint that is in fact serving.
  *
- * An unrecognized value reads as `unknown`, which still offers the page — the
- * URL and both config snippets are posture-independent — but says nothing about
+ * An unrecognized value reads as `unknown`, which still offers the page — with
+ * the request-derived URL, the same guess `local` gets — but says nothing about
  * authentication. Guessing `local` would assert "no authentication" about an
  * endpoint that may well have some, which is the defect this channel exists to
  * remove; resolving to `off` would hide a page for an endpoint that is in fact
@@ -100,7 +105,8 @@ export function describeMcpAuth(posture: ServedMcpPosture): string {
         'This endpoint is an OAuth 2.1 protected resource (server.mcp.http.auth): ' +
         'your client discovers the authorization server from the endpoint itself and ' +
         'sends you to your identity provider to sign in the first time it connects. ' +
-        'The URL and the config above are the same either way.'
+        'No client secret goes in the config above — the URL is the canonical one ' +
+        'you configured, so it is already right for a proxy or another machine.'
       );
     case 'local':
       return (
@@ -121,19 +127,36 @@ export function buildMcpConnectionInfo(input: {
   requestUrl: URL;
   /** Port the co-located MCP HTTP server listens on. */
   mcpPort: number;
-  /** How that endpoint authenticates; decides the wording, nothing else. */
+  /** How that endpoint authenticates. Decides the wording — and, for `oauth`,
+   *  that {@link resourceUrl} is what to register. */
   posture: ServedMcpPosture;
+  /** The canonical resource URI (`server.mcp.http.auth.resource`), when the CLI
+   *  reported one. Used verbatim, path included: it identifies the endpoint, it
+   *  is not a host to append a path to. */
+  resourceUrl?: string;
 }): McpConnectionInfo {
-  const { requestUrl, mcpPort, posture } = input;
-  const httpUrl = `${requestUrl.protocol}//${requestUrl.hostname}:${mcpPort}${MCP_HTTP_PATH}`;
+  const { requestUrl, mcpPort, posture, resourceUrl } = input;
+  // The OAuth posture has an address the operator declared, so stop guessing:
+  // `resource` is explicit precisely because a proxy or tunnel makes the request
+  // host wrong, and that is the deployment this posture describes. The other
+  // postures have no declared URI, so the request host stays the best guess
+  // (and an absent resource in `oauth` — which the schema does not allow —
+  // falls back to it rather than rendering nothing).
+  const canonical = posture === 'oauth' ? resourceUrl?.trim() : undefined;
+  const httpUrl =
+    canonical !== undefined && canonical !== ''
+      ? canonical
+      : `${requestUrl.protocol}//${requestUrl.hostname}:${mcpPort}${MCP_HTTP_PATH}`;
   const claudeCodeCommand = `claude mcp add --transport http kozou ${httpUrl}`;
   const jsonConfig = JSON.stringify(
     { mcpServers: { kozou: { type: 'http', url: httpUrl } } },
     null,
     2,
   );
-  // Deliberately identical across postures: an MCP client discovers the
-  // authorization server from the endpoint's RFC 9728 protected-resource
-  // metadata, so an OAuth deployment registers exactly the same URL and JSON.
+  // The *shape* is identical across postures — one URL, no client secret, no
+  // token field — because an MCP client discovers the authorization server from
+  // the endpoint's RFC 9728 protected-resource metadata. The URL itself is not:
+  // in `oauth` it is the declared canonical resource, everywhere else a guess
+  // from the request host.
   return { httpUrl, claudeCodeCommand, jsonConfig, authNote: describeMcpAuth(posture) };
 }

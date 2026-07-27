@@ -36,6 +36,13 @@ export const load: PageServerLoad = ({ url }) => {
   // default; the page tells the operator to adjust it for a proxy/remote host.
   const mcpPort = resolveMcpHttpPort(process.env.KOZOU_MCP_HTTP_PORT);
   return {
-    connection: buildMcpConnectionInfo({ requestUrl: url, mcpPort, posture }),
+    connection: buildMcpConnectionInfo({
+      requestUrl: url,
+      mcpPort,
+      posture,
+      // Present only in the OAuth posture, where it replaces the host guess with
+      // the canonical URI the operator declared.
+      resourceUrl: process.env.KOZOU_UI_MCP_RESOURCE,
+    }),
   };
 };
