@@ -47,6 +47,49 @@ describe('describeMcpAuth', () => {
     expect(describeMcpAuth('local')).toContain('no authentication');
   });
 
+  it('says nothing about where the endpoint listens or how far it reaches', () => {
+    // The note used to say the server "binds to loopback by default". Both
+    // shipped compose stacks set KOZOU_MCP_HTTP_HOST=0.0.0.0, so for the
+    // flagship `docker compose up` the page and the container's own stderr
+    // disagreed — and the page was the reassuring one. Pointing at the bind
+    // host instead was no better: in that deployment reach is decided by the
+    // compose port publishing (127.0.0.1:3334), not by the 0.0.0.0 bind, and
+    // an Admin UI run on its own resolves to `local` with no CLI output to
+    // consult at all.
+    //
+    // Shapes, not fixed phrases: every wording that slipped past the first
+    // version of this guard was a different spelling of one idea ("your
+    // machine only", "the local interface", "not reachable from the LAN",
+    // "::1", "only from this computer"). Matching the *shape* of a reach
+    // claim catches those without banning ordinary words — the OAuth note
+    // legitimately says the URL is "already right for a proxy or another
+    // machine", which a plain vocabulary ban would have failed.
+    const REACH_CLAIMS = [
+      /\bloopback\b/,
+      /\blocalhost\b/,
+      /\b127\./,
+      /::1/,
+      /\b0\.0\.0\.0\b/,
+      /\bbinds?\b|\bbound\b/,
+      /\bonly (?:from|on|to)\b/,
+      /\b(?:machine|computer|host|interface|network|lan)s? only\b/,
+      /\bnot reachable\b/,
+      /\breachable (?:only|from)\b/,
+    ];
+    for (const posture of ['local', 'oauth', 'unknown'] as const) {
+      const note = describeMcpAuth(posture).toLowerCase();
+      for (const claim of REACH_CLAIMS) {
+        expect(note, `${posture} note makes a reach claim: ${String(claim)}`).not.toMatch(claim);
+      }
+    }
+    // What remains is true wherever the note renders: no authentication, so
+    // reaching the port is the whole of the access control.
+    expect(describeMcpAuth('local')).toBe(
+      'The MCP HTTP server has no authentication, so anything that can reach the port ' +
+        'can read your schema.',
+    );
+  });
+
   it('describes an OAuth-protected resource without claiming there is no auth', () => {
     const note = describeMcpAuth('oauth');
     expect(note).not.toContain('no authentication');

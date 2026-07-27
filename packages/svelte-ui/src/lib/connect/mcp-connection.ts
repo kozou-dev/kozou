@@ -27,7 +27,8 @@ export const MCP_HTTP_PATH = '/mcp';
  * `KOZOU_UI_MCP_POSTURE`:
  *
  *   - `off`     — no listener (`server.mcp.http.enabled: false`); the page 404s;
- *   - `local`   — serving with no authentication (the loopback-default posture);
+ *   - `local`   — serving with no authentication (the posture says nothing
+ *                 about the bind host; the channel has no second axis);
  *   - `oauth`   — serving as an OAuth 2.1 protected resource
  *                 (`server.mcp.http.auth`);
  *   - `unknown` — a value this build does not recognize: a typo in a
@@ -109,9 +110,18 @@ export function describeMcpAuth(posture: ServedMcpPosture): string {
         'you configured, so it is already right for a proxy or another machine.'
       );
     case 'local':
+      // Silent about where the endpoint listens and about how far it can be
+      // reached, because this package can know neither and both were got
+      // wrong here before. "Binds to loopback by default" contradicted the
+      // shipped compose stacks, which set KOZOU_MCP_HTTP_HOST=0.0.0.0. A
+      // pointer at the bind host was no better: in that same deployment the
+      // bind host is 0.0.0.0 while reach is decided by the compose port
+      // publishing (127.0.0.1), and an Admin UI started on its own has no
+      // CLI output to point at. What is left is what holds in every posture
+      // this note renders in.
       return (
-        'The MCP HTTP server has no authentication and binds to loopback by default, ' +
-        'so anything that can reach the port can read your schema.'
+        'The MCP HTTP server has no authentication, so anything that can reach the port ' +
+        'can read your schema.'
       );
     case 'unknown':
       return (
