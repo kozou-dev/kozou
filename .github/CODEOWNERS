@@ -1,0 +1,54 @@
+# Who is asked to review what.
+#
+# This file does nothing on its own today, and saying otherwise would be the
+# kind of claim it exists to guard against. The repository has one
+# collaborator, who authors every PR, and GitHub never requests review from
+# an author; the `protect-main` ruleset currently sets
+# `required_approving_review_count: 0` and `require_code_owner_review:
+# false`. Turning this list into enforcement is a repository setting, not a
+# commit: set `require_code_owner_review` on that ruleset once a second
+# person exists who can satisfy it.
+#
+# It is written now anyway, because the moment it starts to matter - a
+# second maintainer - is the moment nobody thinks to draw the distinction.
+# With the list in place, broadening the catch-all is a one-line change and
+# the entries under it stay where they are; without it, the natural move is
+# one broad rule and no separation at all.
+#
+# The criterion below: paths where a change can weaken a guarantee without
+# touching product code. Last match wins, so the specific paths come after
+# the catch-all.
+
+*                                       @takashi-matsuyama
+
+# --- What CI enforces ------------------------------------------------------
+
+# What runs, with what permissions, and which checks gate a merge.
+/.github/workflows/                     @takashi-matsuyama
+
+# Who Dependabot may bump and how: the update path for every pinned
+# third-party action.
+/.github/dependabot.yml                 @takashi-matsuyama
+
+# --- What CI is told to ignore ---------------------------------------------
+# The two files whose entire purpose is to be read rather than trusted. Each
+# can stop a required check from failing on a real finding, silently, and
+# each covers one of the two blocking scans.
+
+/.github/osv-scanner-exceptions.toml    @takashi-matsuyama
+/.gitleaks.toml                         @takashi-matsuyama
+
+# --- What gets scanned, built and published --------------------------------
+
+# Builds the trees the blocking dependency scan runs against; can narrow
+# what is scanned without touching the scanner.
+/scripts/derive-consumer-manifests.mjs  @takashi-matsuyama
+
+# The published container image: base layer, what is copied in, what runs.
+/Dockerfile                             @takashi-matsuyama
+
+# --- What we promise -------------------------------------------------------
+
+# The disclosure contract: where a reporter is told to go, and what they are
+# told to expect.
+/SECURITY.md                            @takashi-matsuyama
