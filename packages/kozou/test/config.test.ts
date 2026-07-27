@@ -295,6 +295,61 @@ server:
     }
   });
 
+  it('records the env vars that actually fed a config that failed validation', async () => {
+    // Validation runs on file + environment merged, so an issue path can point
+    // at something no file contains. The sources travel with the error.
+    const dir = await makeTempDir();
+    const file = await writeYaml(
+      dir,
+      `database:
+  url: postgres://u:p@host:5432/db
+server:
+  mcp:
+    http:
+      enabled: true
+      auth:
+        resource: https://mcp.example.com/mcp
+        authorizationServers:
+          - https://as.example.com
+        jwt:
+          jwksUri: https://as.example.com/jwks
+`,
+    );
+    let thrown: unknown;
+    try {
+      await loadConfig({ path: file, env: { KOZOU_MCP_HTTP_ENABLED: 'false' } });
+    } catch (err) {
+      thrown = err;
+    }
+    expect(thrown).toBeInstanceOf(KozouConfigError);
+    expect((thrown as KozouConfigError).envSources).toEqual(['KOZOU_MCP_HTTP_ENABLED']);
+    expect((thrown as KozouConfigError).filePath).toBe(file);
+  });
+
+  it('does not record an env var whose value the config ignored', async () => {
+    // DATABASE_URL is set but the file supplies a url, so it contributed
+    // nothing — naming it would be a false lead of the opposite kind.
+    const dir = await makeTempDir();
+    const file = await writeYaml(
+      dir,
+      `database:
+  url: postgres://u:p@host:5432/db
+server:
+  mcp:
+    http:
+      port: 99999
+`,
+    );
+    let thrown: unknown;
+    try {
+      await loadConfig({ path: file, env: { DATABASE_URL: 'postgres://other:x@h:5432/y' } });
+    } catch (err) {
+      thrown = err;
+    }
+    expect(thrown).toBeInstanceOf(KozouConfigError);
+    expect((thrown as KozouConfigError).envSources).toEqual([]);
+  });
+
   it('blames the environment, not the config file, for an unreadable value', async () => {
     // The file is read (database.url comes from it) but contains nothing about
     // this variable, so carrying its path would send anyone who reports the
