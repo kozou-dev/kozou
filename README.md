@@ -110,6 +110,21 @@ npm install kozou @kozou/core @kozou/introspect @kozou/mcp @kozou/svelte-ui
 `@kozou/api` is bundled with `kozou` (no separate install). The experimental
 `@kozou/codegen` ships as an optional companion (`npm install kozou @kozou/codegen`).
 
+**The REST layer is the Admin UI's backend; `kozou dev` does not expose it to
+your network.** By default `kozou dev` starts `@kozou/api` in-process and prints
+its address, but binds it to `127.0.0.1` — the port is configurable
+(`--api-port`), the host is not — and the scaffolded compose stack publishes no
+REST port at all, only the Admin UI (3333) and the MCP endpoint (3334), both on
+host loopback. What it leaves is a loopback service, not a private one: anything
+sharing that loopback reaches it — other processes on your machine when you run
+`kozou dev` directly, other processes in the container under compose — and it
+carries no authentication until you configure `auth`. To serve REST to your own
+clients, run it yourself: `@kozou/api` is published on npm (its wire format and
+OpenAPI are a stable v1.0 contract), and `startApiServer` takes `host` / `port`
+alongside the opt-in JWT + RLS `auth` config, which also needs a `pool`. See the
+[`@kozou/api` README](packages/api/README.md#security-boundary), and do not put
+the unauthenticated default on a network.
+
 ## Security
 
 Kozou introspects `COMMENT ON` text, view definitions, and type information from
