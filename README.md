@@ -14,6 +14,12 @@ definitions, and type information — and hands it to the agent over
 [MCP](https://modelcontextprotocol.io). Same model, same question, correct
 answer.
 
+There is also a desktop app — [kozou Desktop](https://github.com/kozou-dev/kozou-desktop),
+experimental and run from source — that renders the same compiled semantics as
+an interactive map across several databases at once, with the describe output an
+agent reads beside the human view. Not sure which of the two you want? See
+[The desktop app, or a server?](https://kozou.org/concepts/desktop-or-server/).
+
 ## See it: the demo
 
 A small online-store schema where the obvious revenue query is off by **4.8×**:
