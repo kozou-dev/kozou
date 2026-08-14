@@ -56,9 +56,14 @@ export type DevOptions = {
 
 const PREFIX = '[kozou dev]';
 
-// The in-house @kozou/api server is reached only by the Admin UI's
-// server-side fetch (same host), so bind it to loopback — no need to
-// expose it to the browser or the network.
+// The in-house @kozou/api server exists for the Admin UI's server-side
+// fetch, so it binds loopback: the port is configurable (--api-port), the
+// host is not. That constrains where a caller is, not who it is — anything
+// sharing that loopback reaches it (other processes on this host when run
+// directly, other processes in the container under compose; examples/react
+// and the e2e suite both do), with no authentication until `auth` is
+// configured. What is published is a deployment question this file cannot
+// see, so it says nothing about it.
 const API_HOST = '127.0.0.1';
 const DEFAULT_API_PORT = 3335;
 
@@ -102,7 +107,7 @@ async function startInhouseApi(config: KozouConfig, port: number): Promise<Inhou
     // When `auth` is configured the API verifies a JWT and runs each request
     // under SET LOCAL ROLE, which needs a dedicated client per request — pass
     // the pool. With no `auth`, the pool is unused and the API stays
-    // unauthenticated (loopback-only), exactly as before.
+    // unauthenticated, exactly as before.
     pool,
     auth: config.auth,
     host: API_HOST,

@@ -3,9 +3,10 @@
 # Brings up:
 #   - postgres   PostgreSQL 16 (the source of truth)
 #   - kozou      `kozou dev` - the bundled Admin UI + MCP HTTP server, plus
-#                Kozou's in-house REST backend served in-process
-#                (ghcr.io/kozou-dev/kozou). Binds 0.0.0.0 inside the
-#                container so the port mappings below reach your host.
+#                Kozou's in-house REST backend (ghcr.io/kozou-dev/kozou).
+#                The Admin UI and the MCP server bind 0.0.0.0 inside the
+#                container so the port mappings below reach your host; the
+#                REST backend stays on the container's own loopback.
 #
 # The Admin UI talks to Kozou's in-house REST layer by default — no separate
 # REST container is needed. To opt out and use an external PostgREST instead,
@@ -34,9 +35,12 @@ services:
       retries: 10
 
   kozou:
-    # `kozou dev` spawns the bundled @kozou/svelte-ui Admin UI, the MCP HTTP
-    # server, and Kozou's in-house REST backend (all in-process). Each binds
-    # 0.0.0.0 inside the container so the port mappings below reach your host.
+    # `kozou dev` spawns the bundled @kozou/svelte-ui Admin UI as a child
+    # process, and runs the MCP HTTP server (unless opted out below) and
+    # Kozou's in-house REST backend in-process. Only the Admin UI and the MCP
+    # server bind 0.0.0.0 inside the container (see the env below); the REST
+    # backend's host is hardcoded to loopback, so a published REST port would
+    # not reach it and none is listed.
     image: ghcr.io/kozou-dev/kozou:v1.17.0
     command: ["dev"]
     environment:

@@ -4,8 +4,9 @@
 #   - postgres   PostgreSQL 16, initialized with ./schema.sql (the demo store
 #                schema + seed data).
 #   - kozou      `kozou dev` — the bundled Admin UI (:3333) and the MCP HTTP
-#                server (:3334), plus Kozou's in-house REST backend, all
-#                in-process (ghcr.io/kozou-dev/kozou).
+#                server (:3334), plus Kozou's in-house REST backend on the
+#                container's own loopback, unpublished
+#                (ghcr.io/kozou-dev/kozou).
 #
 # Usage:
 #   cp .env.example .env
