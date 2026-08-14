@@ -42,24 +42,6 @@
 # expired date, that failure is always fixable here, by deleting the entry.
 
 [[IgnoredVulns]]
-id = "GHSA-frvp-7c67-39w9"
-# Reached by anyone installing @kozou/mcp, via @modelcontextprotocol/sdk.
-reason = """
-Not reachable from kozou. The flaw is a path traversal in @hono/node-server's \
-serveStatic on Windows via an encoded backslash, and serveStatic is never \
-imported or referenced anywhere in the SDK. Its two imports from the package \
-are getRequestListener (server/streamableHttp.js, the Streamable HTTP \
-transport) and serve (an examples file); the only serve-static strings in the \
-package are `declare module 'express-serve-static-core'` type augmentations, \
-which belong to Express. The SDK is also the sole consumer of \
-@hono/node-server in the tree. The patch is 2.0.5 while \
-@modelcontextprotocol/sdk 1.29.0 declares ^1.19.9 with no 1.x backport, so \
-clearing it would force an unvetted major into every adopter's MCP transport \
-path. \
-Removes itself when @modelcontextprotocol/sdk moves to @hono/node-server 2.x.
-"""
-
-[[IgnoredVulns]]
 id = "GHSA-pxg6-pf52-xh8x"
 # Reached by anyone installing @kozou/svelte-ui, via sveltekit-superforms ->
 # peer @sveltejs/kit -> cookie. Surfaced by this gate on its first run; the
