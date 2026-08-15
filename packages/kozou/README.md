@@ -115,9 +115,14 @@ uiHints:
 ```
 
 The full schema also accepts `server.ui.{port,host}`,
-`server.mcp.http.{enabled,port,host}`, `server.mcp.stdio`, and
-`cache.ttlMs` overrides; defaults match the template that
-`create-kozou` writes. `server.mcp.http.enabled: false` turns the
+`server.mcp.http.{enabled,port,host,advertisedUrl}`, `server.mcp.stdio`,
+and `cache.ttlMs` overrides; defaults match the template that
+`create-kozou` writes. `server.mcp.http.advertisedUrl` is the address
+MCP clients reach the endpoint at when that is not the port it binds —
+a remapped published port, a tunnel, a devcontainer, a proxy — and is
+what the Admin UI's "Connect an AI agent" page hands out instead of
+building one from the browser's host (`KOZOU_MCP_HTTP_ADVERTISED_URL`
+sets it from the environment). `server.mcp.http.enabled: false` turns the
 MCP HTTP endpoint off entirely — `kozou dev` then starts no MCP
 listener and serves only the Admin UI and whichever data backend you
 configured, and `kozou mcp --http` refuses rather than contradicting

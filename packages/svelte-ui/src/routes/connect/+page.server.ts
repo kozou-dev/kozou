@@ -43,6 +43,11 @@ export const load: PageServerLoad = ({ url }) => {
       // Present only in the OAuth posture, where it replaces the host guess with
       // the canonical URI the operator declared.
       resourceUrl: process.env.KOZOU_UI_MCP_RESOURCE,
+      // The same, for the posture with no auth block: set when the operator
+      // declared where this endpoint is actually reached, because the bind port
+      // is not that address once anything sits in between (issue #258). `kozou
+      // dev` sets exactly one of these two, or neither.
+      advertisedUrl: process.env.KOZOU_UI_MCP_ADVERTISED_URL,
     }),
   };
 };

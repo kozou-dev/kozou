@@ -151,8 +151,12 @@ describe('buildMcpConnectionInfo', () => {
       mcpPort: 3334,
       posture: 'local',
     });
-    // The MCP server is co-located on the same host, different port; the path
-    // (/connect) is irrelevant — only the origin's protocol + hostname matter.
+    // This is the *fallback*, and it holds only while the MCP server really is
+    // co-located on the same host at the bind port. That assumption is what a
+    // published-port remap, a tunnel or a proxy breaks, which is why a declared
+    // address wins over it — see the advertisedUrl tests below. The path
+    // (/connect) is irrelevant either way: only the origin's protocol +
+    // hostname feed the guess.
     expect(info.httpUrl).toBe('https://kozou.example.com:3334/mcp');
   });
 
@@ -219,6 +223,136 @@ describe('buildMcpConnectionInfo', () => {
     expect(info.jsonConfig).toContain('https://mcp.example.com/mcp');
     expect(info.httpUrl).not.toContain('admin.internal');
     expect(info.httpUrl).not.toContain('3334');
+  });
+
+  it('prefers the declared reachable address outside the OAuth posture, verbatim', () => {
+    // Issue #258: the endpoint is published on a remapped host port, so the
+    // bind port the page is handed is not where anything answers. Used
+    // verbatim, exactly like `resource` — no port appended, no path invented.
+    for (const posture of ['local', 'unknown'] as const) {
+      const info = buildMcpConnectionInfo({
+        requestUrl: new URL('http://localhost:3333/connect'),
+        mcpPort: 3334,
+        posture,
+        advertisedUrl: 'http://localhost:4334/mcp',
+      });
+      expect(info.httpUrl).toBe('http://localhost:4334/mcp');
+      expect(info.claudeCodeCommand).toContain('http://localhost:4334/mcp');
+      expect(info.jsonConfig).toContain('http://localhost:4334/mcp');
+      expect(info.httpUrl).not.toContain('3334');
+    }
+  });
+
+  it('does not derive the URL from the request at all when an address is declared', () => {
+    // A form-level guard rather than a copy check: whatever the browser reached
+    // the Admin UI on — scheme, host, port — the declared address is what comes
+    // out, byte for byte. A rebuild that merely happens to agree on one input
+    // (or that grafts on the request's scheme or port) breaks invariance here,
+    // where a substring assertion on a single case would let it through.
+    const declared = 'https://mcp.example.com/mcp';
+    const requests = [
+      'http://localhost:3333/connect',
+      'https://kozou.example.com/connect',
+      'http://127.0.0.1:8080/connect',
+      'https://admin.internal:9443/connect?x=1',
+    ];
+    const built = requests.map(
+      (href) =>
+        buildMcpConnectionInfo({
+          requestUrl: new URL(href),
+          mcpPort: 3334,
+          posture: 'local',
+          advertisedUrl: declared,
+        }).httpUrl,
+    );
+    expect(new Set(built)).toEqual(new Set([declared]));
+  });
+
+  it('ignores a declared reachable address in the OAuth posture', () => {
+    // The schema refuses the combination, so this is defence in depth — but the
+    // direction matters: an MCP client discovers the endpoint from its RFC 9728
+    // metadata, which names `resource`, so `resource` is the address to hand out
+    // whenever both somehow arrive.
+    const info = buildMcpConnectionInfo({
+      requestUrl: new URL('https://admin.internal:3333/connect'),
+      mcpPort: 3334,
+      posture: 'oauth',
+      resourceUrl: 'https://mcp.example.com/mcp',
+      advertisedUrl: 'http://localhost:4334/mcp',
+    });
+    expect(info.httpUrl).toBe('https://mcp.example.com/mcp');
+  });
+
+  it('falls back to the request host when the declared address is blank', () => {
+    // Same treatment as an empty resource: render the guess rather than an
+    // empty or `undefined/mcp` URL.
+    for (const advertisedUrl of ['', '   ']) {
+      const info = buildMcpConnectionInfo({
+        requestUrl: new URL('http://localhost:3333/'),
+        mcpPort: 3334,
+        posture: 'local',
+        advertisedUrl,
+      });
+      expect(info.httpUrl).toBe('http://localhost:3334/mcp');
+    }
+  });
+
+  it('says the URL was declared when it was, and points at the right field', () => {
+    // The template used to carry one fixed sentence: "the URL uses the host
+    // Kozou is configured with and the MCP port… adjust the host accordingly".
+    // With a declared address that is false, and it sends the operator away
+    // from the address they declared. The note has to track the address.
+    const declared = buildMcpConnectionInfo({
+      requestUrl: new URL('http://localhost:3333/connect'),
+      mcpPort: 3334,
+      posture: 'local',
+      advertisedUrl: 'http://localhost:4334/mcp',
+    });
+    expect(declared.addressNote).toContain('server.mcp.http.advertisedUrl');
+    expect(declared.addressNote).not.toMatch(/adjust the host/i);
+
+    const viaResource = buildMcpConnectionInfo({
+      requestUrl: new URL('http://localhost:3333/connect'),
+      mcpPort: 3334,
+      posture: 'oauth',
+      resourceUrl: 'https://mcp.example.com/mcp',
+    });
+    expect(viaResource.addressNote).toContain('server.mcp.http.auth.resource');
+  });
+
+  it('says the URL is derived, and names the field that would replace it, when nothing was declared', () => {
+    const guessed = buildMcpConnectionInfo({
+      requestUrl: new URL('http://localhost:3333/connect'),
+      mcpPort: 3334,
+      posture: 'local',
+    });
+    // Naming the fix is the point: this page is where an operator finds out the
+    // address is wrong, so it is where the way to correct it belongs.
+    expect(guessed.addressNote).toContain('server.mcp.http.advertisedUrl');
+    expect(guessed.addressNote).not.toContain('you declared');
+  });
+
+  it('never claims an address was declared when it was guessed, or the reverse', () => {
+    // Form-level: the note and the URL must agree across every combination,
+    // rather than each being right in the one case a copy check pins down.
+    const cases = [
+      { posture: 'local' as const, advertisedUrl: 'http://localhost:4334/mcp', declared: true },
+      { posture: 'local' as const, advertisedUrl: undefined, declared: false },
+      { posture: 'unknown' as const, advertisedUrl: 'http://localhost:4334/mcp', declared: true },
+      { posture: 'unknown' as const, advertisedUrl: undefined, declared: false },
+    ];
+    for (const { posture, advertisedUrl, declared } of cases) {
+      const info = buildMcpConnectionInfo({
+        requestUrl: new URL('http://localhost:3333/connect'),
+        mcpPort: 3334,
+        posture,
+        advertisedUrl,
+      });
+      const saysDeclared = info.addressNote.includes('you declared');
+      expect(saysDeclared).toBe(declared);
+      // And the claim matches what actually came out.
+      expect(info.httpUrl === advertisedUrl).toBe(declared);
+    }
   });
 
   it('ignores a resource URI outside the OAuth posture', () => {

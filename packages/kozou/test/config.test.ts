@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { writeFile, mkdtemp } from 'node:fs/promises';
+import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomBytes } from 'node:crypto';
@@ -21,6 +22,25 @@ async function writeYaml(dir: string, content: string): Promise<string> {
   const file = join(dir, 'kozou.config.yaml');
   await writeFile(file, content, 'utf8');
   return file;
+}
+
+/**
+ * Load a config expected to fail validation, and hand back the error itself.
+ * The thrown message is a count ("Invalid kozou config: N issue(s)"), so which
+ * field was refused lives in `issues` — asserting there is what distinguishes
+ * "this field was rejected" from "something, somewhere, was".
+ */
+async function captureConfigError(
+  options: Parameters<typeof loadConfig>[0],
+): Promise<KozouConfigError> {
+  let thrown: unknown;
+  try {
+    await loadConfig(options);
+  } catch (err) {
+    thrown = err;
+  }
+  expect(thrown).toBeInstanceOf(KozouConfigError);
+  return thrown as KozouConfigError;
 }
 
 describe('loadConfig', () => {
@@ -252,6 +272,163 @@ server:
     );
     const config = await loadConfig({ path: file, env: { KOZOU_MCP_HTTP_ENABLED: 'true' } });
     expect(config.server.mcp.http.enabled).toBe(true);
+  });
+
+  it('KOZOU_MCP_HTTP_ADVERTISED_URL declares where the endpoint is reached', async () => {
+    // The compose stack publishes the endpoint on a host port the operator may
+    // have had to remap, and mounts no config file — so the environment is
+    // where the reachable address can be stated at all (issue #258).
+    const config = await loadConfig({
+      skipFile: true,
+      env: {
+        DATABASE_URL: 'postgres://u:p@localhost:5432/x',
+        KOZOU_MCP_HTTP_ADVERTISED_URL: 'http://localhost:4334/mcp',
+      },
+    });
+    expect(config.server.mcp.http.advertisedUrl).toBe('http://localhost:4334/mcp');
+    // The bind port is untouched: what the runtime listens on and what clients
+    // reach are different facts, which is the whole reason this field exists.
+    expect(config.server.mcp.http.port).toBe(3334);
+  });
+
+  it('an empty or whitespace-only KOZOU_MCP_HTTP_ADVERTISED_URL reads as unset', async () => {
+    // Both shipped compose stacks forward this as `${VAR:-}`, so EVERY
+    // scaffolded run passes an empty string. Treating it as a value would fail
+    // `min(1)` and take every one of those stacks down at startup. Whitespace
+    // gets the same treatment as the boolean env right beside it, so a stray
+    // space after the `=` in a .env means what the operator meant.
+    for (const raw of ['', '   ']) {
+      const config = await loadConfig({
+        skipFile: true,
+        env: {
+          DATABASE_URL: 'postgres://u:p@localhost:5432/x',
+          KOZOU_MCP_HTTP_ADVERTISED_URL: raw,
+        },
+      });
+      expect(config.server.mcp.http.advertisedUrl).toBeUndefined();
+    }
+  });
+
+  it('names KOZOU_MCP_HTTP_ADVERTISED_URL as the source when it supplied a bad value', async () => {
+    // Without this the error points at a config file that does not contain the
+    // offending value — the failure `envSources` exists to prevent.
+    const dir = await makeTempDir();
+    const file = await writeYaml(
+      dir,
+      `database:
+  url: postgres://u:p@host:5432/db
+`,
+    );
+    const thrown = await captureConfigError({
+      path: file,
+      env: { KOZOU_MCP_HTTP_ADVERTISED_URL: 'not-a-url' },
+    });
+    expect(thrown.envSources).toContain('KOZOU_MCP_HTTP_ADVERTISED_URL');
+  });
+
+  it('refuses an advertised URL that does not address the served path', async () => {
+    // #258 is "the page hands out config that cannot connect". The transport
+    // matches its path exactly, so each of these reproduces that failure
+    // through the field added to prevent it.
+    for (const bad of [
+      'http://localhost:4334',
+      'http://localhost:4334/',
+      'http://localhost:4334/mcp/',
+      'http://localhost:4334/admin',
+    ]) {
+      const thrown = await captureConfigError({
+        skipFile: true,
+        env: {
+          DATABASE_URL: 'postgres://u:p@localhost:5432/x',
+          KOZOU_MCP_HTTP_ADVERTISED_URL: bad,
+        },
+      });
+      expect(thrown.issues.map((i) => i.path)).toContain('server.mcp.http.advertisedUrl');
+    }
+  });
+
+  it('refuses an advertised URL carrying a query or fragment, as auth.resource does', async () => {
+    // The same two refusals resolveMcpHttpAuth applies to `resource`: a
+    // fragment never leaves the client and the transport ignores the query, so
+    // either one means the operator believes something is sent that is not.
+    for (const bad of ['http://localhost:4334/mcp?t=1', 'http://localhost:4334/mcp#f']) {
+      const thrown = await captureConfigError({
+        skipFile: true,
+        env: {
+          DATABASE_URL: 'postgres://u:p@localhost:5432/x',
+          KOZOU_MCP_HTTP_ADVERTISED_URL: bad,
+        },
+      });
+      expect(thrown.issues.map((i) => i.path)).toContain('server.mcp.http.advertisedUrl');
+    }
+  });
+
+  it('validates the advertised path against the one @kozou/mcp actually serves', () => {
+    // config.ts holds '/mcp' as a literal because @kozou/mcp keeps its own copy
+    // private. That is a coupling, so assert the two agree rather than trusting
+    // the comment that says they do: if the transport's default path ever moves,
+    // this fails instead of the validator silently refusing every correct URL.
+    const served = readFileSync(
+      new URL('../../mcp/src/startHttpServer.ts', import.meta.url),
+      'utf8',
+    );
+    const match = served.match(/const DEFAULT_MCP_PATH = '([^']+)'/);
+    expect(match?.[1]).toBe('/mcp');
+  });
+
+  it('refuses an advertised URL that is not an absolute http(s) URL', async () => {
+    // No safe fallback: the value exists to replace a guess, so accepting a
+    // malformed one would put the guess back while claiming it was declared.
+    for (const bad of ['localhost:4334/mcp', '/mcp', 'ftp://host/mcp']) {
+      const thrown = await captureConfigError({
+        skipFile: true,
+        env: {
+          DATABASE_URL: 'postgres://u:p@localhost:5432/x',
+          KOZOU_MCP_HTTP_ADVERTISED_URL: bad,
+        },
+      });
+      expect(thrown.issues.map((i) => i.path)).toContain('server.mcp.http.advertisedUrl');
+    }
+  });
+
+  it('refuses an advertised URL on a disabled endpoint', async () => {
+    const thrown = await captureConfigError({
+      skipFile: true,
+      env: {
+        DATABASE_URL: 'postgres://u:p@localhost:5432/x',
+        KOZOU_MCP_HTTP_ENABLED: 'false',
+        KOZOU_MCP_HTTP_ADVERTISED_URL: 'http://localhost:4334/mcp',
+      },
+    });
+    expect(thrown.issues.map((i) => i.path)).toContain('server.mcp.http.advertisedUrl');
+  });
+
+  it('refuses an advertised URL alongside an auth block', async () => {
+    // Two declared addresses, one of which the endpoint's own metadata names.
+    // Picking a winner silently would let the page advertise an address the
+    // endpoint does not claim.
+    const dir = await makeTempDir();
+    const file = await writeYaml(
+      dir,
+      `database:
+  url: postgres://u:p@host:5432/db
+server:
+  mcp:
+    http:
+      advertisedUrl: http://localhost:4334/mcp
+      auth:
+        resource: https://mcp.example.com/mcp
+        authorizationServers:
+          - https://as.example.com
+        scopes:
+          describe: mcp:describe
+          execute: mcp:execute
+        jwt:
+          jwksUri: https://as.example.com/jwks
+`,
+    );
+    const thrown = await captureConfigError({ path: file, env: {} });
+    expect(thrown.issues.map((i) => i.path)).toContain('server.mcp.http.advertisedUrl');
   });
 
   it('applies the MCP host and enabled overrides together', async () => {

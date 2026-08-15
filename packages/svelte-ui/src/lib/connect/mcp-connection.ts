@@ -11,10 +11,13 @@
 // operator who reaches the UI through a different host (proxy/remote) adjusts
 // the host (the page says so).
 //
-// In the OAuth posture that guess is replaced by the canonical resource URI the
-// operator declared (`server.mcp.http.auth.resource`) — see
-// {@link buildMcpConnectionInfo}. Guessing there would be wrong in the exact
-// deployment that field exists for.
+// That guess only holds while nothing sits between the browser and the
+// listener. Where something does — a published-port remap, a tunnel, a
+// devcontainer, a reverse proxy — the operator declares the reachable address
+// and it replaces the guess: `server.mcp.http.auth.resource` in the OAuth
+// posture, `server.mcp.http.advertisedUrl` where there is no auth block. See
+// {@link buildMcpConnectionInfo}. Guessing in those deployments would be wrong
+// in exactly the case those fields exist for.
 
 /** Default MCP HTTP port (matches `kozou dev` / `kozou mcp --http`). */
 export const DEFAULT_MCP_HTTP_PORT = 3334;
@@ -49,7 +52,12 @@ export interface McpConnectionInfo {
   jsonConfig: string;
   /** What to tell the operator about authentication, for this posture. */
   authNote: string;
+  /** Where {@link httpUrl} came from, and what to do if it is not reachable. */
+  addressNote: string;
 }
+
+/** Which declared field supplied the address, or `null` when it was guessed. */
+export type McpAddressSource = 'auth.resource' | 'advertisedUrl' | null;
 
 /**
  * Coerce a `KOZOU_MCP_HTTP_PORT` env string to a valid port, falling back to
@@ -78,9 +86,11 @@ export function resolveMcpHttpPort(raw: string | undefined): number {
  * default dev stack. It also keeps the pre-existing behaviour of offering the
  * page rather than hiding an endpoint that is in fact serving.
  *
- * An unrecognized value reads as `unknown`, which still offers the page — with
- * the request-derived URL, the same guess `local` gets — but says nothing about
- * authentication. Guessing `local` would assert "no authentication" about an
+ * An unrecognized value reads as `unknown`, which still offers the page — the
+ * address is resolved the same way `local` resolves it, a declared
+ * `advertisedUrl` if the CLI reported one and the request host otherwise — but
+ * says nothing about authentication. Guessing `local` would assert "no
+ * authentication" about an
  * endpoint that may well have some, which is the defect this channel exists to
  * remove; resolving to `off` would hide a page for an endpoint that is in fact
  * serving. Two ways to get here: a value written by hand (the README documents
@@ -132,6 +142,38 @@ export function describeMcpAuth(posture: ServedMcpPosture): string {
   }
 }
 
+/**
+ * Where the URL came from, and what to do about it. Lives here for the same
+ * reason as {@link describeMcpAuth}: the template used to carry one fixed
+ * sentence saying the URL was built from the configured host and the MCP port,
+ * and telling the operator to adjust the host. That became false the moment a
+ * declared address replaced the guess — and worse than false, since it sends
+ * the operator away from the address they declared, in the one deployment the
+ * declaration exists for.
+ */
+export function describeMcpAddress(
+  posture: ServedMcpPosture,
+  source: McpAddressSource,
+): string {
+  if (source !== null) {
+    return (
+      `The URL above is the address you declared (server.mcp.http.${source}), handed ` +
+      'over unchanged — register it exactly as it appears. The host you reached this ' +
+      'page on does not affect it.'
+    );
+  }
+  // Which field to point at depends on the posture: an OAuth endpoint declares
+  // its address as part of being one, and the schema requires it, so reaching
+  // here in that posture means something is wrong rather than unset.
+  const field = posture === 'oauth' ? 'server.mcp.http.auth.resource' : 'server.mcp.http.advertisedUrl';
+  return (
+    'The URL above is built from the host you reached this page on and the port Kozou ' +
+    'binds the MCP endpoint to. If clients reach that endpoint at a different address — ' +
+    'through a proxy or a tunnel, or because the published port was remapped — set ' +
+    `${field} to the address they should use, and this page will hand out that instead.`
+  );
+}
+
 export function buildMcpConnectionInfo(input: {
   /** The browser's request URL to the Admin UI; only origin parts are used. */
   requestUrl: URL;
@@ -144,19 +186,37 @@ export function buildMcpConnectionInfo(input: {
    *  reported one. Used verbatim, path included: it identifies the endpoint, it
    *  is not a host to append a path to. */
   resourceUrl?: string;
+  /** The declared reachable address (`server.mcp.http.advertisedUrl`), when the
+   *  CLI reported one. Same verbatim contract as {@link resourceUrl}, for the
+   *  postures that have no auth block. */
+  advertisedUrl?: string;
 }): McpConnectionInfo {
-  const { requestUrl, mcpPort, posture, resourceUrl } = input;
-  // The OAuth posture has an address the operator declared, so stop guessing:
-  // `resource` is explicit precisely because a proxy or tunnel makes the request
-  // host wrong, and that is the deployment this posture describes. The other
-  // postures have no declared URI, so the request host stays the best guess
-  // (and an absent resource in `oauth` — which the schema does not allow —
-  // falls back to it rather than rendering nothing).
-  const canonical = posture === 'oauth' ? resourceUrl?.trim() : undefined;
-  const httpUrl =
-    canonical !== undefined && canonical !== ''
-      ? canonical
-      : `${requestUrl.protocol}//${requestUrl.hostname}:${mcpPort}${MCP_HTTP_PATH}`;
+  const { requestUrl, mcpPort, posture, resourceUrl, advertisedUrl } = input;
+  // Prefer whatever address the operator declared, in every posture. Which
+  // field carries it depends on the posture — `resource` where an auth block
+  // exists (it is what the endpoint's own RFC 9728 metadata names, so it is
+  // what clients obey), `advertisedUrl` where none does — but the reason is
+  // the same in both: the request host plus the bind port is a guess, and it
+  // is wrong in exactly the deployments these fields exist for. The posture
+  // decides which field is read — that is a precedence rule, and it points at
+  // `resource` in the OAuth posture because clients discover that one from the
+  // endpoint itself. The schema also refuses the two together, so in practice
+  // only one ever arrives; this stays exclusive regardless, because a config
+  // object built directly bypasses the schema.
+  //
+  // Absent a declared address the request host remains the best guess, which
+  // is right for the default local stack and said to be a guess on the page.
+  const declared = posture === 'oauth' ? resourceUrl : advertisedUrl;
+  const canonical = declared?.trim();
+  const hasDeclared = canonical !== undefined && canonical !== '';
+  const httpUrl = hasDeclared
+    ? canonical
+    : `${requestUrl.protocol}//${requestUrl.hostname}:${mcpPort}${MCP_HTTP_PATH}`;
+  const addressSource: McpAddressSource = !hasDeclared
+    ? null
+    : posture === 'oauth'
+      ? 'auth.resource'
+      : 'advertisedUrl';
   const claudeCodeCommand = `claude mcp add --transport http kozou ${httpUrl}`;
   const jsonConfig = JSON.stringify(
     { mcpServers: { kozou: { type: 'http', url: httpUrl } } },
@@ -166,7 +226,13 @@ export function buildMcpConnectionInfo(input: {
   // The *shape* is identical across postures — one URL, no client secret, no
   // token field — because an MCP client discovers the authorization server from
   // the endpoint's RFC 9728 protected-resource metadata. The URL itself is not:
-  // in `oauth` it is the declared canonical resource, everywhere else a guess
-  // from the request host.
-  return { httpUrl, claudeCodeCommand, jsonConfig, authNote: describeMcpAuth(posture) };
+  // it is whichever address the operator declared, and a guess from the request
+  // host only when they declared none.
+  return {
+    httpUrl,
+    claudeCodeCommand,
+    jsonConfig,
+    authNote: describeMcpAuth(posture),
+    addressNote: describeMcpAddress(posture, addressSource),
+  };
 }

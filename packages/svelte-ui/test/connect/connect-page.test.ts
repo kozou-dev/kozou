@@ -137,6 +137,28 @@ describe('the connect template states no posture of its own', () => {
     expect(template()).toContain('data.connection.authNote');
   });
 
+  it('binds the resolved address note', () => {
+    // Same reason as the auth note: the template used to state where the URL
+    // came from as a fixed sentence, which a declared address made false.
+    expect(template()).toContain('data.connection.addressNote');
+  });
+
+  it('asserts nothing about where the URL came from itself', () => {
+    const text = renderedText();
+    // The removed sentence and its paraphrases. The defect was a fixed claim
+    // about the address, so what is forbidden is any fixed claim about it —
+    // including the instruction that followed from it, which pointed the
+    // operator away from an address they had declared.
+    for (const claim of [
+      'adjust the host',
+      'the host Kozou is configured with',
+      'and the MCP port',
+      'uses the host',
+    ]) {
+      expect(text.toLowerCase()).not.toContain(claim.toLowerCase());
+    }
+  });
+
   it('asserts nothing about authentication or bind posture itself', () => {
     const text = renderedText();
     // Paraphrases too: the defect was a fixed claim, not a fixed wording.
@@ -167,18 +189,26 @@ describe('the connect template states no posture of its own', () => {
   });
 });
 
-describe('connect page load: the OAuth address', () => {
+describe('connect page load: the declared address', () => {
   const RESOURCE_KEY = 'KOZOU_UI_MCP_RESOURCE';
+  const ADVERTISED_KEY = 'KOZOU_UI_MCP_ADVERTISED_URL';
   let savedResource: string | undefined;
+  let savedAdvertised: string | undefined;
 
   beforeEach(() => {
     savedResource = process.env[RESOURCE_KEY];
+    // Cleared too, or an operator debugging #258 — who has this exported in
+    // their shell — sees these tests fail for reasons that are not the code's.
+    savedAdvertised = process.env[ADVERTISED_KEY];
     delete process.env[RESOURCE_KEY];
+    delete process.env[ADVERTISED_KEY];
   });
 
   afterEach(() => {
     if (savedResource === undefined) delete process.env[RESOURCE_KEY];
     else process.env[RESOURCE_KEY] = savedResource;
+    if (savedAdvertised === undefined) delete process.env[ADVERTISED_KEY];
+    else process.env[ADVERTISED_KEY] = savedAdvertised;
   });
 
   it('hands over the canonical resource URI the CLI reported, not the request host', () => {
@@ -200,5 +230,30 @@ describe('connect page load: the OAuth address', () => {
     process.env[RESOURCE_KEY] = 'https://stale.example.com/mcp';
     const data = connectLoad(connectEvent()) as { connection: { httpUrl: string } };
     expect(data.connection.httpUrl).toBe('http://localhost:3334/mcp');
+  });
+
+  it('hands over the advertised address in the local posture (issue #258)', () => {
+    // The whole point of the fix, through the real process boundary: the env
+    // the CLI sets has to reach the builder. The regex guard in the kozou
+    // package asserts the name appears in this file's source; this asserts it
+    // is wired to something.
+    process.env[ENV_KEY] = 'local';
+    process.env[ADVERTISED_KEY] = 'http://localhost:4334/mcp';
+    const data = connectLoad(connectEvent()) as {
+      connection: { httpUrl: string; jsonConfig: string; claudeCodeCommand: string };
+    };
+    // connectEvent() requests http://localhost:3333/connect, so without this
+    // the page hands out http://localhost:3334/mcp — the remapped-away port.
+    expect(data.connection.httpUrl).toBe('http://localhost:4334/mcp');
+    expect(data.connection.jsonConfig).toContain('http://localhost:4334/mcp');
+    expect(data.connection.claudeCodeCommand).toContain('http://localhost:4334/mcp');
+  });
+
+  it('ignores an advertised address in the OAuth posture, where resource decides', () => {
+    process.env[ENV_KEY] = 'oauth';
+    process.env[RESOURCE_KEY] = 'https://mcp.example.com/mcp';
+    process.env[ADVERTISED_KEY] = 'http://localhost:4334/mcp';
+    const data = connectLoad(connectEvent()) as { connection: { httpUrl: string } };
+    expect(data.connection.httpUrl).toBe('https://mcp.example.com/mcp');
   });
 });

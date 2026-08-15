@@ -12,6 +12,7 @@ import {
   UI_MCP_POSTURE_OAUTH,
   UI_MCP_POSTURE_OFF,
   UI_MCP_RESOURCE_ENV,
+  UI_MCP_ADVERTISED_URL_ENV,
   buildAdminUiEnv,
   classifyAdminUiExposure,
   describeApiAuth,
@@ -174,6 +175,98 @@ describe('buildAdminUiEnv', () => {
       KOZOU_UI_MCP_RESOURCE: 'https://stale.example.com/mcp',
     });
     expect(env.KOZOU_UI_MCP_RESOURCE).toBeUndefined();
+  });
+
+  it('passes the declared reachable address when there is no auth block', async () => {
+    const config = await makeConfig();
+    const custom: KozouConfig = {
+      ...config,
+      server: {
+        ...config.server,
+        mcp: {
+          ...config.server.mcp,
+          http: {
+            ...config.server.mcp.http,
+            advertisedUrl: 'http://localhost:4334/mcp',
+          },
+        },
+      },
+    };
+    const env = buildAdminUiEnv(custom, 'http://localhost:3333', {});
+    // The bind port and the reachable address are different facts once an
+    // indirection exists; the page must be handed the second one (issue #258).
+    expect(env.KOZOU_UI_MCP_ADVERTISED_URL).toBe('http://localhost:4334/mcp');
+    expect(env.KOZOU_MCP_HTTP_PORT).toBe('3334');
+    expect(env.KOZOU_UI_MCP_POSTURE).toBe('local');
+  });
+
+  it('passes no advertised address, and clears an inherited one, when none is declared', async () => {
+    const config = await makeConfig();
+    const env = buildAdminUiEnv(config, 'http://localhost:3333', {
+      KOZOU_UI_MCP_ADVERTISED_URL: 'http://stale.example.com:4334/mcp',
+    });
+    // Same rule as the resource URI: a value from another stack must not
+    // address this one.
+    expect(env.KOZOU_UI_MCP_ADVERTISED_URL).toBeUndefined();
+  });
+
+  it('passes no advertised address when the endpoint is off, even though one is declared', async () => {
+    // The config carries BOTH `enabled: false` and an advertisedUrl. Dropping
+    // the `enabled` half of the condition has to fail here — an earlier version
+    // of this test replaced the whole `http` object and so left advertisedUrl
+    // undefined, which made it a duplicate of the test above and left that
+    // branch unconstrained. The schema refuses this combination, so it is
+    // reachable only by building the object directly; the runtime still checks,
+    // because a page for an endpoint that is off must not be handed an address.
+    const config = await makeConfig();
+    const custom: KozouConfig = {
+      ...config,
+      server: {
+        ...config.server,
+        mcp: {
+          ...config.server.mcp,
+          http: {
+            ...config.server.mcp.http,
+            enabled: false,
+            advertisedUrl: 'http://localhost:4334/mcp',
+          },
+        },
+      },
+    };
+    const env = buildAdminUiEnv(custom, 'http://localhost:3333', {
+      KOZOU_UI_MCP_ADVERTISED_URL: 'http://stale.example.com:4334/mcp',
+    });
+    expect(env.KOZOU_UI_MCP_ADVERTISED_URL).toBeUndefined();
+    expect(env.KOZOU_UI_MCP_POSTURE).toBe('off');
+  });
+
+  it('never hands the page two declared addresses at once', async () => {
+    // The schema refuses the combination, so this is reachable only by
+    // constructing the config object directly — which is exactly why the
+    // runtime branch is exclusive rather than trusting validation upstream.
+    // Two addresses would mean the page picks, and the page must not have to.
+    const config = await makeOauthMcpConfig();
+    const custom: KozouConfig = {
+      ...config,
+      server: {
+        ...config.server,
+        mcp: {
+          ...config.server.mcp,
+          http: {
+            ...config.server.mcp.http,
+            advertisedUrl: 'http://localhost:4334/mcp',
+          },
+        },
+      },
+    };
+    const env = buildAdminUiEnv(custom, 'http://localhost:3333', {});
+    const declared = [env.KOZOU_UI_MCP_RESOURCE, env.KOZOU_UI_MCP_ADVERTISED_URL].filter(
+      (v) => v !== undefined,
+    );
+    expect(declared).toHaveLength(1);
+    // And the one that survives is the one clients obey: an MCP client reads
+    // the endpoint's RFC 9728 metadata, which names `resource`.
+    expect(env.KOZOU_UI_MCP_RESOURCE).toBe('https://mcp.example.com/mcp');
   });
 
   it('tells the UI the MCP endpoint is off, and drops the port', async () => {
@@ -373,6 +466,17 @@ describe('the Admin UI posture channel is a cross-package contract', () => {
       'utf8',
     );
     expect(src).toMatch(new RegExp(`process\\.env\\.${UI_MCP_RESOURCE_ENV}(?![A-Za-z0-9_])`));
+  });
+
+  it('is the exact env name the connection page reads the advertised address from', () => {
+    // Breaks the same way and just as quietly: the page would go back to
+    // guessing from the request host, and the operator would get config for a
+    // port nothing answers on with nothing logged anywhere.
+    const src = readFileSync(
+      new URL('../../svelte-ui/src/routes/connect/+page.server.ts', import.meta.url),
+      'utf8',
+    );
+    expect(src).toMatch(new RegExp(`process\\.env\\.${UI_MCP_ADVERTISED_URL_ENV}(?![A-Za-z0-9_])`));
   });
 
   it('are the exact posture values the Admin UI helper matches on', () => {

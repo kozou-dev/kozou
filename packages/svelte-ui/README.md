@@ -99,8 +99,8 @@ Optional, both concerning the "Connect an AI agent" page:
 
   Absent reads as `local`, which is the posture a standalone UI is in.
   A value this build does not recognize (a typo, or a newer CLI) still
-  offers the page, with the request-derived URL, but says nothing about
-  authentication rather than guessing.
+  offers the page, resolving the address the way `local` does, but says
+  nothing about authentication rather than guessing.
 
 - `KOZOU_UI_MCP_RESOURCE` — the canonical resource URI
   (`server.mcp.http.auth.resource`) to hand out in the `oauth` posture,
@@ -109,6 +109,14 @@ Optional, both concerning the "Connect an AI agent" page:
   browser's request host and the MCP port, which is wrong behind the
   proxy or tunnel that makes `resource` necessary in the first place.
   Ignored in the other postures, where nothing declared a canonical URI.
+
+- `KOZOU_UI_MCP_ADVERTISED_URL` — the same thing for the postures with no
+  auth block (`server.mcp.http.advertisedUrl`): the address clients reach
+  the endpoint at, when that differs from the port it binds — a remapped
+  published port, a tunnel, a devcontainer, a proxy. Used verbatim, path
+  included. `kozou dev` sets it whenever the field is configured, and sets
+  at most one of this and `KOZOU_UI_MCP_RESOURCE`. Ignored in the `oauth`
+  posture, where `resource` is the address clients discover.
 
 ```bash
 # from the monorepo root

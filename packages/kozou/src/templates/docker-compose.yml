@@ -63,6 +63,18 @@ services:
       # The port published below has no authentication of its own unless you
       # configure server.mcp.http.auth.
       KOZOU_MCP_HTTP_ENABLED: ${KOZOU_MCP_HTTP_ENABLED:-}
+      # Where MCP clients reach the endpoint, when that is not the port below.
+      # This stack binds 3334 inside the container; the host port is whatever
+      # the mapping publishes, and the Admin UI's "Connect an AI agent" page
+      # cannot see the difference — left unset it hands out the container-side
+      # port, which after a remap addresses nothing, or whatever took 3334.
+      # Set it whenever the left-hand side of the MCP mapping stops being 3334,
+      # and for a tunnel or a proxy in front of it. Include the /mcp path:
+      # KOZOU_MCP_HTTP_ADVERTISED_URL=http://localhost:4334/mcp
+      # Refused at startup alongside KOZOU_MCP_HTTP_ENABLED=false (nothing is
+      # served, so there is no address to advertise) and alongside a
+      # server.mcp.http.auth block (auth.resource already declares one).
+      KOZOU_MCP_HTTP_ADVERTISED_URL: ${KOZOU_MCP_HTTP_ADVERTISED_URL:-}
       # JWT auth (see .env.example). Compose reads .env for ${VAR}
       # interpolation only, so every variable must be forwarded here
       # explicitly to reach the container. An empty value means unset:
@@ -97,6 +109,9 @@ services:
     # condition because this file cannot drop the line.
     ports:
       - "127.0.0.1:3333:3333"   # Admin UI (no auth by default)
+      # Moving the host side of this line (a clash with something already on
+      # 3334) also means setting KOZOU_MCP_HTTP_ADVERTISED_URL above — nothing
+      # here reaches the page that hands out the connection config.
       - "127.0.0.1:3334:3334"   # MCP HTTP (no auth; not served if opted out)
 
 # --- PostgREST opt-out -------------------------------------------------------
