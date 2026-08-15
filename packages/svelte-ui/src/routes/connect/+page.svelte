@@ -62,12 +62,7 @@
       meaning, never mutate data, through this surface.
     </li>
     <li>{data.connection.authNote}</li>
-    <li>
-      The URL above uses the host Kozou is configured with
-      (<code class="font-mono">localhost</code> by default) and the MCP port; if
-      you reach Kozou through a different host — a proxy or another machine —
-      adjust the host accordingly.
-    </li>
+    <li>{data.connection.addressNote}</li>
     <li>
       Full setup, the stdio transport, troubleshooting, and what each tool
       returns are in the

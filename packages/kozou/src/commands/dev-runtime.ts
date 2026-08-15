@@ -59,6 +59,23 @@ export type UiMcpPosture =
  */
 export const UI_MCP_RESOURCE_ENV = 'KOZOU_UI_MCP_RESOURCE';
 
+/**
+ * The reachable address for the posture that has no `auth` block
+ * (`server.mcp.http.advertisedUrl`), forwarded to the Admin UI.
+ *
+ * `resource` answers this question only where an auth block exists, and the
+ * question is not confined to that deployment: a published-port remap, a
+ * tunnel, a devcontainer or WSL forwarding all put something between the
+ * browser and the listener without any OAuth in sight. Without a declared
+ * value the page rebuilds the URL from the request host and the bind port,
+ * and hands out config for an address that is not this endpoint — nothing
+ * behind it, or whatever else holds that port (issue #258).
+ *
+ * Mutually exclusive with {@link UI_MCP_RESOURCE_ENV} by schema, and deleted
+ * rather than left alone when absent, for the same reason as that one.
+ */
+export const UI_MCP_ADVERTISED_URL_ENV = 'KOZOU_UI_MCP_ADVERTISED_URL';
+
 // Resolve the Admin UI's adapter-node standalone server entry. The
 // `build/` directory ships in @kozou/svelte-ui's published `files`, and
 // resolving the package's own package.json works whether kozou runs from
@@ -185,6 +202,19 @@ export function buildAdminUiEnv(
     env[UI_MCP_RESOURCE_ENV] = mcpAuth.resource;
   } else {
     delete env[UI_MCP_RESOURCE_ENV];
+  }
+  // The same job for the posture that has no auth block: the address the
+  // operator declared this endpoint is reached at, when an indirection makes
+  // the bind port the wrong thing to advertise. The schema refuses it
+  // alongside `auth`, so the two are never both set — but this is written as
+  // an exclusive branch anyway, because the page must be handed one declared
+  // address, not two. Authoritative in the same way: deleted when this runtime
+  // declares none, so a value inherited from another stack cannot address it.
+  const advertisedUrl = config.server.mcp.http.advertisedUrl;
+  if (config.server.mcp.http.enabled && mcpAuth === undefined && advertisedUrl !== undefined) {
+    env[UI_MCP_ADVERTISED_URL_ENV] = advertisedUrl;
+  } else {
+    delete env[UI_MCP_ADVERTISED_URL_ENV];
   }
   // Privilege-aware introspection (issue #99): pass the resolved role through to
   // the UI child so its introspection reflects what that role may do (hide

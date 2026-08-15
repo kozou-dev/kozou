@@ -108,6 +108,13 @@ const mcpAuthSchema = z.object({
   allowInsecureHttp: z.boolean().default(false),
 });
 
+// The path the MCP Streamable HTTP transport is served at. Kept as a literal
+// rather than imported: @kozou/mcp holds it privately (startHttpServer's
+// DEFAULT_MCP_PATH) and takes an override kozou never passes, so importing it
+// would widen that package's public surface to state a coupling a test can
+// assert instead — see config.test.ts.
+const MCP_HTTP_PATH = '/mcp';
+
 const mcpHttpServerSchema = z
   .object({
     // Serve the MCP Streamable HTTP endpoint at all. Default ON (the transport
@@ -120,6 +127,26 @@ const mcpHttpServerSchema = z
     enabled: z.boolean().default(true),
     port: z.number().int().min(0).max(65_535).default(3334),
     host: z.string().min(1).default('127.0.0.1'),
+    // Where clients reach this endpoint, when that is not what `port` says.
+    // `port` is the address the runtime BINDS; this is the address it is
+    // REACHED at, and any indirection separates the two — a published-port
+    // remap under compose, a tunnel, a devcontainer, WSL port forwarding, a
+    // reverse proxy. The Admin UI's /connect page otherwise rebuilds the URL
+    // from the browser's Host header plus `port`, which is exactly wrong in
+    // those deployments: it hands out copy-paste config for an address that is
+    // not this endpoint — nothing at all behind it, or, when the remap was
+    // forced by a clash, whatever took the port instead.
+    //
+    // A full URL rather than a port, because the class is not limited to a
+    // port clash: a tunnel changes host and scheme too. Used verbatim, path
+    // included — it identifies the endpoint, it is not a host to append a
+    // path to (same contract as `auth.resource`).
+    //
+    // The OAuth posture does not use this: `auth.resource` is already the
+    // declared address there, and it is the one clients must use because the
+    // endpoint's RFC 9728 metadata names it. Setting both is refused below
+    // rather than silently resolved.
+    advertisedUrl: z.string().min(1).optional(),
     auth: mcpAuthSchema.optional(),
   })
   .prefault({})
@@ -135,6 +162,94 @@ const mcpHttpServerSchema = z
           '(no endpoint is served, so the auth block has no effect). ' +
           'Enable the endpoint, or drop the auth block.',
         path: ['auth'],
+      });
+    }
+    if (http.advertisedUrl === undefined) return;
+    // Same dead-configuration rule as above: nothing is served, so there is no
+    // address to advertise.
+    if (!http.enabled) {
+      ctx.addIssue({
+        code: 'custom',
+        message:
+          'server.mcp.http.advertisedUrl is set while server.mcp.http.enabled ' +
+          'is false (no endpoint is served, so there is no address to ' +
+          'advertise). Enable the endpoint, or drop advertisedUrl.',
+        path: ['advertisedUrl'],
+      });
+      return;
+    }
+    // Two declared addresses, and only one of them is the one clients obey:
+    // an MCP client discovers the endpoint from its RFC 9728 protected-resource
+    // metadata, which carries `resource`. Advertising something else on the
+    // page would send the operator to an address the endpoint itself does not
+    // claim. Refuse the contradiction instead of picking a winner silently.
+    if (http.auth !== undefined) {
+      ctx.addIssue({
+        code: 'custom',
+        message:
+          'server.mcp.http.advertisedUrl is set alongside server.mcp.http.auth, ' +
+          'which already declares the endpoint address as auth.resource ' +
+          '(clients discover it from the endpoint metadata). ' +
+          'Drop advertisedUrl and set auth.resource to the reachable URL.',
+        path: ['advertisedUrl'],
+      });
+      return;
+    }
+    // Parsed here rather than left to the page: the value exists to replace a
+    // guess, so a malformed one has no safe fallback that is also honest. The
+    // checks below are the ones `auth.resource` already gets in
+    // resolveMcpHttpAuth — same contract, so the same refusals — plus the path,
+    // which decides whether the URL works at all.
+    let parsed: URL;
+    try {
+      parsed = new URL(http.advertisedUrl);
+    } catch {
+      ctx.addIssue({
+        code: 'custom',
+        message:
+          `server.mcp.http.advertisedUrl is not an absolute URL: ${http.advertisedUrl}. ` +
+          'Give the full address clients should register, e.g. ' +
+          `http://localhost:4334${MCP_HTTP_PATH}.`,
+        path: ['advertisedUrl'],
+      });
+      return;
+    }
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+      ctx.addIssue({
+        code: 'custom',
+        message:
+          `server.mcp.http.advertisedUrl must be http or https, got ${parsed.protocol}. ` +
+          'It is the URL an MCP client registers for the Streamable HTTP transport.',
+        path: ['advertisedUrl'],
+      });
+      return;
+    }
+    // A query or fragment cannot survive the trip: the fragment never leaves
+    // the client, and the transport matches on path alone. Carrying either
+    // means the operator believes something is being sent that is not.
+    if (parsed.search !== '' || parsed.hash !== '') {
+      ctx.addIssue({
+        code: 'custom',
+        message:
+          'server.mcp.http.advertisedUrl must not carry a query or fragment ' +
+          `(got ${http.advertisedUrl}). It is the endpoint address a client registers.`,
+        path: ['advertisedUrl'],
+      });
+      return;
+    }
+    // The transport matches the path exactly, so a URL that omits it — or
+    // adds a trailing slash, or points somewhere else entirely — is config
+    // that cannot connect. Accepting it would reproduce, through the field
+    // that exists to prevent it, the failure this field was added for: the
+    // page handing out an address nothing serves.
+    if (parsed.pathname !== MCP_HTTP_PATH) {
+      ctx.addIssue({
+        code: 'custom',
+        message:
+          `server.mcp.http.advertisedUrl must end in ${MCP_HTTP_PATH} (got the path ` +
+          `"${parsed.pathname}"). It is the full endpoint address, not the host it is on: ` +
+          `e.g. http://localhost:4334${MCP_HTTP_PATH}.`,
+        path: ['advertisedUrl'],
       });
     }
   });
@@ -647,7 +762,18 @@ function injectServerOverridesFromEnv(
   const uiHost = env.KOZOU_UI_HOST;
   const mcpHost = env.KOZOU_MCP_HTTP_HOST;
   const mcpEnabled = parseBooleanEnv('KOZOU_MCP_HTTP_ENABLED', env.KOZOU_MCP_HTTP_ENABLED);
-  if (!uiHost && !mcpHost && mcpEnabled === undefined) return raw;
+  // The reachable address belongs here as much as in the file: the deployments
+  // that separate bind address from reachable address (compose port remap, a
+  // tunnel, a devcontainer) are configured in the environment that creates the
+  // indirection, often without a config file to edit.
+  //
+  // Trimmed, and whitespace-only read as unset, matching parseBooleanEnv right
+  // below: both shipped compose stacks forward this as `${VAR:-}`, so a stray
+  // space after the `=` in a .env is a realistic way to reach here — and it
+  // would otherwise take the whole stack down at startup rather than mean what
+  // the operator plainly meant, which was to leave it unset.
+  const mcpAdvertisedUrl = env.KOZOU_MCP_HTTP_ADVERTISED_URL?.trim();
+  if (!uiHost && !mcpHost && mcpEnabled === undefined && !mcpAdvertisedUrl) return raw;
   const asObj = (v: unknown): Record<string, unknown> =>
     v !== null && typeof v === 'object' ? { ...(v as Record<string, unknown>) } : {};
 
@@ -659,7 +785,7 @@ function injectServerOverridesFromEnv(
     server.ui = ui;
     envUsed.push('KOZOU_UI_HOST');
   }
-  if (mcpHost || mcpEnabled !== undefined) {
+  if (mcpHost || mcpEnabled !== undefined || mcpAdvertisedUrl) {
     const mcp = asObj(server.mcp);
     const http = asObj(mcp.http);
     if (mcpHost) {
@@ -669,6 +795,10 @@ function injectServerOverridesFromEnv(
     if (mcpEnabled !== undefined) {
       http.enabled = mcpEnabled;
       envUsed.push('KOZOU_MCP_HTTP_ENABLED');
+    }
+    if (mcpAdvertisedUrl) {
+      http.advertisedUrl = mcpAdvertisedUrl;
+      envUsed.push('KOZOU_MCP_HTTP_ADVERTISED_URL');
     }
     mcp.http = http;
     server.mcp = mcp;

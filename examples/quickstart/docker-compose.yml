@@ -53,6 +53,15 @@ services:
       # out: KOZOU_MCP_HTTP_ENABLED=false runs Admin UI + REST only, with no
       # MCP listener and no "Connect an AI agent" page in the Admin UI.
       KOZOU_MCP_HTTP_ENABLED: ${KOZOU_MCP_HTTP_ENABLED:-}
+      # Where MCP clients reach the endpoint, when that is not the port below.
+      # This stack binds 3334 in the container and publishes it on the same
+      # host port; remap that mapping (a clash with something already on 3334)
+      # or put a tunnel or proxy in front, and the "Connect an AI agent" page
+      # has no way to know — it would hand out the container-side port. Set
+      # this to the address clients should register, /mcp path included:
+      # KOZOU_MCP_HTTP_ADVERTISED_URL=http://localhost:4334/mcp
+      # Refused at startup alongside KOZOU_MCP_HTTP_ENABLED=false.
+      KOZOU_MCP_HTTP_ADVERTISED_URL: ${KOZOU_MCP_HTTP_ADVERTISED_URL:-}
     depends_on:
       postgres:
         condition: service_healthy
