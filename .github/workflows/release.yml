@@ -209,8 +209,25 @@ jobs:
               npm publish "$TGZ" --access public --provenance
             fi
           else
-            echo "Dry-run mode (event=$GITHUB_EVENT_NAME, dry_run=${{ inputs.dry_run }}): pnpm publish --dry-run for ${{ matrix.pkg }}"
-            pnpm publish --access public --provenance --no-git-checks --dry-run
+            # `--dry-run` still asks the registry, and the registry refuses a
+            # version it already carries. So in the state this repo is in for
+            # most of its life - main sitting at the version that was last
+            # released - every package here failed on "cannot publish over the
+            # previously published versions", and the smoke test this run
+            # exists to be could never pass. That error says nothing about the
+            # workflow, so the already-published case packs instead: the
+            # tarball is still built and `workspace:*` is still rewritten,
+            # which is the part worth exercising. Same `npm view` probe the
+            # real publish above uses.
+            PKG_VERSION="$(node -p "require('./package.json').version")"
+            if npm view "${{ matrix.pkg }}@${PKG_VERSION}" version >/dev/null 2>&1; then
+              echo "${{ matrix.pkg }}@${PKG_VERSION} is already on npm; packing only (the registry would refuse even a dry-run publish)."
+              pnpm pack
+              ls -l ./*.tgz
+            else
+              echo "Dry-run mode (event=$GITHUB_EVENT_NAME, dry_run=${{ inputs.dry_run }}): pnpm publish --dry-run for ${{ matrix.pkg }}"
+              pnpm publish --access public --provenance --no-git-checks --dry-run
+            fi
           fi
 
   publish-docker:
@@ -353,8 +370,17 @@ jobs:
               npm publish "$TGZ" --access public --provenance
             fi
           else
-            echo "Dry-run mode (event=$GITHUB_EVENT_NAME, dry_run=${{ inputs.dry_run }}): pnpm publish --dry-run for kozou"
-            pnpm publish --access public --provenance --no-git-checks --dry-run
+            # Same as publish-npm: a dry-run publish of an already-published
+            # version is refused by the registry, so pack instead.
+            PKG_VERSION="$(node -p "require('./package.json').version")"
+            if npm view "kozou@${PKG_VERSION}" version >/dev/null 2>&1; then
+              echo "kozou@${PKG_VERSION} is already on npm; packing only (the registry would refuse even a dry-run publish)."
+              pnpm pack
+              ls -l ./*.tgz
+            else
+              echo "Dry-run mode (event=$GITHUB_EVENT_NAME, dry_run=${{ inputs.dry_run }}): pnpm publish --dry-run for kozou"
+              pnpm publish --access public --provenance --no-git-checks --dry-run
+            fi
           fi
 
   github-release:
