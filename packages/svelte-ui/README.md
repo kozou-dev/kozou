@@ -114,9 +114,11 @@ Optional, both concerning the "Connect an AI agent" page:
   auth block (`server.mcp.http.advertisedUrl`): the address clients reach
   the endpoint at, when that differs from the port it binds — a remapped
   published port, a tunnel, a devcontainer, a proxy. Used verbatim, path
-  included. `kozou dev` sets it whenever the field is configured, and sets
-  at most one of this and `KOZOU_UI_MCP_RESOURCE`. Ignored in the `oauth`
-  posture, where `resource` is the address clients discover.
+  included; the CLI refuses any path but `/mcp`, so what arrives here
+  never describes an endpoint mounted under a path prefix. `kozou dev`
+  sets it whenever the field is configured, and sets at most one of this
+  and `KOZOU_UI_MCP_RESOURCE`. Ignored in the `oauth` posture, where
+  `resource` is the address clients discover.
 
 ```bash
 # from the monorepo root

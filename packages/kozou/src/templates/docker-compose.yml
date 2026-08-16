@@ -69,7 +69,10 @@ services:
       # cannot see the difference — left unset it hands out the container-side
       # port, which after a remap addresses nothing, or whatever took 3334.
       # Set it whenever the left-hand side of the MCP mapping stops being 3334,
-      # and for a tunnel or a proxy in front of it. Include the /mcp path:
+      # and for a tunnel or a proxy in front of it. The path must be exactly
+      # /mcp — change the scheme (http or https), host and port, not the path,
+      # so a proxy that mounts the endpoint under a prefix cannot be
+      # advertised here:
       # KOZOU_MCP_HTTP_ADVERTISED_URL=http://localhost:4334/mcp
       # Refused at startup alongside KOZOU_MCP_HTTP_ENABLED=false (nothing is
       # served, so there is no address to advertise) and alongside a
