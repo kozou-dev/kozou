@@ -1,6 +1,7 @@
 import type { Client } from 'pg';
 import type { RawCheck, RawColumn, RawForeignKey, RawIndex, RawTable } from '@kozou/core';
 import { runQuery } from './errors.js';
+import { deniedCommands } from './rowSecurity.js';
 
 type TableRow = {
   schema: string;
@@ -10,6 +11,8 @@ type TableRow = {
   row_security_enabled: boolean;
   row_security_forced: boolean;
   has_policies: boolean;
+  /** Distinct `polcmd` codes of the table's PERMISSIVE policies. */
+  permissive_policy_commands: string[];
 };
 
 type ColumnRow = {
@@ -64,6 +67,17 @@ export async function fetchTables(client: Client, schemas: string[]): Promise<Ra
     // policy is defined *without reading the policy expressions* — those encode
     // the authorization model and are deliberately never surfaced. RLS enabled
     // with no policy is effectively default-deny for non-owner roles.
+    // The `polcmd` aggregate is the per-command half of the same signal, and it
+    // stays inside the same line: `polcmd` says which command a policy is FOR
+    // and `polpermissive` whether it grants at all, neither of which is an
+    // expression. Read from the catalog itself rather than from the readable
+    // view over it on purpose: that view's target list renders both
+    // expressions, and whether they are evaluated for a query selecting one
+    // column is a planner detail rather than something this query would be
+    // saying. See rowSecurity.ts for what the codes mean, and
+    // test/policy-expressions.test.ts for the check that keeps this honest —
+    // which is also why the view is described here rather than named (the
+    // check reads comments too, deliberately).
     `SELECT
        n.nspname AS schema,
        c.relname AS name,
@@ -71,7 +85,14 @@ export async function fetchTables(client: Client, schemas: string[]): Promise<Ra
        CASE WHEN c.reltuples < 0 THEN NULL ELSE c.reltuples::float8 END AS row_count_estimate,
        c.relrowsecurity AS row_security_enabled,
        c.relforcerowsecurity AS row_security_forced,
-       EXISTS (SELECT 1 FROM pg_policy p WHERE p.polrelid = c.oid) AS has_policies
+       EXISTS (SELECT 1 FROM pg_policy p WHERE p.polrelid = c.oid) AS has_policies,
+       COALESCE(
+         (SELECT array_agg(DISTINCT p.polcmd::text)
+            FROM pg_policy p
+           WHERE p.polrelid = c.oid
+             AND p.polpermissive),
+         '{}'
+       ) AS permissive_policy_commands
      FROM pg_class c
      JOIN pg_namespace n ON n.oid = c.relnamespace
      LEFT JOIN pg_description d ON d.objoid = c.oid AND d.objsubid = 0
@@ -226,6 +247,7 @@ export async function fetchTables(client: Client, schemas: string[]): Promise<Ra
         enabled: row.row_security_enabled,
         forced: row.row_security_forced,
         hasPolicies: row.has_policies,
+        deniedCommands: deniedCommands(row.row_security_enabled, row.permissive_policy_commands ?? []),
       },
       // pg returns float8 as a JS number; round to integer because
       // the contract types this as `number | null` and a fractional

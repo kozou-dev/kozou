@@ -4,7 +4,7 @@
 // input contract for @kozou/mcp and @kozou/svelte-ui. The code is the
 // source of truth.
 
-import type { RawFunction, RawTable, RawView } from './raw.js';
+import type { RawFunction, RawTable, RawView, RlsCommand } from './raw.js';
 
 /** Output of core.buildSchemaContext; input to MCP / UI. */
 export type SchemaContext = {
@@ -65,6 +65,22 @@ export type RowSecurity = {
   /** At least one policy exists (existence only; expressions are never read).
    *  `enabled` true with `hasPolicies` false ⇒ default-deny for non-owners. */
   hasPolicies: boolean;
+  /** Commands with no permissive policy that could apply, in a fixed order.
+   *
+   *  `hasPolicies` is per table; RLS is enforced per command. A table can be
+   *  enabled, carry a policy and hold the GRANT and still refuse every INSERT,
+   *  because the only policy written was `FOR SELECT`. This names that case
+   *  without reading a policy expression: a command with no permissive policy is
+   *  refused for every role RLS applies to.
+   *
+   *  `FOR ALL` counts for every command; restrictive policies grant nothing; the
+   *  roles a policy names are deliberately not consulted, so the answer does not
+   *  depend on who is asking. Empty when RLS is disabled.
+   *
+   *  One direction only, and it is the safe one: a listed command IS refused; an
+   *  unlisted one may still be refused (a policy scoped to other roles, or a
+   *  `USING` that matches nothing). It never promises a write will succeed. */
+  deniedCommands: RlsCommand[];
 };
 
 export type TableContext = {

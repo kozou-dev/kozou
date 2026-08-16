@@ -414,9 +414,20 @@ function pushRowSecurity(out: string[], rls: RowSecurity | undefined): void {
   const forced = rls.forced
     ? ' Also applies to the table owner (roles with BYPASSRLS still bypass it).'
     : '';
+  // Only where a policy exists: the no-policy branch above already says every
+  // command is refused.
+  const denied = rls.deniedCommands ?? [];
+  const perCommand =
+    rls.hasPolicies && denied.length > 0
+      ? ` No permissive policy covers ${denied.join(', ')}, so ` +
+        `${denied.length === 1 ? 'that command is' : 'those commands are'} refused for every ` +
+        'role RLS applies to, whatever privileges have been granted. An INSERT raises an error ' +
+        'only once it writes a row, and one that writes none reports success; a refused SELECT, ' +
+        'UPDATE or DELETE matches no rows instead of failing.'
+      : '';
   out.push(
     `**Row-level security** — enabled (advisory; PostgreSQL enforces access): ` +
-      `${detail}.${forced}`,
+      `${detail}.${perCommand}${forced}`,
   );
 }
 

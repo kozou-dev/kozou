@@ -58,6 +58,8 @@ describe('introspect: row-level security signal', () => {
       enabled: false,
       forced: false,
       hasPolicies: false,
+      // RLS is off, so it refuses nothing — an empty list, not "all four".
+      deniedCommands: [],
     });
   });
 
@@ -67,6 +69,8 @@ describe('introspect: row-level security signal', () => {
       enabled: true,
       forced: false,
       hasPolicies: true,
+      // The policy has no FOR clause, so it is FOR ALL.
+      deniedCommands: [],
     });
   });
 
@@ -76,6 +80,7 @@ describe('introspect: row-level security signal', () => {
       enabled: true,
       forced: false,
       hasPolicies: false,
+      deniedCommands: ['select', 'insert', 'update', 'delete'],
     });
   });
 
@@ -85,6 +90,7 @@ describe('introspect: row-level security signal', () => {
       enabled: true,
       forced: true,
       hasPolicies: true,
+      deniedCommands: [],
     });
   });
 

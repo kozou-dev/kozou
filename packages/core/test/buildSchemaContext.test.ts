@@ -1078,7 +1078,12 @@ describe('buildSchemaContext privilege-aware (#99)', () => {
       const raw = makeRaw({
         tables: [
           makeTable('orders', {
-            rowSecurity: { enabled: true, forced: false, hasPolicies: true },
+            rowSecurity: {
+              enabled: true,
+              forced: false,
+              hasPolicies: true,
+              deniedCommands: ['insert', 'update', 'delete'],
+            },
           }),
         ],
       });
@@ -1087,6 +1092,10 @@ describe('buildSchemaContext privilege-aware (#99)', () => {
         enabled: true,
         forced: false,
         hasPolicies: true,
+        // Carried through unchanged: the per-command signal is derived at
+        // introspection, where the catalog is, and this layer must not reshape
+        // it on the way past.
+        deniedCommands: ['insert', 'update', 'delete'],
       });
     });
 

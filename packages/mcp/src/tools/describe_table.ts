@@ -6,6 +6,13 @@ import {
   type DescribeTableColumn,
 } from '../schemas/describe_table.js';
 
+/** "a", "a and b", "a, b and c" — the list reads as a sentence, because it is
+ *  inside one. */
+function englishList(items: readonly string[]): string {
+  if (items.length <= 1) return items[0] ?? '';
+  return `${items.slice(0, -1).join(', ')} and ${items[items.length - 1]}`;
+}
+
 /** Build the human-readable advisory for the row-security signal. Returns a
  *  `note` only when RLS is enabled — a non-RLS table needs no caveat, and the
  *  bare `enabled: false` already says "rows are not filtered". */
@@ -17,11 +24,22 @@ function rowSecurityNote(rls: RowSecurity): { note: string } | Record<string, ne
       'that a write will be accepted.'
     : 'Row-level security is enabled but no policy is defined, so non-owner roles can read and ' +
       'write no rows (default-deny).';
-  return {
-    note: rls.forced
-      ? `${base} RLS also applies to the table owner (roles with BYPASSRLS still bypass it).`
-      : base,
-  };
+  // Named only alongside the "policies exist" branch: with no policy at all the
+  // sentence above already says every command is refused, and repeating it as a
+  // list would read as a second, narrower fact.
+  const denied = rls.deniedCommands ?? [];
+  const perCommand =
+    rls.hasPolicies && denied.length > 0
+      ? ` No permissive policy covers ${englishList(denied)}, so ` +
+        `${denied.length === 1 ? 'that command is' : 'those commands are'} refused for every role ` +
+        'RLS applies to, whatever privileges have been granted. An INSERT raises an error only ' +
+        'once it writes a row, and one that writes none reports success; a refused SELECT, ' +
+        'UPDATE or DELETE matches no rows instead of failing.'
+      : '';
+  const forced = rls.forced
+    ? ' RLS also applies to the table owner (roles with BYPASSRLS still bypass it).'
+    : '';
+  return { note: `${base}${perCommand}${forced}` };
 }
 
 export function describeTable(

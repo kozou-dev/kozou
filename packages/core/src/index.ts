@@ -15,6 +15,7 @@ export type {
   RawFunctionReturn,
   RawFunctionSearchPathElement,
   RawRowSecurity,
+  RlsCommand,
   FkAction,
 } from './types/raw.js';
 
