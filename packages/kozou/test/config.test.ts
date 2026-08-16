@@ -347,6 +347,131 @@ server:
     }
   });
 
+  it('offers only advertised URLs the validator itself accepts', async () => {
+    // The wording of these refusals was unguarded until #266, which is how one
+    // of them came to describe a suffix rule while the check is exact equality.
+    // This is the half a test can hold shut without depending on the prose:
+    // whatever address a refusal points the operator at has to survive the same
+    // validator. Rewording cannot get around it — only offering a way out that
+    // does not work can.
+    const cases = [
+      // Each of these takes a different branch, and every branch that hands the
+      // operator an address is one that can hand out a wrong one.
+      { bad: 'http://advertise.invalid', offersAWayOut: true },
+      { bad: 'http://advertise.invalid/mcp/', offersAWayOut: true },
+      { bad: 'http://advertise.invalid/api/mcp', offersAWayOut: true },
+      { bad: 'not-a-url', offersAWayOut: true },
+      // These two only quote the value back, so there is nothing to check —
+      // listed so that a future example added to them is picked up here.
+      { bad: 'http://advertise.invalid/mcp?t=1', offersAWayOut: false },
+      { bad: 'ftp://advertise.invalid/mcp', offersAWayOut: false },
+    ];
+    for (const { bad, offersAWayOut } of cases) {
+      const thrown = await captureConfigError({
+        skipFile: true,
+        env: {
+          DATABASE_URL: 'postgres://u:p@localhost:5432/x',
+          KOZOU_MCP_HTTP_ADVERTISED_URL: bad,
+        },
+      });
+      const message = thrown.issues
+        .filter((i) => i.path === 'server.mcp.http.advertisedUrl')
+        .map((i) => i.message)
+        .join(' ');
+      // Any scheme, any case: a refusal offering `ftp://…` or `HTTP://…` is
+      // precisely the failure this guards, so the scan must not skip the
+      // addresses it exists to catch. The refused value is echoed back for
+      // identification and is dropped by exact match — dropping everything on
+      // the input's host instead would hide a second, wrong address proposed
+      // alongside it.
+      const offered = (message.match(/[a-z][a-z\d+.-]*:\/\/[^\s"']+/gi) ?? [])
+        // Prose punctuation, not part of the address a reader would copy: a
+        // closing paren counts only when the address did not open one.
+        .map((url) => url.replace(/[.,;:]+$/, ''))
+        .map((url) => (url.endsWith(')') && !url.includes('(') ? url.slice(0, -1) : url))
+        .filter((url) => url !== bad);
+      // Without this the guard would pass by finding nothing to check: dropping
+      // the example from a message would read as success.
+      expect(offered.length, `"${bad}": the refusal proposes no working address`).toBe(
+        offersAWayOut ? 1 : 0,
+      );
+      for (const url of offered) {
+        let accepted: string | undefined;
+        try {
+          const config = await loadConfig({
+            skipFile: true,
+            env: {
+              DATABASE_URL: 'postgres://u:p@localhost:5432/x',
+              KOZOU_MCP_HTTP_ADVERTISED_URL: url,
+            },
+          });
+          accepted = config.server.mcp.http.advertisedUrl;
+        } catch {
+          accepted = undefined;
+        }
+        expect(
+          accepted,
+          `"${bad}": the refusal offers ${url}, which the validator itself refuses`,
+        ).toBe(url);
+      }
+    }
+  });
+
+  it('states the exact-path rule the check applies, not a looser suffix rule', async () => {
+    // #266: the message said "must end in /mcp" while the check is equality, so
+    // `…/api/mcp` — which does end in /mcp — was refused by a rule it satisfies,
+    // and an operator editing against the message got the same error back. The
+    // predicate is deliberately exact (a path prefix cannot be advertised, see
+    // config.ts), which makes this a capability limit; a suffix rule states it
+    // as a formatting one and hides that.
+    //
+    // Substring assertions, so they hold the exact regression and not every way
+    // a message could be loose — the guard above is the form-based half.
+    const bad = 'http://advertise.invalid/kozou/mcp';
+    const thrown = await captureConfigError({
+      skipFile: true,
+      env: {
+        DATABASE_URL: 'postgres://u:p@localhost:5432/x',
+        KOZOU_MCP_HTTP_ADVERTISED_URL: bad,
+      },
+    });
+    const message = thrown.issues
+      .filter((i) => i.path === 'server.mcp.http.advertisedUrl')
+      .map((i) => i.message)
+      .join(' ');
+    expect(message, 'the refusal does not say the path must match exactly').toMatch(/exactly/i);
+    expect(message, 'the refusal describes a suffix rule the check does not apply').not.toMatch(
+      /ends? (in|with)|ending (in|with)/i,
+    );
+    // The message quotes the refused path back, and that echo is a sub-path —
+    // so asserting the shape against the whole message would be satisfied by
+    // the input rather than by the message naming the case. Drop the echo and
+    // assert against what the message says on its own.
+    const withoutEcho = message.split(new URL(bad).pathname).join(' … ');
+    // The two cases where a suffix reading and the real predicate diverge, so
+    // these are what the operator has to be told outright. Matched by shape,
+    // not by the illustration chosen: any leading segment counts, so rewording
+    // `/api/mcp` to `/prefix/mcp` keeps this green while deleting the case does
+    // not.
+    expect(withoutEcho, 'the refusal does not name the sub-path case it refuses').toMatch(
+      /\/[a-z][\w-]*\/mcp/i,
+    );
+    expect(withoutEcho, 'the refusal does not name the trailing-slash case it refuses').toMatch(
+      /\/mcp\//,
+    );
+    // Known holes, measured rather than assumed. Both of these pass every
+    // assertion here:
+    //   - "must finish with /mcp, exactly as shown" — a suffix rule that never
+    //     uses the guarded word for it.
+    //   - a message that names the same two shapes and calls them ACCEPTED —
+    //     the assertions match vocabulary and shape, never polarity.
+    // What is held is that the refusal states an exact rule and names the two
+    // cases where a suffix reading diverges from it. Prose polarity and
+    // paraphrase are not held, and substring assertions cannot hold them; that
+    // would need the error to carry the refused cases as data rather than as
+    // text, which is a larger change than this one.
+  });
+
   it('refuses an advertised URL carrying a query or fragment, as auth.resource does', async () => {
     // The same two refusals resolveMcpHttpAuth applies to `resource`: a
     // fragment never leaves the client and the transport ignores the query, so

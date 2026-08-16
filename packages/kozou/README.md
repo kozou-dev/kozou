@@ -122,8 +122,11 @@ MCP clients reach the endpoint at when that is not the port it binds —
 a remapped published port, a tunnel, a devcontainer, a proxy — and is
 what the Admin UI's "Connect an AI agent" page hands out instead of
 building one from the browser's host (`KOZOU_MCP_HTTP_ADVERTISED_URL`
-sets it from the environment). `server.mcp.http.enabled: false` turns the
-MCP HTTP endpoint off entirely — `kozou dev` then starts no MCP
+sets it from the environment). Its path must be exactly `/mcp`, the
+path the transport serves: the scheme (`http` or `https`), host and
+port are yours to declare, the path is not, so an endpoint reached
+under a path prefix cannot be advertised. `server.mcp.http.enabled: false` turns the MCP HTTP
+endpoint off entirely — `kozou dev` then starts no MCP
 listener and serves only the Admin UI and whichever data backend you
 configured, and `kozou mcp --http` refuses rather than contradicting
 the config (stdio is unaffected).

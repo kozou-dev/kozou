@@ -131,16 +131,20 @@ const mcpHttpServerSchema = z
     // `port` is the address the runtime BINDS; this is the address it is
     // REACHED at, and any indirection separates the two — a published-port
     // remap under compose, a tunnel, a devcontainer, WSL port forwarding, a
-    // reverse proxy. The Admin UI's /connect page otherwise rebuilds the URL
-    // from the browser's Host header plus `port`, which is exactly wrong in
-    // those deployments: it hands out copy-paste config for an address that is
-    // not this endpoint — nothing at all behind it, or, when the remap was
-    // forced by a clash, whatever took the port instead.
+    // reverse proxy that forwards /mcp unchanged. The Admin UI's /connect page
+    // otherwise rebuilds the URL from the browser's Host header plus `port`,
+    // which is exactly wrong in those deployments: it hands out copy-paste
+    // config for an address that is not this endpoint — nothing at all behind
+    // it, or, when the remap was forced by a clash, whatever took the port
+    // instead.
     //
     // A full URL rather than a port, because the class is not limited to a
     // port clash: a tunnel changes host and scheme too. Used verbatim, path
     // included — it identifies the endpoint, it is not a host to append a
-    // path to (same contract as `auth.resource`).
+    // path to (same contract as `auth.resource`). The scheme (http or https),
+    // host and port are free; the path is not. It must be exactly /mcp, so a
+    // proxy that mounts the endpoint under a prefix cannot be described here —
+    // see the refusals below.
     //
     // The OAuth posture does not use this: `auth.resource` is already the
     // declared address there, and it is the one clients must use because the
@@ -242,13 +246,22 @@ const mcpHttpServerSchema = z
     // that cannot connect. Accepting it would reproduce, through the field
     // that exists to prevent it, the failure this field was added for: the
     // page handing out an address nothing serves.
+    //
+    // Exact equality also refuses the one indirection that keeps a working
+    // path: a proxy mounting the endpoint under a prefix, where the
+    // client-facing path legitimately differs from the served one. That is a
+    // capability limit, not a formatting rule, so the message states the
+    // predicate it actually applies rather than a looser one the operator
+    // would edit against in vain (issue #266).
     if (parsed.pathname !== MCP_HTTP_PATH) {
       ctx.addIssue({
         code: 'custom',
         message:
-          `server.mcp.http.advertisedUrl must end in ${MCP_HTTP_PATH} (got the path ` +
-          `"${parsed.pathname}"). It is the full endpoint address, not the host it is on: ` +
-          `e.g. http://localhost:4334${MCP_HTTP_PATH}.`,
+          `server.mcp.http.advertisedUrl must have the path ${MCP_HTTP_PATH} exactly — the ` +
+          `transport serves that path and no other — but got "${parsed.pathname}". A bare ` +
+          `host, a trailing slash ("${MCP_HTTP_PATH}/") and a sub-path ` +
+          `("/api${MCP_HTTP_PATH}") are all refused: an endpoint reached under a path ` +
+          `prefix cannot be advertised. e.g. http://localhost:4334${MCP_HTTP_PATH}.`,
         path: ['advertisedUrl'],
       });
     }

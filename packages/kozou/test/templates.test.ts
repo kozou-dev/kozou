@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
+import { loadConfig } from '../src/config.js';
 
 // The real scaffold templates (not the copy mechanics — scaffold.test.ts
 // covers those). Guards the contract between config.ts's env-var surface
@@ -138,6 +139,45 @@ describe('scaffold templates', () => {
       expect(label, `${url.pathname}: the label states the opt-out backwards`).not.toMatch(
         /=\s*true|to serve\b|to enable\b/i,
       );
+    }
+  });
+
+  it('documents no advertised URL the config validator would refuse', async () => {
+    // Both stacks ship a commented-out KOZOU_MCP_HTTP_ADVERTISED_URL line as
+    // the shape to copy. A stack that documents a value loadConfig refuses
+    // fails the operator at startup with the file they were told to copy —
+    // and the same wording that was wrong in the refusal message (#266) was
+    // wrong here too, in the artifact scaffolded into every new project.
+    for (const { compose, envExample, label } of SHIPPED_STACKS) {
+      const documented: string[] = [];
+      for (const at of [compose, envExample]) {
+        const text = await readFile(fileURLToPath(at), 'utf8');
+        // `NAME=value` (the copy-me form). The compose forward is
+        // `NAME: ${NAME:-}`, which this deliberately does not match.
+        for (const match of text.matchAll(/KOZOU_MCP_HTTP_ADVERTISED_URL=(\S+)/g)) {
+          const value = match[1]!;
+          documented.push(value);
+          const config = await loadConfig({
+            skipFile: true,
+            env: {
+              DATABASE_URL: 'postgres://u:p@localhost:5432/x',
+              KOZOU_MCP_HTTP_ADVERTISED_URL: value,
+            },
+          });
+          expect(config.server.mcp.http.advertisedUrl, `${label}: ${at.pathname}`).toBe(value);
+        }
+        // The path is exact equality, so prose describing a suffix tells the
+        // reader a rule the runtime does not apply.
+        expect(text, `${label}: ${at.pathname} describes the advertised path as a suffix`)
+          .not.toMatch(/end(s|ing)? (in|with) \/mcp/i);
+      }
+      // Non-vacuous, and per stack: a stack that stops showing the value
+      // altogether leaves the operator to invent it, and would otherwise
+      // leave this guard green by having nothing to check.
+      expect(
+        documented.length,
+        `${label}: neither its compose file nor its .env.example shows an advertised URL`,
+      ).toBeGreaterThan(0);
     }
   });
 
