@@ -41,7 +41,7 @@ services:
     # server bind 0.0.0.0 inside the container (see the env below); the REST
     # backend's host is hardcoded to loopback, so a published REST port would
     # not reach it and none is listed.
-    image: ghcr.io/kozou-dev/kozou:v1.18.0
+    image: ghcr.io/kozou-dev/kozou:v1.19.0
     command: ["dev"]
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER:-kozou}:${POSTGRES_PASSWORD:-kozou}@postgres:5432/${POSTGRES_DB:-kozou}
