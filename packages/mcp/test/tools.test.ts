@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import pkg from 'pg';
-import { buildSchemaContext, type RawIntrospection } from '@kozou/core';
+import { buildSchemaContext, type RawIntrospection, type RlsCommand } from '@kozou/core';
 import {
   setupDatabase,
   type DatabaseHandle,
@@ -16,6 +16,7 @@ import {
   getConceptContext,
   searchSchema,
   McpToolError,
+  describeTableOutputSchema,
 } from '../src/index.js';
 
 describe('MCP tools (generic English fixture)', () => {
@@ -417,9 +418,10 @@ describe('MCP tools: @policy is surfaced to the AI agent (no DB)', () => {
     enabled: boolean;
     forced: boolean;
     hasPolicies: boolean;
+    deniedCommands?: RlsCommand[];
   }): RawIntrospection => ({
     ...raw,
-    tables: [{ ...raw.tables[0]!, rowSecurity }],
+    tables: [{ ...raw.tables[0]!, rowSecurity: { deniedCommands: [], ...rowSecurity } }],
   });
 
   it('describe_table surfaces rowSecurity with an advisory note when RLS is on', async () => {
@@ -430,6 +432,54 @@ describe('MCP tools: @policy is surfaced to the AI agent (no DB)', () => {
     expect(t.rowSecurity).toMatchObject({ enabled: true, forced: false, hasPolicies: true });
     expect(t.rowSecurity!.note).toMatch(/row-level security is enabled/i);
     expect(t.rowSecurity!.note).toMatch(/do not assume a result is complete/i);
+  });
+
+  it('describe_table names the commands no permissive policy covers', async () => {
+    const ctx = await buildSchemaContext({
+      raw: withRls({
+        enabled: true,
+        forced: false,
+        hasPolicies: true,
+        deniedCommands: ['insert', 'update', 'delete'],
+      }),
+    });
+    const t = describeTable({ qualifiedName: 'public.orders' }, ctx);
+    expect(t.rowSecurity!.deniedCommands).toEqual(['insert', 'update', 'delete']);
+    expect(t.rowSecurity!.note).toContain('insert, update and delete');
+    expect(t.rowSecurity!.note).toMatch(/whatever privileges have been granted/i);
+    // The shape of the refusal, which is the part an agent cannot observe: a
+    // refused UPDATE reports success and touches nothing — and so does an
+    // INSERT that writes no row, because the raise happens per written row.
+    expect(t.rowSecurity!.note).toMatch(/matches no rows instead of failing/i);
+    expect(t.rowSecurity!.note).toMatch(/only once it writes a row/i);
+    expect(t.rowSecurity!.note).not.toMatch(/a refused INSERT raises/i);
+  });
+
+  it('describe_table still reads a context compiled before deniedCommands existed', async () => {
+    // Contexts are serialized and reused, so an older one arrives without the
+    // field. The type requires it, which is why the older shape has to be built
+    // by deleting it here.
+    const legacy = withRls({ enabled: true, forced: false, hasPolicies: true });
+    delete (legacy.tables[0]!.rowSecurity! as { deniedCommands?: unknown }).deniedCommands;
+    const ctx = await buildSchemaContext({ raw: legacy });
+    const t = describeTable({ qualifiedName: 'public.orders' }, ctx);
+    expect(t.rowSecurity!.deniedCommands).toBeUndefined();
+    // The rest of the signal survives; only the per-command sentence is absent,
+    // since nothing is known about which commands are refused.
+    expect(t.rowSecurity!.note).toMatch(/row-level security is enabled/i);
+    expect(t.rowSecurity!.note).not.toMatch(/no permissive policy covers/i);
+    // And the output still validates: the field is optional on the wire for
+    // exactly this case.
+    expect(describeTableOutputSchema.safeParse(t).success).toBe(true);
+  });
+
+  it('describe_table says nothing about denied commands when there are none', async () => {
+    const ctx = await buildSchemaContext({
+      raw: withRls({ enabled: true, forced: false, hasPolicies: true, deniedCommands: [] }),
+    });
+    const t = describeTable({ qualifiedName: 'public.orders' }, ctx);
+    expect(t.rowSecurity!.deniedCommands).toEqual([]);
+    expect(t.rowSecurity!.note).not.toMatch(/no permissive policy covers/i);
   });
 
   it('describe_table flags default-deny when RLS is on but no policy exists', async () => {
@@ -455,7 +505,12 @@ describe('MCP tools: @policy is surfaced to the AI agent (no DB)', () => {
       raw: withRls({ enabled: false, forced: false, hasPolicies: false }),
     });
     const t = describeTable({ qualifiedName: 'public.orders' }, ctx);
-    expect(t.rowSecurity).toEqual({ enabled: false, forced: false, hasPolicies: false });
+    expect(t.rowSecurity).toEqual({
+      enabled: false,
+      forced: false,
+      hasPolicies: false,
+      deniedCommands: [],
+    });
     expect(t.rowSecurity!.note).toBeUndefined();
   });
 
@@ -467,7 +522,7 @@ describe('MCP tools: @policy is surfaced to the AI agent (no DB)', () => {
     });
     const t = describeTable({ qualifiedName: 'public.orders' }, ctx);
     expect(Object.keys(t.rowSecurity!).sort()).toEqual(
-      ['enabled', 'forced', 'hasPolicies', 'note'].sort(),
+      ['deniedCommands', 'enabled', 'forced', 'hasPolicies', 'note'].sort(),
     );
   });
 

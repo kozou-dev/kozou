@@ -264,15 +264,55 @@ describe('emitMarkdown', () => {
   // never read or shown.
   it('renders a Row-level security line when RLS is enabled (with policies)', async () => {
     const raw = makeRaw();
-    raw.tables[0]!.rowSecurity = { enabled: true, forced: false, hasPolicies: true };
+    raw.tables[0]!.rowSecurity = {
+      enabled: true,
+      forced: false,
+      hasPolicies: true,
+      deniedCommands: [],
+    };
     const md = emitMarkdown(await buildSchemaContext({ raw }));
     expect(md).toContain('**Row-level security**');
     expect(md).toContain('filtered by policy');
   });
 
+  it('names the commands no permissive policy covers', async () => {
+    const raw = makeRaw();
+    raw.tables[0]!.rowSecurity = {
+      enabled: true,
+      forced: false,
+      hasPolicies: true,
+      deniedCommands: ['insert', 'update', 'delete'],
+    };
+    const md = emitMarkdown(await buildSchemaContext({ raw }));
+    expect(md).toContain('No permissive policy covers insert, update, delete');
+    expect(md).toContain('matches no rows instead of failing');
+    // The INSERT raises per row written, so one that writes none is not refused
+    // at all — the line has to say that rather than "a refused INSERT raises".
+    expect(md).toContain('only once it writes a row');
+    expect(md).not.toContain('A refused INSERT raises');
+  });
+
+  it('renders the line for a context compiled before deniedCommands existed', async () => {
+    const raw = makeRaw();
+    // An older serialized context carries no `deniedCommands`. The type
+    // requires the field, so the older shape has to be built by omitting it.
+    raw.tables[0]!.rowSecurity = { enabled: true, forced: false, hasPolicies: true } as NonNullable<
+      RawIntrospection['tables'][number]['rowSecurity']
+    >;
+    const md = emitMarkdown(await buildSchemaContext({ raw }));
+    expect(md).toContain('**Row-level security**');
+    expect(md).toContain('filtered by policy');
+    expect(md).not.toContain('No permissive policy covers');
+  });
+
   it('notes default-deny when RLS is enabled with no policy, and forced for the owner', async () => {
     const raw = makeRaw();
-    raw.tables[0]!.rowSecurity = { enabled: true, forced: true, hasPolicies: false };
+    raw.tables[0]!.rowSecurity = {
+      enabled: true,
+      forced: true,
+      hasPolicies: false,
+      deniedCommands: ['select', 'insert', 'update', 'delete'],
+    };
     const md = emitMarkdown(await buildSchemaContext({ raw }));
     expect(md).toContain('default-deny');
     expect(md).toContain('table owner');
@@ -280,7 +320,12 @@ describe('emitMarkdown', () => {
 
   it('omits the Row-level security line when RLS is disabled', async () => {
     const raw = makeRaw();
-    raw.tables[0]!.rowSecurity = { enabled: false, forced: false, hasPolicies: false };
+    raw.tables[0]!.rowSecurity = {
+      enabled: false,
+      forced: false,
+      hasPolicies: false,
+      deniedCommands: [],
+    };
     const md = emitMarkdown(await buildSchemaContext({ raw }));
     expect(md).not.toContain('**Row-level security**');
   });

@@ -58,7 +58,29 @@ export type RawRowSecurity = {
    *  policy expressions are never read). When `enabled` is true but this is
    *  false, the table is effectively default-deny for non-owner roles. */
   hasPolicies: boolean;
+  /** Commands with no permissive policy that could apply, in a fixed order.
+   *
+   *  RLS is enforced per command, while `hasPolicies` is per table — so a table
+   *  can be enabled, carry a policy, hold the GRANT and still refuse every
+   *  INSERT, because the only policy written was `FOR SELECT`.
+   *  This is the part of that gap which is soundly derivable without reading a
+   *  policy expression: a command with no permissive policy is refused for every
+   *  role RLS applies to, whatever the expressions say.
+   *
+   *  Derived from `polcmd` and `polpermissive` only. `FOR ALL` (`polcmd = '*'`)
+   *  counts for every command, restrictive policies grant nothing, and
+   *  `polroles` is deliberately not consulted so the answer stays the same for
+   *  every role. Empty when RLS is disabled — RLS then refuses nothing.
+   *
+   *  Sound in one direction only, and it is the safe one: a command listed here
+   *  IS refused. A command NOT listed may still be refused — by a policy scoped
+   *  to other roles, or by a `USING` expression that matches nothing — so this
+   *  never says a write will succeed. */
+  deniedCommands: RlsCommand[];
 };
+
+/** The four commands PostgreSQL enforces row-level security for. */
+export type RlsCommand = 'select' | 'insert' | 'update' | 'delete';
 
 export type RawTable = {
   schema: string;

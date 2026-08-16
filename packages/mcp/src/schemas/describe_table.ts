@@ -60,6 +60,10 @@ const rowSecuritySchema = z.object({
   /** Whether any policy exists (existence only; expressions are never read).
    *  Enabled with no policy ⇒ default-deny for non-owner roles. */
   hasPolicies: z.boolean(),
+  /** Commands with no permissive policy that could apply — refused for every
+   *  role RLS applies to, whatever privileges say. Optional for the same reason
+   *  `rowSecurity` is: a context compiled before the field existed has none. */
+  deniedCommands: z.array(z.enum(['select', 'insert', 'update', 'delete'])).optional(),
   /** Human-readable advisory, present only when `enabled`. */
   note: z.string().optional(),
 });
