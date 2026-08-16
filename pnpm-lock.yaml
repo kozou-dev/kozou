@@ -232,6 +232,9 @@ importers:
       '@kozou/codegen':
         specifier: workspace:*
         version: link:../codegen
+      '@kozou/test-utils':
+        specifier: workspace:*
+        version: link:../test-utils
       '@modelcontextprotocol/sdk':
         specifier: ^1.0.0
         version: 1.29.0(zod@4.4.3)
