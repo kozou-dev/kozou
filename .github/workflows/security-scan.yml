@@ -314,7 +314,7 @@ jobs:
         # so no autobuild/manual build step is needed. node_modules /
         # dist / build are absent here (not installed, gitignored), so
         # the scan stays on first-party source.
-        uses: github/codeql-action/init@e4fba868fa4b1b91e1fdab776edc8cfbe6e9fb81 # v4.37.3
+        uses: github/codeql-action/init@ff2f1c621b7f889edc0d3c761ac2e6a3f8cdb0dd # v4.37.7
         with:
           languages: javascript-typescript
 
