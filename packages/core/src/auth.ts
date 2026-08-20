@@ -68,7 +68,10 @@ export type AuthConfig = {
   roleClaim?: string;
   /** Allowlist of assumable roles. When set, any other role is forbidden. */
   allowedRoles?: string[];
-  /** Role used when the token carries no role claim. */
+  /** Role used when the token carries no role claim at all. A claim that is
+   *  present but cannot name a role (a list, a number, an empty string, …) is
+   *  refused instead of falling back here — it means the role could not be
+   *  read, not that the token named none. */
   defaultRole?: string;
   /** Role assumed when a request carries NO Authorization header at all, so
    *  the database's RLS policies decide what an anonymous caller may see.
@@ -198,10 +201,46 @@ async function importPublicKey(
   return importJWK(JSON.parse(trimmed) as Record<string, unknown>, algorithm);
 }
 
-function resolveRole(payload: JWTPayload, roleClaim: string, config: AuthConfig): string {
+/** How to name an unusable claim value in a refusal: by shape, never by value.
+ *  The claim that got mapped here can hold directory data (a group list), which
+ *  has no business in an error message. */
+function shapeOf(claimed: unknown): string {
+  if (claimed === null) return 'null';
+  if (Array.isArray(claimed)) return 'a list';
+  if (typeof claimed === 'string') return 'an empty string';
+  if (typeof claimed === 'object') return 'an object';
+  // A verified payload is JSON, so only a number or a boolean is left.
+  return `a ${typeof claimed}`;
+}
+
+/** The role the token names, or undefined when it carries no role claim at all.
+ *
+ *  Absent means "this token names no role", which is exactly what `defaultRole`
+ *  answers. Present-but-unreadable is a different question and must not borrow
+ *  that answer: falling through would run the request under the default role
+ *  while the claim the operator mapped is discarded, and `allowedRoles` would
+ *  vet the default rather than anything the token said. An IdP mapper that
+ *  emits a group list instead of a single role name is the ordinary way to get
+ *  here, so this fails closed and says which shape arrived.
+ */
+function readRoleClaim(payload: JWTPayload, roleClaim: string): string | undefined {
+  // An own-property test, not `in`: a verified payload is a JSON.parse object,
+  // so `in` answers for `Object.prototype` members too. A roleClaim named after
+  // one ("toString", "constructor", "__proto__", …) would then read as present
+  // on every token, refusing every request while naming a claim the token does
+  // not carry. A payload that really does carry such a claim has it as an own
+  // property, so it still resolves.
+  if (!Object.prototype.hasOwnProperty.call(payload, roleClaim)) return undefined;
   const claimed = payload[roleClaim];
-  const role =
-    typeof claimed === 'string' && claimed.length > 0 ? claimed : config.defaultRole;
+  if (typeof claimed === 'string' && claimed.length > 0) return claimed;
+  throw new KozouAuthError(
+    'forbidden',
+    `Token's "${roleClaim}" claim is ${shapeOf(claimed)}, not a role name.`,
+  );
+}
+
+function resolveRole(payload: JWTPayload, roleClaim: string, config: AuthConfig): string {
+  const role = readRoleClaim(payload, roleClaim) ?? config.defaultRole;
   if (role === undefined || role.length === 0) {
     throw new KozouAuthError(
       'forbidden',

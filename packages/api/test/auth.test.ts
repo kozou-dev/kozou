@@ -104,6 +104,19 @@ describe('createAuthenticator (adapter) — 403 mapping (wire-stable)', () => {
     );
   });
 
+  it('maps an unreadable role claim to 403 forbidden with the stable message', async () => {
+    // Present-but-unreadable is its own refusal: it does not borrow the
+    // missing-claim message, and it is not silently answered by defaultRole.
+    const a = createAuthenticator(hs({ defaultRole: 'app_reader' }));
+    const token = await sign({ role: ['app_reader'] });
+    await expectApiError(
+      () => a.authenticate(`Bearer ${token}`),
+      403,
+      'forbidden',
+      'Token\'s "role" claim is a list, not a role name.',
+    );
+  });
+
   it('maps an allowlist violation to 403 forbidden with the stable message', async () => {
     const a = createAuthenticator(hs({ allowedRoles: ['app_reader'] }));
     const token = await sign({ role: 'evil' });
