@@ -16,7 +16,11 @@ import { existsSync } from 'node:fs';
 import { resolve, isAbsolute } from 'node:path';
 import { parse as parseYAML } from 'yaml';
 import { z } from 'zod';
-import { unusableAllowedHostReason, type McpHttpAuthOptions } from '@kozou/mcp';
+import {
+  unusableAdvertisedUrlReason,
+  unusableAllowedHostReason,
+  type McpHttpAuthOptions,
+} from '@kozou/mcp';
 
 // ---- Schema ---------------------------------------------------------------
 
@@ -229,9 +233,16 @@ const mcpHttpServerSchema = z
     }
     // Parsed here rather than left to the page: the value exists to replace a
     // guess, so a malformed one has no safe fallback that is also honest. The
-    // checks below are the ones `auth.resource` already gets in
-    // resolveMcpHttpAuth — same contract, so the same refusals — plus the path,
-    // which decides whether the URL works at all.
+    // checks below are the shape checks `auth.resource` also gets in
+    // resolveMcpHttpAuth, plus the path, which decides whether the URL works at
+    // all. NOT the same refusals: `auth.resource` refuses plaintext http outside
+    // loopback by default (waivable with allowInsecureHttp, which downgrades it
+    // to a warning), because bearer tokens travel to it. This value does not:
+    // kozou neither requires nor issues a token for this address, and serves no
+    // metadata that would send one. A plaintext off-box address here draws a
+    // startup warning instead — one that also says to use https if an
+    // authenticating layer is put in front, since credentials would then cross
+    // it after all.
     let parsed: URL;
     try {
       parsed = new URL(http.advertisedUrl);
@@ -281,6 +292,19 @@ const mcpHttpServerSchema = z
     // capability limit, not a formatting rule, so the message states the
     // predicate it actually applies rather than a looser one the operator
     // would edit against in vain (issue #266).
+    // Checked against @kozou/mcp's own predicate: an address no client can
+    // connect to, or one carrying credentials, is the failure this key exists to
+    // prevent rather than a lesser version of it. The value is not echoed —
+    // repeating userinfo into the error would be the leak itself.
+    const unusable = unusableAdvertisedUrlReason(parsed);
+    if (unusable !== undefined) {
+      ctx.addIssue({
+        code: 'custom',
+        message: `server.mcp.http.advertisedUrl is not usable: ${unusable}.`,
+        path: ['advertisedUrl'],
+      });
+      return;
+    }
     if (parsed.pathname !== MCP_HTTP_PATH) {
       ctx.addIssue({
         code: 'custom',

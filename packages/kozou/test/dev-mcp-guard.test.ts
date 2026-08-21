@@ -24,6 +24,10 @@ vi.mock('@kozou/mcp', () => ({
   startStdioServer: vi.fn(async () => {}),
   unusableAllowedHostReason: (entry: string): string | undefined =>
     entry.includes('/') ? 'it is a URL or carries a path' : undefined,
+  // config.ts validates advertisedUrl against this predicate too, so the mocked
+  // module has to carry it or loading any config throws.
+  unusableAdvertisedUrlReason: (url: URL): string | undefined =>
+    url.username !== '' || url.hostname === '0.0.0.0' ? 'not usable' : undefined,
 }));
 
 import { startHttpServer } from '@kozou/mcp';

@@ -518,6 +518,175 @@ describe('startHttpServer allowedHosts startup refusals', () => {
   });
 });
 
+describe('startHttpServer warns about a declared off-box address with no auth', () => {
+  // The bind-address warning cannot reach this deployment: a tunnel or proxy
+  // binds loopback, so the endpoint most exposed to the internet was the one
+  // that said nothing at all.
+  /** Every chunk written to stderr while booting. Kept as chunks, not joined:
+   *  the warning is one write, so its own boundaries are what make an exact
+   *  assertion on it possible. */
+  async function bootChunks(opts: Record<string, unknown>): Promise<string[]> {
+    const writes: string[] = [];
+    const spy = vi.spyOn(process.stderr, 'write').mockImplementation((chunk: unknown) => {
+      writes.push(String(chunk));
+      return true;
+    });
+    const cache = new SchemaCache({ connection: 'postgres://invalid:5432/none' });
+    let handle: HttpServerHandle;
+    try {
+      handle = await startHttpServer(cache, { port: 0, host: '127.0.0.1', ...opts });
+    } finally {
+      spy.mockRestore();
+    }
+    await handle.close();
+    return writes;
+  }
+
+  const bootStderr = async (opts: Record<string, unknown>): Promise<string> =>
+    (await bootChunks(opts)).join('');
+
+  const NEEDLE = 'declared reachable at';
+
+  /** The warning's own lines, in order, with the log prefix stripped. */
+  async function warningLines(opts: Record<string, unknown>): Promise<string[]> {
+    const chunk = (await bootChunks({ logPrefix: '[test]', ...opts })).find((written) =>
+      written.includes(NEEDLE),
+    );
+    if (chunk === undefined) return [];
+    return chunk
+      .split('\n')
+      .filter((line) => line !== '')
+      .map((line) => {
+        expect(line.startsWith('[test] '), `every line carries the log prefix: ${line}`).toBe(true);
+        return line.slice('[test] '.length);
+      });
+  }
+
+  // Asserted as exact prose, not substrings: a warning is the whole product
+  // here, so a dropped line, a lost prefix, a collapsed newline or a reordering
+  // is the defect, and every one of those survives a `toContain` check.
+  it('renders exactly this, for a public https address with no execution', async () => {
+    expect(await warningLines({ advertisedUrl: 'https://mcp.example.com/mcp' })).toEqual([
+      'WARNING: this endpoint is declared reachable at "https://mcp.example.com/mcp",',
+      'which is not a local address, and it runs no authentication of its own.',
+      "Anyone who can reach it can read this database's schema metadata",
+      'and force a schema re-read (POST /admin/refresh is open in this mode).',
+      'To authenticate each caller: move this address to auth.resource, drop',
+      'advertisedUrl (the two are refused together) and configure',
+      'server.mcp.http.auth. Otherwise keep the address private, or front it',
+      'with a layer that authenticates before kozou sees the request — over',
+      'https, since credentials would then cross this address too.',
+    ]);
+  });
+
+  it('names the remedy that actually boots', async () => {
+    // "Add auth" alone would send the operator into a startup error, because
+    // advertisedUrl and auth are refused together. The address has to move.
+    const out = await bootStderr({ advertisedUrl: 'https://mcp.example.com/mcp' });
+    expect(out).toContain('move this address to auth.resource');
+    expect(out).toContain('drop');
+    expect(out).toContain('refused together');
+  });
+
+  it('adds plaintext lines for an http address, and asks for https in the remedy', async () => {
+    const lines = await warningLines({ advertisedUrl: 'http://mcp.example.com/mcp' });
+    expect(lines).toContain('The advertised address is plaintext http, so requests and');
+    expect(lines).toContain('responses cross the network unencrypted.');
+    expect(lines).toContain('https, since credentials would then cross this address too.');
+  });
+
+  it('says nothing about plaintext for an https address', async () => {
+    const out = await bootStderr({ advertisedUrl: 'https://mcp.example.com/mcp' });
+    expect(out).not.toContain('plaintext');
+    expect(out).not.toContain('unencrypted');
+  });
+
+  it('escalates for execution, and drops the metadata-only wording', async () => {
+    const lines = await warningLines({
+      advertisedUrl: 'https://mcp.example.com/mcp',
+      execution: {
+        pool: {
+          connect: async () => ({
+            query: async () => ({ rows: [], rowCount: 0 }),
+            release: () => {},
+          }),
+        },
+        role: 'kozou_agent',
+        claimsGuc: 'request.jwt.claims',
+      },
+    });
+    expect(lines).toEqual([
+      'WARNING: this endpoint is declared reachable at "https://mcp.example.com/mcp",',
+      'which is not a local address, and it runs no authentication of its own.',
+      'The `call` execution tool is ENABLED: anyone who can reach it can',
+      'execute exposed database functions as the "kozou_agent" role,',
+      'which is the single identity every caller shares here, and can force',
+      'a schema re-read (POST /admin/refresh is open in this mode).',
+      'To authenticate each caller: move this address to auth.resource, drop',
+      'advertisedUrl (the two are refused together) and configure',
+      'server.mcp.http.auth. Otherwise keep the address private, or front it',
+      'with a layer that authenticates before kozou sees the request — over',
+      'https, since credentials would then cross this address too.',
+    ]);
+  });
+
+  it('does not claim execution when there is none', async () => {
+    // The role lines must be gated, not appended: ungated they would print
+    // `as the "undefined" role` on a describe-only deployment.
+    const out = await bootStderr({ advertisedUrl: 'https://mcp.example.com/mcp' });
+    expect(out).not.toContain('execution tool is ENABLED');
+    expect(out).not.toContain('single identity');
+    expect(out).not.toContain('undefined');
+  });
+
+  it('fires alongside the bind-address warning, which is a different fact', async () => {
+    const out = await bootStderr({
+      host: '0.0.0.0',
+      advertisedUrl: 'https://mcp.example.com/mcp',
+    });
+    expect(out).toContain('bound to non-loopback host');
+    expect(out).toContain(NEEDLE);
+  });
+
+  it('stays quiet for a loopback declared address, however it is spelled', async () => {
+    // The scaffolded Compose stack's ordinary shape is a published-port remap on
+    // localhost. The trailing-dot and IPv4-mapped forms name the same machine,
+    // and the guard's own Host matching already treats them that way.
+    for (const url of [
+      'http://localhost:4334/mcp',
+      'http://localhost.:4334/mcp',
+      'http://127.0.0.1:4334/mcp',
+      'http://127.0.0.5:4334/mcp',
+      'http://[::1]:4334/mcp',
+      'http://[::ffff:127.0.0.1]:4334/mcp',
+    ]) {
+      expect(await bootStderr({ advertisedUrl: url }), url).not.toContain(NEEDLE);
+    }
+  });
+
+  it('still warns for an off-box name with a trailing dot', async () => {
+    expect(await bootStderr({ advertisedUrl: 'https://mcp.example.com./mcp' })).toContain(NEEDLE);
+  });
+
+  it('stays quiet when no address is declared', async () => {
+    expect(await bootStderr({})).not.toContain(NEEDLE);
+  });
+
+  it('never fires from an auth block, whose public resource URI is sanctioned', async () => {
+    // auth and advertisedUrl are mutually exclusive, so the risk is a future
+    // change feeding auth.resource into this warning. Pinned from that side.
+    const out = await bootStderr({
+      auth: {
+        resource: 'https://mcp.example.com/mcp',
+        authorizationServers: ['https://idp.example.com/realms/kozou'],
+        jwt: { secret: 'x'.repeat(32) },
+      },
+    });
+    expect(out).not.toContain(NEEDLE);
+    expect(out).not.toContain('runs no authentication of its own');
+  });
+});
+
 describe('startHttpServer advertisedUrl startup refusals', () => {
   const cache = (): SchemaCache =>
     new SchemaCache({ connection: 'postgres://invalid:5432/none' });
@@ -541,6 +710,42 @@ describe('startHttpServer advertisedUrl startup refusals', () => {
     await expect(
       startHttpServer(cache(), { port: 0, host: '127.0.0.1', advertisedUrl: '/mcp' }),
     ).rejects.toThrow(/is not an absolute URL/);
+  });
+
+  it('refuses a bind-all declared address', async () => {
+    // Not somewhere a client can connect, so handing it out is the failure this
+    // key exists to prevent — and it would have drawn a security warning
+    // claiming it "is not a local address".
+    for (const url of ['http://0.0.0.0:4334/mcp', 'http://[::]:4334/mcp']) {
+      await expect(
+        startHttpServer(cache(), { port: 0, host: '127.0.0.1', advertisedUrl: url }),
+      ).rejects.toThrow(/bind-all address/);
+    }
+  });
+
+  it('refuses userinfo, and does not echo it', async () => {
+    const attempt = startHttpServer(cache(), {
+      port: 0,
+      host: '127.0.0.1',
+      advertisedUrl: 'https://user:secret@mcp.example.com/mcp',
+    });
+    await expect(attempt).rejects.toThrow(/carries userinfo/);
+    // Repeating the credential into the log is the leak the refusal prevents.
+    await expect(attempt).rejects.not.toThrow(/secret/);
+  });
+
+  it('refuses a query, a fragment and a wrong path, as the CLI config does', async () => {
+    for (const url of [
+      'https://mcp.example.com/mcp?t=1',
+      'https://mcp.example.com/mcp#f',
+      'https://mcp.example.com/',
+      'https://mcp.example.com/api/mcp',
+    ]) {
+      await expect(
+        startHttpServer(cache(), { port: 0, host: '127.0.0.1', advertisedUrl: url }),
+        url,
+      ).rejects.toThrow();
+    }
   });
 
   it('refuses a non-http(s) advertisedUrl', async () => {
