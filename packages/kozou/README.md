@@ -115,17 +115,26 @@ uiHints:
 ```
 
 The full schema also accepts `server.ui.{port,host}`,
-`server.mcp.http.{enabled,port,host,advertisedUrl}`, `server.mcp.stdio`,
-and `cache.ttlMs` overrides; defaults match the template that
-`create-kozou` writes. `server.mcp.http.advertisedUrl` is the address
-MCP clients reach the endpoint at when that is not the port it binds —
-a remapped published port, a tunnel, a devcontainer, a proxy — and is
-what the Admin UI's "Connect an AI agent" page hands out instead of
-building one from the browser's host (`KOZOU_MCP_HTTP_ADVERTISED_URL`
-sets it from the environment). Its path must be exactly `/mcp`, the
-path the transport serves: the scheme (`http` or `https`), host and
-port are yours to declare, the path is not, so an endpoint reached
-under a path prefix cannot be advertised. `server.mcp.http.enabled: false` turns the MCP HTTP
+`server.mcp.http.{enabled,port,host,advertisedUrl,allowedHosts}`,
+`server.mcp.stdio`, and `cache.ttlMs` overrides; defaults match the
+template that `create-kozou` writes. `server.mcp.http.advertisedUrl` is
+the address MCP clients reach the endpoint at when that is not the port
+it binds — a remapped published port, a tunnel, a devcontainer, a proxy
+— and is what the Admin UI's "Connect an AI agent" page hands out
+instead of building one from the browser's host
+(`KOZOU_MCP_HTTP_ADVERTISED_URL` sets it from the environment). Its path
+must be exactly `/mcp`, the path the transport serves: the scheme
+(`http` or `https`), host and port are yours to declare, the path is
+not, so an endpoint reached under a path prefix cannot be advertised.
+Its **hostname is also added to the DNS-rebinding guard**, which is what
+lets a tunnel or a `Host`-preserving reverse proxy reach the endpoint at
+all: the guard otherwise accepts the loopback names, plus a *specific*
+bind host — a bind-all address (`0.0.0.0`, which is what both shipped
+Compose stacks set) cannot be enumerated and adds nothing.
+`server.mcp.http.allowedHosts` adds hostnames the server cannot derive —
+a second valid external path, or an internal name that also reaches the
+endpoint (`KOZOU_MCP_HTTP_ALLOWED_HOSTS` takes a comma-separated list).
+Matching is on the hostname and port-agnostic. `server.mcp.http.enabled: false` turns the MCP HTTP
 endpoint off entirely — `kozou dev` then starts no MCP
 listener and serves only the Admin UI and whichever data backend you
 configured, and `kozou mcp --http` refuses rather than contradicting

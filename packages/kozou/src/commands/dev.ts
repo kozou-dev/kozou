@@ -31,6 +31,7 @@ import {
   type KozouConfig,
   ADAPTER_KINDS,
   type AdapterKind,
+  resolveMcpGuardOptions,
 } from '../config.js';
 import { PACKAGE_VERSION } from '../version.js';
 import {
@@ -159,7 +160,7 @@ function warnIfPublic(label: string, host: string, exposure: AdminUiExposure): v
 // double-warn for it. A configured server.mcp.http.auth block is honoured here
 // too — the config declaring OAuth and `kozou dev` serving the endpoint open
 // would be a silent posture downgrade.
-async function startDevMcp(config: KozouConfig, apiActive: boolean): Promise<HttpServerHandle> {
+export async function startDevMcp(config: KozouConfig, apiActive: boolean): Promise<HttpServerHandle> {
   // Privilege-aware annotation (issue #99) for the in-process MCP server, using
   // the same resolved role the Admin UI child runs as, so describe_table /
   // describe_view tell an agent what that role may touch. Off => schema-wide.
@@ -182,11 +183,17 @@ async function startDevMcp(config: KozouConfig, apiActive: boolean): Promise<Htt
   }
 
   const auth = resolveMcpAuthOptions(config);
+  const http = config.server.mcp.http;
   return startHttpServer(cache, {
-    port: config.server.mcp.http.port,
-    host: config.server.mcp.http.host,
+    port: http.port,
+    host: http.host,
     logPrefix: `${PREFIX} mcp`,
     provenance: config.server.mcp.provenance,
+    // The declared reachable address and any extra Host names belong to the
+    // rebinding guard, not just to the /connect page: a tunnel or proxy that
+    // does not rewrite the Host header forwards the public hostname, and
+    // without this every request from it is refused.
+    ...resolveMcpGuardOptions(config),
     ...(auth === undefined ? {} : { auth }),
   });
 }

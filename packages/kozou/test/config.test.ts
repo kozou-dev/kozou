@@ -9,6 +9,7 @@ import {
   resolvePrivilegeRole,
   hasReadyMadeToken,
   resolveMcpAuthOptions,
+  resolveMcpGuardOptions,
   configSchema,
   KozouConfigError,
 } from '../src/config.js';
@@ -291,6 +292,90 @@ server:
     expect(config.server.mcp.http.port).toBe(3334);
   });
 
+  it('resolveMcpGuardOptions maps only the keys that are set', async () => {
+    const bare = await loadConfig({
+      skipFile: true,
+      env: { DATABASE_URL: 'postgres://u:p@localhost:5432/x' },
+    });
+    expect(resolveMcpGuardOptions(bare)).toEqual({});
+    const both = await loadConfig({
+      skipFile: true,
+      env: {
+        DATABASE_URL: 'postgres://u:p@localhost:5432/x',
+        KOZOU_MCP_HTTP_ADVERTISED_URL: 'https://mcp.example.com/mcp',
+        KOZOU_MCP_HTTP_ALLOWED_HOSTS: 'tunnel.example.com',
+      },
+    });
+    expect(resolveMcpGuardOptions(both)).toEqual({
+      advertisedUrl: 'https://mcp.example.com/mcp',
+      allowedHosts: ['tunnel.example.com'],
+    });
+  });
+
+  it('KOZOU_MCP_HTTP_ALLOWED_HOSTS admits names the server cannot derive', async () => {
+    // Derivation covers the declared address; a second external path or an
+    // internal name is a fact about the network, so it needs stating.
+    const config = await loadConfig({
+      skipFile: true,
+      env: {
+        DATABASE_URL: 'postgres://u:p@localhost:5432/x',
+        KOZOU_MCP_HTTP_ALLOWED_HOSTS: 'tunnel.example.com, mcp.internal:3334',
+      },
+    });
+    expect(config.server.mcp.http.allowedHosts).toEqual([
+      'tunnel.example.com',
+      'mcp.internal:3334',
+    ]);
+  });
+
+  it('refuses an unusable allowedHosts entry and names the env var it came from', async () => {
+    // The sibling key takes a full URL, so a URL here is the likely slip. Left
+    // accepted it would contribute a garbage hostname and leave every request
+    // refused with nothing said. Checked against @kozou/mcp's own predicate.
+    for (const bad of ['https://tunnel.example.com', 'tunnel.example.com/mcp', ':3334']) {
+      const thrown = await captureConfigError({
+        skipFile: true,
+        env: {
+          DATABASE_URL: 'postgres://u:p@localhost:5432/x',
+          KOZOU_MCP_HTTP_ALLOWED_HOSTS: bad,
+        },
+      });
+      expect(thrown.issues.map((i) => i.path)).toContain('server.mcp.http.allowedHosts');
+      // Provenance: the offending value is not in any config file.
+      expect(thrown.envSources).toContain('KOZOU_MCP_HTTP_ALLOWED_HOSTS');
+    }
+  });
+
+  it('an empty or whitespace-only KOZOU_MCP_HTTP_ALLOWED_HOSTS reads as unset', async () => {
+    for (const raw of ['', '   ', ',', ' , ']) {
+      const config = await loadConfig({
+        skipFile: true,
+        env: {
+          DATABASE_URL: 'postgres://u:p@localhost:5432/x',
+          KOZOU_MCP_HTTP_ALLOWED_HOSTS: raw,
+        },
+      });
+      expect(config.server.mcp.http.allowedHosts).toBeUndefined();
+    }
+  });
+
+  it('accepts allowedHosts from the config file', async () => {
+    const dir = await makeTempDir();
+    const file = await writeYaml(
+      dir,
+      `database:
+  url: postgres://u:p@localhost:5432/x
+server:
+  mcp:
+    http:
+      allowedHosts:
+        - tunnel.example.com
+`,
+    );
+    const config = await loadConfig({ path: file, env: {} });
+    expect(config.server.mcp.http.allowedHosts).toEqual(['tunnel.example.com']);
+  });
+
   it('an empty or whitespace-only KOZOU_MCP_HTTP_ADVERTISED_URL reads as unset', async () => {
     // Both shipped compose stacks forward this as `${VAR:-}`, so EVERY
     // scaffolded run passes an empty string. Treating it as a value would fail
@@ -486,6 +571,37 @@ server:
       });
       expect(thrown.issues.map((i) => i.path)).toContain('server.mcp.http.advertisedUrl');
     }
+  });
+
+  it('accepts the config key @kozou/mcp tells operators to set', async () => {
+    // The guard's startup line advises a key by name. The bug this pins is the
+    // one that produced issue #281: the line named `allowedHosts`, which this
+    // schema rejected, so the server's own advice did not work. Read the key out
+    // of the message rather than restating it, and prove the schema takes it.
+    const served = readFileSync(
+      new URL('../../mcp/src/startHttpServer.ts', import.meta.url),
+      'utf8',
+    );
+    const advised = served.match(/add more with ([A-Za-z0-9_.]+)\)/)?.[1];
+    expect(advised).toBeDefined();
+    const path = (advised as string).split('.');
+    expect(path.slice(0, 3)).toEqual(['server', 'mcp', 'http']);
+    const dir = await makeTempDir();
+    const file = await writeYaml(
+      dir,
+      `database:
+  url: postgres://u:p@localhost:5432/x
+server:
+  mcp:
+    http:
+      ${path[3]}:
+        - tunnel.example.com
+`,
+    );
+    const config = await loadConfig({ path: file, env: {} });
+    expect(
+      (config.server.mcp.http as Record<string, unknown>)[path[3] as string],
+    ).toEqual(['tunnel.example.com']);
   });
 
   it('validates the advertised path against the one @kozou/mcp actually serves', () => {
