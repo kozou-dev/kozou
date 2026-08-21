@@ -411,12 +411,30 @@ function collectAdvertisementSignals(
 /** Loopback per the RFC 8252 native-app convention: `localhost`, any
  *  127.0.0.0/8 address, and `::1` (a WHATWG URL keeps IPv6 brackets in
  *  `hostname`, so they are stripped first). */
-function isLoopbackUrl(url: URL): boolean {
-  const host =
+/** Whether a URL names the local machine. Shared with startHttpServer so the
+ *  "is this address off-box?" question has one answer across the two places
+ *  that ask it: the plaintext refusal for advertised OAuth URLs, and the
+ *  no-authentication warning for a declared reachable address. */
+export function isLoopbackUrl(url: URL): boolean {
+  const bracketed =
     url.hostname.startsWith('[') && url.hostname.endsWith(']')
       ? url.hostname.slice(1, -1)
       : url.hostname;
-  return host === 'localhost' || host === '::1' || /^127(\.\d{1,3}){3}$/.test(host);
+  // A single trailing dot is the absolute form of the same name — the same rule
+  // the rebinding guard applies to a Host header, so the two must agree about
+  // whether `localhost.` is local.
+  const host = bracketed.length > 1 && bracketed.endsWith('.') ? bracketed.slice(0, -1) : bracketed;
+  if (host === 'localhost' || host === '::1') return true;
+  if (/^127(\.\d{1,3}){3}$/.test(host)) return true;
+  // An IPv4-mapped IPv6 loopback is loopback. WHATWG URL rewrites the mapped
+  // address in hex (`::ffff:127.0.0.1` -> `::ffff:7f00:1`), so the dotted
+  // spelling an operator writes is never the one that arrives here.
+  const mapped = /^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/.exec(host);
+  if (mapped !== null) {
+    const high = Number.parseInt(mapped[1] as string, 16);
+    return high >> 8 === 127;
+  }
+  return /^::ffff:127(\.\d{1,3}){3}$/.test(host);
 }
 
 function trimTrailingSlash(path: string): string {

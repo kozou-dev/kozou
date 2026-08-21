@@ -42,6 +42,7 @@ import type { SchemaCache } from './schemaCache.js';
 import { fixedIdentity, type McpExecution } from './execution.js';
 import {
   authenticateRequest,
+  isLoopbackUrl,
   resolveMcpHttpAuth,
   type McpAuthContext,
   type McpHttpAuth,
@@ -204,6 +205,26 @@ export function buildRebindingGuard(
  *  hostname, and leave every request refused with nothing said. An entry whose
  *  hostname comes out empty is worse than useless: it would admit a request
  *  that carries an empty `Host` header. */
+/** Why a parsed `advertisedUrl` cannot be an address a client registers, or
+ *  undefined when it can. Exported so the CLI checks the same predicate rather
+ *  than a second copy: this key exists to stop the endpoint handing out an
+ *  address nothing answers on, so a value no client can use is the failure it
+ *  was added to prevent, not a lesser version of it. */
+export function unusableAdvertisedUrlReason(url: URL): string | undefined {
+  if (url.username !== '' || url.password !== '') {
+    // It would also be echoed into the startup log, which is a credential in a
+    // place nobody expects one.
+    return 'it carries userinfo (credentials), which is not part of an endpoint address';
+  }
+  const host = url.hostname.startsWith('[') && url.hostname.endsWith(']')
+    ? url.hostname.slice(1, -1)
+    : url.hostname;
+  if (host === '0.0.0.0' || host === '::' || host === '') {
+    return `"${url.hostname}" is a bind-all address, not somewhere a client can connect`;
+  }
+  return undefined;
+}
+
 export function unusableAllowedHostReason(entry: string): string | undefined {
   if (entry.includes('/') || entry.includes('@')) {
     return 'it is a URL or carries a path — this takes a bare hostname, optionally with a port';
@@ -220,14 +241,15 @@ function assertUsableAllowedHosts(entries: readonly string[], prefix: string): v
   }
 }
 
-/** The hostname `advertisedUrl` declares, or undefined when it is not set.
- *  Validated here so a library embedder gets the same startup refusal the CLI
- *  config gives: the value exists to replace a guess, so a malformed one has no
- *  honest fallback. */
-function resolveAdvertisedHostname(
+/** The `advertisedUrl` as a URL, or undefined when it is not set.
+ *  Validated here against the same set of refusals the CLI config applies — not
+ *  a subset — so a library embedder cannot boot with a value `kozou dev` would
+ *  have rejected. The value exists to replace a guess, so a malformed one has
+ *  no honest fallback. */
+function resolveAdvertisedUrl(
   opts: StartHttpServerOptions,
   prefix: string,
-): string | undefined {
+): URL | undefined {
   if (opts.advertisedUrl === undefined) return undefined;
   if (opts.auth !== undefined) {
     throw new Error(
@@ -247,7 +269,26 @@ function resolveAdvertisedHostname(
   if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
     throw new Error(`${prefix} advertisedUrl must be an http(s) URL, got ${parsed.protocol}.`);
   }
-  return parsed.hostname;
+  if (parsed.search !== '' || parsed.hash !== '') {
+    throw new Error(
+      `${prefix} advertisedUrl must not carry a query or fragment — the transport matches on ` +
+        'path alone and a fragment never leaves the client.',
+    );
+  }
+  if (parsed.pathname !== DEFAULT_MCP_PATH) {
+    throw new Error(
+      `${prefix} advertisedUrl must have the path ${DEFAULT_MCP_PATH} exactly (got ` +
+        `"${parsed.pathname}") — the transport serves that path and no other.`,
+    );
+  }
+  const unusable = unusableAdvertisedUrlReason(parsed);
+  if (unusable !== undefined) {
+    // The value is deliberately not echoed: one of the reasons this fires is
+    // that it carries credentials, and repeating them into the log is the leak
+    // the refusal exists to prevent. Each reason names what it needs to.
+    throw new Error(`${prefix} advertisedUrl is not usable: ${unusable}.`);
+  }
+  return parsed;
 }
 
 /** Returns a rejection reason when the request's Host/Origin is not allowed by
@@ -311,6 +352,50 @@ function nonLoopbackWarning(host: string, prefix: string, executionRole?: string
   return head + `${prefix} Anyone who can reach ${host} can read this database's schema metadata.\n` + tail;
 }
 
+/** The endpoint declares an off-box reachable address and runs no
+ *  authentication of its own. The bind-address warning cannot cover this: the
+ *  standard tunnel and reverse-proxy shape binds loopback, so the loudest
+ *  deployment is the quietest one. Says "of its own" because kozou cannot see
+ *  whether something in front authenticates — the remedy names that path too.
+ *
+ *  The remedy has to be the one that actually boots: `advertisedUrl` is refused
+ *  alongside `auth`, so "add auth" alone would send the operator into a startup
+ *  error. The address has to move, not be duplicated.
+ */
+function advertisedNoAuthWarning(
+  advertised: URL,
+  prefix: string,
+  executionRole?: string,
+): string {
+  const lines = [
+    `WARNING: this endpoint is declared reachable at "${advertised.href}",`,
+    'which is not a local address, and it runs no authentication of its own.',
+  ];
+  if (advertised.protocol === 'http:') {
+    // Named rather than refused: kozou neither requires nor issues a token for
+    // this address, and serves no metadata that would send one, so plaintext is
+    // a smaller problem here than on the OAuth side. It stops being smaller the
+    // moment an authenticating layer sits in front — hence the remedy's https.
+    lines.push('The advertised address is plaintext http, so requests and');
+    lines.push('responses cross the network unencrypted.');
+  }
+  if (executionRole === undefined) {
+    lines.push("Anyone who can reach it can read this database's schema metadata");
+    lines.push('and force a schema re-read (POST /admin/refresh is open in this mode).');
+  } else {
+    lines.push('The `call` execution tool is ENABLED: anyone who can reach it can');
+    lines.push(`execute exposed database functions as the "${executionRole}" role,`);
+    lines.push('which is the single identity every caller shares here, and can force');
+    lines.push('a schema re-read (POST /admin/refresh is open in this mode).');
+  }
+  lines.push('To authenticate each caller: move this address to auth.resource, drop');
+  lines.push('advertisedUrl (the two are refused together) and configure');
+  lines.push('server.mcp.http.auth. Otherwise keep the address private, or front it');
+  lines.push('with a layer that authenticates before kozou sees the request — over');
+  lines.push('https, since credentials would then cross this address too.');
+  return lines.map((line) => `${prefix} ${line}\n`).join('');
+}
+
 /** Divergences between the advertised `iss` / `aud` contract and the one
  *  actually verified, formatted for a startup warning. Scoped to those two
  *  claims on purpose — the verification key (`jwt.jwksUri`) can point
@@ -362,7 +447,7 @@ export async function startHttpServer(
   // The declared reachable address of a deployment that runs no OAuth. Both
   // declare the same fact, so both together is a contradiction rather than
   // something to resolve silently.
-  const advertisedHostname = resolveAdvertisedHostname(opts, prefix);
+  const advertised = resolveAdvertisedUrl(opts, prefix);
   if (opts.allowedHosts !== undefined) assertUsableAllowedHosts(opts.allowedHosts, prefix);
 
   if (auth !== undefined && auth.insecureHttpUrls.length > 0) {
@@ -410,6 +495,13 @@ export async function startHttpServer(
     process.stderr.write(nonLoopbackWarning(host, prefix, opts.execution?.role));
   }
 
+  // A separate fact from the bind address, and the one the bind warning cannot
+  // reach: `advertisedUrl` is refused alongside `auth`, so an off-box declared
+  // address here always means an endpoint kozou does not authenticate.
+  if (advertised !== undefined && !isLoopbackUrl(advertised)) {
+    process.stderr.write(advertisedNoAuthWarning(advertised, prefix, opts.execution?.role));
+  }
+
   // Active MCP sessions, keyed by the transport-issued session id.
   const transports = new Map<string, StreamableHTTPServerTransport>();
 
@@ -424,7 +516,7 @@ export async function startHttpServer(
     allowedHosts: [
       ...(opts.allowedHosts ?? []),
       ...(auth === undefined ? [] : [auth.resource.hostname]),
-      ...(advertisedHostname === undefined ? [] : [advertisedHostname]),
+      ...(advertised === undefined ? [] : [advertised.hostname]),
     ],
     ...(opts.allowedOrigins === undefined ? {} : { allowedOrigins: opts.allowedOrigins }),
   });

@@ -15,6 +15,7 @@ export { startStdioServer, type StartStdioServerOptions } from './startStdioServ
 export {
   startHttpServer,
   isLoopbackHost,
+  unusableAdvertisedUrlReason,
   unusableAllowedHostReason,
   type StartHttpServerOptions,
   type HttpServerHandle,

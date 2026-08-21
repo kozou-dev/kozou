@@ -617,6 +617,39 @@ server:
     expect(match?.[1]).toBe('/mcp');
   });
 
+  it('refuses a bind-all or credential-carrying advertised URL', async () => {
+    // Both are addresses no client can register: one cannot be connected to,
+    // the other is a credential in a place nobody expects one. Left accepted,
+    // the first would also have drawn a security warning claiming it is not a
+    // local address.
+    for (const bad of [
+      'http://0.0.0.0:4334/mcp',
+      'http://[::]:4334/mcp',
+      'https://user:secret@mcp.example.com/mcp',
+    ]) {
+      const thrown = await captureConfigError({
+        skipFile: true,
+        env: {
+          DATABASE_URL: 'postgres://u:p@localhost:5432/x',
+          KOZOU_MCP_HTTP_ADVERTISED_URL: bad,
+        },
+      });
+      expect(thrown.issues.map((i) => i.path)).toContain('server.mcp.http.advertisedUrl');
+      expect(thrown.envSources).toContain('KOZOU_MCP_HTTP_ADVERTISED_URL');
+    }
+  });
+
+  it('does not echo a credential-carrying advertised URL back in the error', async () => {
+    const thrown = await captureConfigError({
+      skipFile: true,
+      env: {
+        DATABASE_URL: 'postgres://u:p@localhost:5432/x',
+        KOZOU_MCP_HTTP_ADVERTISED_URL: 'https://user:hunter2@mcp.example.com/mcp',
+      },
+    });
+    expect(JSON.stringify(thrown.issues)).not.toContain('hunter2');
+  });
+
   it('refuses an advertised URL that is not an absolute http(s) URL', async () => {
     // No safe fallback: the value exists to replace a guess, so accepting a
     // malformed one would put the guess back while claiming it was declared.
