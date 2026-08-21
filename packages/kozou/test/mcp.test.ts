@@ -14,6 +14,10 @@ vi.mock('@kozou/mcp', () => ({
   },
   startHttpServer: vi.fn(async () => ({ port: 0, host: '', close: async () => {} })),
   startStdioServer: vi.fn(async () => {}),
+  // config.ts validates allowedHosts against this predicate, so the mocked
+  // module has to carry it or loading any config throws.
+  unusableAllowedHostReason: (entry: string): string | undefined =>
+    entry.includes('/') ? 'it is a URL or carries a path' : undefined,
 }));
 
 import { startHttpServer, startStdioServer } from '@kozou/mcp';
@@ -270,6 +274,33 @@ server:
     const opts = lastHttpOpts() as { auth?: { resource: string; jwt: { jwksUri?: string } } };
     expect(opts.auth?.resource).toBe('https://mcp.example.com/mcp');
     expect(opts.auth?.jwt.jwksUri).toBe('https://as.example.com/jwks');
+  });
+
+  it('startHttpServer receives advertisedUrl and allowedHosts', async () => {
+    // The bug this pins: the option existing on StartHttpServerOptions proved
+    // nothing, because no entry point passed it. The guard then refused every
+    // request from a tunnel that forwards its own Host, with no config remedy.
+    const file = await writeConfig(`database:
+  url: postgres://u:p@db:5432/app
+server:
+  mcp:
+    http:
+      advertisedUrl: https://mcp.example.com/mcp
+      allowedHosts:
+        - tunnel.example.com
+`);
+    await mcpCommand({ http: true, config: file });
+    const opts = lastHttpOpts() as { advertisedUrl?: string; allowedHosts?: string[] };
+    expect(opts.advertisedUrl).toBe('https://mcp.example.com/mcp');
+    expect(opts.allowedHosts).toEqual(['tunnel.example.com']);
+  });
+
+  it('passes neither key when the config sets neither', async () => {
+    const file = await writeConfig('database:\n  url: postgres://u:p@db:5432/app\n');
+    await mcpCommand({ http: true, config: file });
+    const opts = lastHttpOpts() as { advertisedUrl?: string; allowedHosts?: string[] };
+    expect(opts.advertisedUrl).toBeUndefined();
+    expect(opts.allowedHosts).toBeUndefined();
   });
 
   it('no auth block -> no auth option (unchanged no-auth mode)', async () => {

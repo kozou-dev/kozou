@@ -20,6 +20,7 @@ import {
   resolveMcpAuthOptions,
   resolvePrivilegeRole,
   type KozouConfig,
+  resolveMcpGuardOptions,
 } from '../config.js';
 
 export type McpOptions = {
@@ -183,6 +184,9 @@ export async function mcpCommand(opts: McpOptions = {}): Promise<void> {
       logPrefix: '[kozou mcp]',
       execution,
       provenance: config.server.mcp.provenance,
+      // Same resolver as `kozou dev`: the guard needs the declared public
+      // hostname, or a tunnelled deployment refuses every request.
+      ...resolveMcpGuardOptions(config),
       ...(mcpAuth === undefined ? {} : { auth: mcpAuth }),
     });
     return;

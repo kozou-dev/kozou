@@ -65,11 +65,13 @@ export type StartHttpServerOptions = {
   /** Opt-in: stamp read/describe tool results with a `provenance` object
    *  ({ databaseVersion, kozouVersion, builtAt }). Emit-only; default off. */
   provenance?: boolean;
-  /** Override the set of `Host` header values accepted by the DNS-rebinding
-   *  guard (host:port form, e.g. `mcp.internal:3334`). When omitted, a loopback
-   *  bind accepts the loopback names on the bound port and a specific
-   *  non-loopback bind accepts that host:port; a bind-all address (0.0.0.0 / ::)
-   *  cannot be enumerated, so pass this to enable the guard there. */
+  /** Additional hostnames the DNS-rebinding guard accepts in the `Host` header.
+   *  Matching is on the hostname alone and is port-agnostic, so a `host:port`
+   *  entry contributes its host part. The guard always accepts the loopback
+   *  names; a specific non-loopback bind adds its own hostname, and OAuth mode
+   *  or `advertisedUrl` adds the declared public hostname. Pass this for what
+   *  neither covers: a second valid external path, or an internal name that
+   *  also reaches the endpoint. */
   allowedHosts?: string[];
   /** Override the set of `Origin` header values accepted by the DNS-rebinding
    *  guard. When omitted it mirrors the allowed hosts under `http://`. Requests
@@ -82,6 +84,15 @@ export type StartHttpServerOptions = {
    *  whose `Content-Length` exceeds this, or that streams past it, is rejected
    *  with 413. */
   maxBodyBytes?: number;
+  /** The address clients reach this endpoint at, when a tunnel, a reverse proxy
+   *  or a port remap makes that different from the bind address. Its hostname is
+   *  added to the DNS-rebinding guard — a declared value, never derived from a
+   *  header, and exactly the name a tunnel or proxy forwards unless it is
+   *  configured to rewrite it. Without this, a loopback-bound server behind a
+   *  `Host`-preserving tunnel or proxy refuses every request. Refused together with `auth`, whose `resource` already declares
+   *  the address (and is the one clients obey, since they discover it from the
+   *  endpoint's own metadata). */
+  advertisedUrl?: string;
   /** Run as an OAuth 2.1 resource server (MCP authorization spec): serve
    *  RFC 9728 protected-resource metadata, require a verified bearer token
    *  on the MCP endpoint, and gate the tool facets on the token's scopes.
@@ -136,6 +147,10 @@ const LOOPBACK_HOSTNAMES = ['127.0.0.1', 'localhost', '::1'];
  *  `127.0.0.1:3334` -> `127.0.0.1`, `[::1]:3334` -> `::1`, `LOCALHOST` ->
  *  `localhost`. */
 function hostnameOf(value: string): string {
+  // A single trailing dot names the same host (the absolute form of the FQDN),
+  // so it is stripped on both sides of the comparison: an `advertisedUrl` of
+  // `https://mcp.example.com./mcp` must still match `Host: mcp.example.com`.
+  const dropRootDot = (h: string): string => (h.length > 1 && h.endsWith('.') ? h.slice(0, -1) : h);
   const stripped = value.startsWith('[')
     ? (() => {
         const end = value.indexOf(']');
@@ -145,7 +160,7 @@ function hostnameOf(value: string): string {
         const colon = value.indexOf(':');
         return colon === -1 ? value : value.slice(0, colon);
       })();
-  return stripped.toLowerCase();
+  return dropRootDot(stripped.toLowerCase());
 }
 
 /** Build the DNS-rebinding guard for a server bound to `host`. The MCP HTTP
@@ -179,14 +194,80 @@ export function buildRebindingGuard(
   return { hostnames, allowedOrigins };
 }
 
+/** Why an `allowedHosts` entry cannot name a host, or undefined when it can.
+ *  Exported so the CLI validates against this same predicate rather than a
+ *  second copy of it: the CLI can then report the offending key and the env var
+ *  it came from, while this package still refuses an embedder's bad input.
+ *
+ *  The sibling key `advertisedUrl` takes a full URL, so a URL or a path lands
+ *  here by habit — and would otherwise be accepted, contribute a garbage
+ *  hostname, and leave every request refused with nothing said. An entry whose
+ *  hostname comes out empty is worse than useless: it would admit a request
+ *  that carries an empty `Host` header. */
+export function unusableAllowedHostReason(entry: string): string | undefined {
+  if (entry.includes('/') || entry.includes('@')) {
+    return 'it is a URL or carries a path — this takes a bare hostname, optionally with a port';
+  }
+  return hostnameOf(entry) === '' ? 'no hostname can be read from it' : undefined;
+}
+
+function assertUsableAllowedHosts(entries: readonly string[], prefix: string): void {
+  for (const entry of entries) {
+    const why = unusableAllowedHostReason(entry);
+    if (why !== undefined) {
+      throw new Error(`${prefix} allowedHosts entry "${entry}" is not usable: ${why}.`);
+    }
+  }
+}
+
+/** The hostname `advertisedUrl` declares, or undefined when it is not set.
+ *  Validated here so a library embedder gets the same startup refusal the CLI
+ *  config gives: the value exists to replace a guess, so a malformed one has no
+ *  honest fallback. */
+function resolveAdvertisedHostname(
+  opts: StartHttpServerOptions,
+  prefix: string,
+): string | undefined {
+  if (opts.advertisedUrl === undefined) return undefined;
+  if (opts.auth !== undefined) {
+    throw new Error(
+      `${prefix} advertisedUrl is set alongside auth, which already declares the endpoint's ` +
+        "address as auth.resource — and that is the one clients obey, since they discover it " +
+        'from the metadata. Drop advertisedUrl and set auth.resource to the reachable URL.',
+    );
+  }
+  let parsed: URL;
+  try {
+    parsed = new URL(opts.advertisedUrl);
+  } catch {
+    throw new Error(
+      `${prefix} advertisedUrl "${opts.advertisedUrl}" is not an absolute URL.`,
+    );
+  }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    throw new Error(`${prefix} advertisedUrl must be an http(s) URL, got ${parsed.protocol}.`);
+  }
+  return parsed.hostname;
+}
+
 /** Returns a rejection reason when the request's Host/Origin is not allowed by
  *  the guard, or null when the request may proceed. The Host header must be
  *  present and its hostname allowed. A *present* Origin must be allowed too
  *  (exact match when `allowedOrigins` is set, else its hostname must be
  *  allowed); a missing Origin — the usual non-browser MCP client — is fine. */
-function validateRebindingHeaders(req: IncomingMessage, guard: RebindingGuard): string | null {
+export function validateRebindingHeaders(
+  req: IncomingMessage,
+  guard: RebindingGuard,
+): string | null {
   const host = headerValue(req.headers.host);
-  if (host === undefined || !guard.hostnames.has(hostnameOf(host))) {
+  // Defense in depth: an empty hostname is refused whatever the guard set
+  // holds. `Host:` with no value names nothing, so admitting it could only come
+  // from a bad entry in the set — which `assertUsableAllowedHosts` now refuses
+  // at startup, leaving this reachable only if guard construction regresses.
+  // Exported alongside `buildRebindingGuard` so that stays asserted rather than
+  // assumed.
+  const hostname = host === undefined ? undefined : hostnameOf(host);
+  if (hostname === undefined || hostname === '' || !guard.hostnames.has(hostname)) {
     return 'Host header is not allowed for this server.';
   }
   const origin = headerValue(req.headers.origin);
@@ -278,6 +359,12 @@ export async function startHttpServer(
   // a startup error, never a per-request one.
   const auth = opts.auth === undefined ? undefined : resolveMcpHttpAuth(opts.auth, mcpPath);
 
+  // The declared reachable address of a deployment that runs no OAuth. Both
+  // declare the same fact, so both together is a contradiction rather than
+  // something to resolve silently.
+  const advertisedHostname = resolveAdvertisedHostname(opts, prefix);
+  if (opts.allowedHosts !== undefined) assertUsableAllowedHosts(opts.allowedHosts, prefix);
+
   if (auth !== undefined && auth.insecureHttpUrls.length > 0) {
     process.stderr.write(
       `${prefix} WARNING: allowInsecureHttp is set — advertising plaintext http URL(s) ` +
@@ -327,14 +414,17 @@ export async function startHttpServer(
   const transports = new Map<string, StreamableHTTPServerTransport>();
 
   // The DNS-rebinding guard is hostname-based and known up front; build it here
-  // so the request handler (which only runs after listen()) closes over it. In
-  // OAuth mode the canonical resource hostname is allowed automatically — it
-  // is config-declared (never derived from a header), and it is exactly the
-  // name a tunnel / reverse proxy forwards.
+  // so the request handler (which only runs after listen()) closes over it. The
+  // declared public hostname is allowed automatically — in OAuth mode the
+  // canonical resource's, otherwise `advertisedUrl`'s. Either way it is
+  // config-declared (never derived from a header), and it is exactly the name a
+  // tunnel / reverse proxy forwards. The two are mutually exclusive, so at most
+  // one of them contributes.
   const guard = buildRebindingGuard(host, {
     allowedHosts: [
       ...(opts.allowedHosts ?? []),
       ...(auth === undefined ? [] : [auth.resource.hostname]),
+      ...(advertisedHostname === undefined ? [] : [advertisedHostname]),
     ],
     ...(opts.allowedOrigins === undefined ? {} : { allowedOrigins: opts.allowedOrigins }),
   });
@@ -394,7 +484,7 @@ export async function startHttpServer(
   }
   process.stderr.write(
     `${prefix} DNS-rebinding guard: accepting Host names ${[...guard.hostnames].join(', ')}` +
-      ` (set allowedHosts to add more)\n`,
+      ` (add more with server.mcp.http.allowedHosts)\n`,
   );
 
   return {

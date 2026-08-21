@@ -64,6 +64,14 @@ services:
       # KOZOU_MCP_HTTP_ADVERTISED_URL=http://localhost:4334/mcp
       # Refused at startup alongside KOZOU_MCP_HTTP_ENABLED=false.
       KOZOU_MCP_HTTP_ADVERTISED_URL: ${KOZOU_MCP_HTTP_ADVERTISED_URL:-}
+      # Hostnames the DNS-rebinding guard should also accept, comma-separated.
+      # The guard derives the loopback names, a specific bind host, and the
+      # hostname in KOZOU_MCP_HTTP_ADVERTISED_URL. This is for what it cannot
+      # derive: a second valid external path, or an internal name that also
+      # reaches the endpoint. A bare hostname, optionally with a port — a URL
+      # or a path is refused at startup.
+      # KOZOU_MCP_HTTP_ALLOWED_HOSTS=mcp.internal,tunnel.example.com
+      KOZOU_MCP_HTTP_ALLOWED_HOSTS: ${KOZOU_MCP_HTTP_ALLOWED_HOSTS:-}
     depends_on:
       postgres:
         condition: service_healthy

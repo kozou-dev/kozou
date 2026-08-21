@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import pkg from 'pg';
 import { request as httpRequest } from 'node:http';
+import { connect as netConnect } from 'node:net';
 
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
@@ -11,7 +12,30 @@ import {
   isLoopbackHost,
   type HttpServerHandle,
 } from '../src/index.js';
-import { buildRebindingGuard } from '../src/startHttpServer.js';
+import { buildRebindingGuard, validateRebindingHeaders } from '../src/startHttpServer.js';
+
+/** Write a handcrafted request over a bare socket and return its status. Used
+ *  for header shapes Node's http client refuses to emit verbatim (an empty
+ *  `Host:`, which it replaces with its own). */
+function rawSocketStatus(port: number, raw: string): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const socket = netConnect({ host: '127.0.0.1', port }, () => socket.write(raw));
+    let buf = '';
+    socket.on('data', (chunk) => {
+      buf += String(chunk);
+      const match = /^HTTP\/1\.[01] (\d{3})/.exec(buf);
+      if (match) {
+        resolve(Number(match[1]));
+        socket.destroy();
+      }
+    });
+    socket.on('error', reject);
+    socket.setTimeout(5000, () => {
+      socket.destroy();
+      reject(new Error('raw socket timed out'));
+    });
+  });
+}
 
 /** Send a raw HTTP request so we can set the Host / Origin headers freely
  *  (undici's fetch refuses to override Host). Resolves with the status code. */
@@ -91,6 +115,35 @@ describe('buildRebindingGuard', () => {
     });
     expect(guard.hostnames.has('mcp.example.com')).toBe(true);
     expect([...(guard.allowedOrigins ?? [])]).toEqual(['https://app.example.com']);
+  });
+});
+
+describe('validateRebindingHeaders', () => {
+  const asReq = (headers: Record<string, string>): Parameters<typeof validateRebindingHeaders>[0] =>
+    ({ headers }) as unknown as Parameters<typeof validateRebindingHeaders>[0];
+
+  it('refuses an empty Host even when the guard set holds the empty string', () => {
+    // `assertUsableAllowedHosts` keeps such an entry out of a configured server,
+    // so this is the case that stays reachable only if guard construction
+    // regresses — asserted here rather than assumed, since the request-path
+    // test cannot produce it.
+    const guard = buildRebindingGuard('127.0.0.1', { allowedHosts: [''] });
+    expect(guard.hostnames.has('')).toBe(true);
+    expect(validateRebindingHeaders(asReq({ host: '' }), guard)).toBe(
+      'Host header is not allowed for this server.',
+    );
+  });
+
+  it('refuses a missing Host header', () => {
+    const guard = buildRebindingGuard('127.0.0.1');
+    expect(validateRebindingHeaders(asReq({}), guard)).toBe(
+      'Host header is not allowed for this server.',
+    );
+  });
+
+  it('allows an allowed Host', () => {
+    const guard = buildRebindingGuard('127.0.0.1');
+    expect(validateRebindingHeaders(asReq({ host: 'localhost:3334' }), guard)).toBeNull();
   });
 });
 
@@ -323,6 +376,209 @@ describe('startHttpServer DNS-rebinding guard on a bind-all address', () => {
       headers: { host: `localhost:${handle.port}` },
     });
     expect(status).toBe(200);
+  });
+});
+
+describe('startHttpServer advertisedUrl feeds the rebinding guard', () => {
+  // The declared reachable address is exactly the Host a tunnel or a
+  // Host-preserving reverse proxy forwards. Without it a loopback-bound server
+  // behind one refuses every request, which is the deployment advertisedUrl
+  // exists to serve.
+  const ADVERTISED = 'https://mcp.example.com/mcp';
+
+  async function boot(opts: {
+    advertisedUrl?: string;
+    allowedHosts?: string[];
+  }): Promise<HttpServerHandle> {
+    const cache = new SchemaCache({ connection: 'postgres://invalid:5432/none' });
+    return startHttpServer(cache, { port: 0, host: '127.0.0.1', ...opts });
+  }
+
+  const refresh = (port: number, host: string): Promise<number> =>
+    rawRequest(port, { method: 'POST', path: '/admin/refresh', headers: { host } });
+
+  it('accepts the advertised hostname', async () => {
+    const handle = await boot({ advertisedUrl: ADVERTISED });
+    try {
+      expect(await refresh(handle.port, 'mcp.example.com')).toBe(200);
+      // Port-agnostic, like every other entry in the guard.
+      expect(await refresh(handle.port, 'mcp.example.com:8443')).toBe(200);
+    } finally {
+      await handle.close();
+    }
+  });
+
+  it('still refuses a Host it was never told about', async () => {
+    const handle = await boot({ advertisedUrl: ADVERTISED });
+    try {
+      expect(await refresh(handle.port, 'attacker.example:1234')).toBe(403);
+    } finally {
+      await handle.close();
+    }
+  });
+
+  it('refuses the same hostname when advertisedUrl is not set (the control)', async () => {
+    const handle = await boot({});
+    try {
+      expect(await refresh(handle.port, 'mcp.example.com')).toBe(403);
+    } finally {
+      await handle.close();
+    }
+  });
+
+  it('admits a second external path through allowedHosts', async () => {
+    // What derivation cannot cover: one declared address, two real paths.
+    const handle = await boot({ advertisedUrl: ADVERTISED, allowedHosts: ['tunnel.example.com'] });
+    try {
+      expect(await refresh(handle.port, 'tunnel.example.com')).toBe(200);
+      expect(await refresh(handle.port, 'mcp.example.com')).toBe(200);
+      expect(await refresh(handle.port, 'attacker.example')).toBe(403);
+    } finally {
+      await handle.close();
+    }
+  });
+});
+
+describe('startHttpServer guard host normalisation', () => {
+  const refresh = (port: number, host: string): Promise<number> =>
+    rawRequest(port, { method: 'POST', path: '/admin/refresh', headers: { host } });
+
+  it('never accepts an empty Host header', async () => {
+    // The sharp end of an unusable allowedHosts entry: a guard set holding the
+    // empty string would admit a request naming no host at all. Sent over a raw
+    // socket because Node's http client substitutes its own Host for an empty
+    // one, so the case is unreachable through `rawRequest`.
+    const cache = new SchemaCache({ connection: 'postgres://invalid:5432/none' });
+    const handle = await startHttpServer(cache, {
+      port: 0,
+      host: '127.0.0.1',
+      // Even asked for explicitly, via the library, it must not be admitted.
+      allowedHosts: ['mcp.example.com'],
+    });
+    try {
+      expect(await rawSocketStatus(handle.port, 'POST /admin/refresh HTTP/1.1\r\nHost:\r\n\r\n')).toBe(
+        403,
+      );
+    } finally {
+      await handle.close();
+    }
+  });
+
+  it('accepts a bracketed IPv6 Host for a loopback bind', async () => {
+    // hostnameOf strips the brackets; without that branch `[::1]:port` reads as
+    // "[" and the guard refuses a client that reached it over IPv6 loopback.
+    const cache = new SchemaCache({ connection: 'postgres://invalid:5432/none' });
+    const handle = await startHttpServer(cache, { port: 0, host: '127.0.0.1' });
+    try {
+      expect(await refresh(handle.port, `[::1]:${handle.port}`)).toBe(200);
+    } finally {
+      await handle.close();
+    }
+  });
+
+  it('matches a trailing-dot advertisedUrl against the dotless Host', async () => {
+    const cache = new SchemaCache({ connection: 'postgres://invalid:5432/none' });
+    const handle = await startHttpServer(cache, {
+      port: 0,
+      host: '127.0.0.1',
+      advertisedUrl: 'https://mcp.example.com./mcp',
+    });
+    try {
+      expect(await refresh(handle.port, 'mcp.example.com')).toBe(200);
+      expect(await refresh(handle.port, 'mcp.example.com.')).toBe(200);
+    } finally {
+      await handle.close();
+    }
+  });
+});
+
+describe('startHttpServer allowedHosts startup refusals', () => {
+  const cache = (): SchemaCache =>
+    new SchemaCache({ connection: 'postgres://invalid:5432/none' });
+
+  const boot = (allowedHosts: string[]): Promise<HttpServerHandle> =>
+    startHttpServer(cache(), { port: 0, host: '127.0.0.1', allowedHosts });
+
+  it('refuses a URL, the shape the sibling key takes', async () => {
+    await expect(boot(['https://tunnel.example.com'])).rejects.toThrow(/is a URL or carries a path/);
+  });
+
+  it('refuses an entry carrying a path', async () => {
+    await expect(boot(['tunnel.example.com/mcp'])).rejects.toThrow(/is a URL or carries a path/);
+  });
+
+  it('refuses an entry no hostname can be read from', async () => {
+    await expect(boot([':3334'])).rejects.toThrow(/no hostname can be read from it/);
+    await expect(boot([''])).rejects.toThrow(/no hostname can be read from it/);
+  });
+
+  it('accepts a bare hostname and a host:port', async () => {
+    const handle = await boot(['tunnel.example.com', 'mcp.internal:3334']);
+    await handle.close();
+  });
+});
+
+describe('startHttpServer advertisedUrl startup refusals', () => {
+  const cache = (): SchemaCache =>
+    new SchemaCache({ connection: 'postgres://invalid:5432/none' });
+
+  it('refuses advertisedUrl alongside auth (both declare the address)', async () => {
+    await expect(
+      startHttpServer(cache(), {
+        port: 0,
+        host: '127.0.0.1',
+        advertisedUrl: 'https://mcp.example.com/mcp',
+        auth: {
+          resource: 'https://mcp.example.com/mcp',
+          authorizationServers: ['https://idp.example.com/realms/kozou'],
+          jwt: { secret: 'x'.repeat(32) },
+        },
+      }),
+    ).rejects.toThrow(/advertisedUrl is set alongside auth/);
+  });
+
+  it('refuses a relative advertisedUrl', async () => {
+    await expect(
+      startHttpServer(cache(), { port: 0, host: '127.0.0.1', advertisedUrl: '/mcp' }),
+    ).rejects.toThrow(/is not an absolute URL/);
+  });
+
+  it('refuses a non-http(s) advertisedUrl', async () => {
+    await expect(
+      startHttpServer(cache(), {
+        port: 0,
+        host: '127.0.0.1',
+        advertisedUrl: 'ws://mcp.example.com/mcp',
+      }),
+    ).rejects.toThrow(/must be an http\(s\) URL/);
+  });
+});
+
+describe('startHttpServer guard startup line', () => {
+  it('advises the fully-qualified config key, and lists the derived hostname', async () => {
+    const writes: string[] = [];
+    const spy = vi.spyOn(process.stderr, 'write').mockImplementation((chunk: unknown) => {
+      writes.push(String(chunk));
+      return true;
+    });
+    const cache = new SchemaCache({ connection: 'postgres://invalid:5432/none' });
+    let handle: HttpServerHandle;
+    try {
+      handle = await startHttpServer(cache, {
+        port: 0,
+        host: '127.0.0.1',
+        advertisedUrl: 'https://mcp.example.com/mcp',
+      });
+    } finally {
+      spy.mockRestore();
+    }
+    await handle.close();
+    const out = writes.join('');
+    expect(out).toContain('add more with server.mcp.http.allowedHosts');
+    // The bare option name is what kozou.config.yaml rejects, so the line must
+    // not advertise it on its own.
+    expect(out).not.toContain('set allowedHosts to add more');
+    expect(out).toContain('mcp.example.com');
   });
 });
 

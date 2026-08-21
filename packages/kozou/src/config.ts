@@ -16,7 +16,7 @@ import { existsSync } from 'node:fs';
 import { resolve, isAbsolute } from 'node:path';
 import { parse as parseYAML } from 'yaml';
 import { z } from 'zod';
-import type { McpHttpAuthOptions } from '@kozou/mcp';
+import { unusableAllowedHostReason, type McpHttpAuthOptions } from '@kozou/mcp';
 
 // ---- Schema ---------------------------------------------------------------
 
@@ -151,10 +151,38 @@ const mcpHttpServerSchema = z
     // endpoint's RFC 9728 metadata names it. Setting both is refused below
     // rather than silently resolved.
     advertisedUrl: z.string().min(1).optional(),
+    // Hostnames the DNS-rebinding guard accepts beyond the ones it derives.
+    // The derived set covers the ordinary deployments — loopback, a specific
+    // bind host, and the declared public hostname (`advertisedUrl`, or
+    // `auth.resource` in OAuth mode). What it cannot cover is a second valid
+    // external path, or an internal name that also reaches the endpoint: those
+    // are facts about the network, not about the address this server declares.
+    // Matching is on the hostname and port-agnostic, so a `host:port` entry
+    // contributes its host part.
+    allowedHosts: z.array(z.string().min(1)).optional(),
     auth: mcpAuthSchema.optional(),
   })
   .prefault({})
   .superRefine((http, ctx) => {
+    // Checked against @kozou/mcp's own predicate, not a second copy of it: the
+    // server refuses an unusable entry at startup either way, but reaching it
+    // through the config means the error can name the key and (via envSources)
+    // the environment variable that supplied it. The sibling key `advertisedUrl`
+    // takes a full URL, so a URL lands here by habit — and an entry that yields
+    // no hostname would otherwise sit in the guard matching nothing.
+    for (const entry of http.allowedHosts ?? []) {
+      const why = unusableAllowedHostReason(entry);
+      if (why !== undefined) {
+        ctx.addIssue({
+          code: 'custom',
+          message:
+            `server.mcp.http.allowedHosts entry "${entry}" is not usable: ${why}. ` +
+            'Give a bare hostname, optionally with a port (e.g. mcp.internal or ' +
+            'mcp.internal:3334).',
+          path: ['allowedHosts'],
+        });
+      }
+    }
     // An auth block under a disabled endpoint is dead configuration: it reads
     // as "the endpoint is protected" while nothing is served. Make the
     // contradiction explicit instead of silently ignoring one of the two.
@@ -607,6 +635,25 @@ export function hasReadyMadeToken(config: KozouConfig, env: NodeJS.ProcessEnv): 
  *  MCP endpoint advertises a different authorization server, this server
  *  would advertise one contract and verify another. That is legal but rarely
  *  intended, so `@kozou/mcp` warns about it at startup. */
+/** The rebinding-guard options both entry points hand `startHttpServer`.
+ *
+ *  A function rather than two inline spreads: the failure mode when one call
+ *  site drops a key is silent and total — a tunnelled deployment refuses every
+ *  request while the guard's startup line still looks correct, because the
+ *  option exists on `StartHttpServerOptions` either way. One resolver keeps the
+ *  two entry points from drifting and makes the mapping testable on its own.
+ */
+export function resolveMcpGuardOptions(config: KozouConfig): {
+  advertisedUrl?: string;
+  allowedHosts?: string[];
+} {
+  const http = config.server.mcp.http;
+  return {
+    ...(http.advertisedUrl === undefined ? {} : { advertisedUrl: http.advertisedUrl }),
+    ...(http.allowedHosts === undefined ? {} : { allowedHosts: http.allowedHosts }),
+  };
+}
+
 export function resolveMcpAuthOptions(config: KozouConfig): McpHttpAuthOptions | undefined {
   const mcpAuth = config.server.mcp.http.auth;
   if (mcpAuth === undefined) return undefined;
@@ -786,7 +833,20 @@ function injectServerOverridesFromEnv(
   // would otherwise take the whole stack down at startup rather than mean what
   // the operator plainly meant, which was to leave it unset.
   const mcpAdvertisedUrl = env.KOZOU_MCP_HTTP_ADVERTISED_URL?.trim();
-  if (!uiHost && !mcpHost && mcpEnabled === undefined && !mcpAdvertisedUrl) return raw;
+  // Comma-separated, same shape as the other list-valued overrides. The
+  // deployments that need a name the server cannot derive — a second external
+  // path, an internal name — are configured in the environment that creates
+  // the indirection, often with no config file to edit.
+  const mcpAllowedHosts = splitList(env.KOZOU_MCP_HTTP_ALLOWED_HOSTS?.trim());
+  if (
+    !uiHost &&
+    !mcpHost &&
+    mcpEnabled === undefined &&
+    !mcpAdvertisedUrl &&
+    mcpAllowedHosts === undefined
+  ) {
+    return raw;
+  }
   const asObj = (v: unknown): Record<string, unknown> =>
     v !== null && typeof v === 'object' ? { ...(v as Record<string, unknown>) } : {};
 
@@ -798,7 +858,7 @@ function injectServerOverridesFromEnv(
     server.ui = ui;
     envUsed.push('KOZOU_UI_HOST');
   }
-  if (mcpHost || mcpEnabled !== undefined || mcpAdvertisedUrl) {
+  if (mcpHost || mcpEnabled !== undefined || mcpAdvertisedUrl || mcpAllowedHosts !== undefined) {
     const mcp = asObj(server.mcp);
     const http = asObj(mcp.http);
     if (mcpHost) {
@@ -812,6 +872,10 @@ function injectServerOverridesFromEnv(
     if (mcpAdvertisedUrl) {
       http.advertisedUrl = mcpAdvertisedUrl;
       envUsed.push('KOZOU_MCP_HTTP_ADVERTISED_URL');
+    }
+    if (mcpAllowedHosts !== undefined) {
+      http.allowedHosts = mcpAllowedHosts;
+      envUsed.push('KOZOU_MCP_HTTP_ALLOWED_HOSTS');
     }
     mcp.http = http;
     server.mcp = mcp;

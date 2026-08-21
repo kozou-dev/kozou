@@ -2,6 +2,7 @@
 import { SchemaCache } from './schemaCache.js';
 import { startStdioServer } from './startStdioServer.js';
 import { startHttpServer } from './startHttpServer.js';
+import { guardOptionsFromEnv } from './cliEnv.js';
 
 function parseEnvNumber(value: string | undefined, fallback: number): number {
   if (value === undefined) return fallback;
@@ -76,7 +77,15 @@ async function main(): Promise<void> {
       console.error(`[@kozou/mcp] invalid --port "${args.port}"`);
       process.exit(1);
     }
-    await startHttpServer(cache, { port: args.port, host: args.host });
+    // This CLI reads no config file, so the environment is the only place the
+    // reachable address and any extra Host names can be stated. Without them a
+    // tunnelled or proxied endpoint refuses every request — the same gap
+    // `kozou dev` / `kozou mcp --http` close through kozou.config.yaml.
+    await startHttpServer(cache, {
+      port: args.port,
+      host: args.host,
+      ...guardOptionsFromEnv(process.env),
+    });
     return;
   }
   await startStdioServer(cache);

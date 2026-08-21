@@ -98,6 +98,22 @@ describe('scaffold templates', () => {
     }
   });
 
+  it('every shipped stack forwards the guard-widening key it documents', async () => {
+    // Same failure as the opt-out above, and the deployment that needs this key
+    // most: both stacks set KOZOU_MCP_HTTP_HOST=0.0.0.0, and a bind-all address
+    // contributes nothing to the guard, so the derived set is just the loopback
+    // names plus whatever KOZOU_MCP_HTTP_ADVERTISED_URL declares. Neither stack
+    // ships a kozou.config.yaml, so an unforwarded variable leaves no route to
+    // the key at all.
+    for (const url of NO_AUTH_HTTP_COMPOSE_FILES) {
+      const compose = await readFile(fileURLToPath(url), 'utf8');
+      expect(
+        compose,
+        `${url.pathname}: documents KOZOU_MCP_HTTP_ALLOWED_HOSTS but does not forward it`,
+      ).toContain('KOZOU_MCP_HTTP_ALLOWED_HOSTS: ${KOZOU_MCP_HTTP_ALLOWED_HOSTS:-}');
+    }
+  });
+
   it('every shipped stack forwards the MCP opt-out it documents', async () => {
     // Both files tell their reader that KOZOU_MCP_HTTP_ENABLED=false is how to
     // turn the endpoint off in a stack that ships no kozou.config.yaml. Compose
