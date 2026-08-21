@@ -33,13 +33,24 @@ async function sign(payload: Record<string, unknown>, opts: SignOpts = {}): Prom
 
 const hs = (extra: Partial<AuthConfig> = {}): AuthConfig => ({ jwt: { secret: SECRET }, ...extra });
 
-async function expectError(fn: () => Promise<unknown>, kind: AuthErrorKind): Promise<void> {
+async function expectError(
+  fn: () => Promise<unknown>,
+  kind: AuthErrorKind,
+  message?: string | RegExp,
+): Promise<void> {
   try {
     await fn();
     expect.unreachable('should have thrown');
   } catch (err) {
     expect(err).toBeInstanceOf(KozouAuthError);
     expect((err as KozouAuthError).kind).toBe(kind);
+    if (message !== undefined) {
+      if (typeof message === 'string') {
+        expect((err as KozouAuthError).message).toBe(message);
+      } else {
+        expect((err as KozouAuthError).message).toMatch(message);
+      }
+    }
   }
 }
 
@@ -241,6 +252,138 @@ describe('authenticate — role resolution', () => {
     const a = createAuthenticator(hs());
     const token = await sign({ sub: 'x' });
     await expectError(() => a.authenticate(`Bearer ${token}`), 'forbidden');
+  });
+
+  // A claim that is present but cannot name a role means the role could not be
+  // read — not that the token named none — so defaultRole must not answer for
+  // it. A group mapper emitting a list is the ordinary way to get here.
+  it('forbids a list-valued role claim instead of falling back to defaultRole', async () => {
+    const a = createAuthenticator(hs({ defaultRole: 'anon_reader' }));
+    const token = await sign({ role: ['app_admin', 'app_reader'] });
+    await expectError(
+      () => a.authenticate(`Bearer ${token}`),
+      'forbidden',
+      'Token\'s "role" claim is a list, not a role name.',
+    );
+  });
+
+  it('forbids a list-valued role claim when the default is itself allowlisted', async () => {
+    // Proves the refusal is not the allowlist doing the work: without this
+    // rule the request would run as 'anon_reader', which the allowlist admits.
+    const a = createAuthenticator(
+      hs({ defaultRole: 'anon_reader', allowedRoles: ['anon_reader', 'app_reader'] }),
+    );
+    const token = await sign({ role: ['app_reader'] });
+    await expectError(() => a.authenticate(`Bearer ${token}`), 'forbidden', /is a list/);
+  });
+
+  it('forbids an empty-string role claim', async () => {
+    const a = createAuthenticator(hs({ defaultRole: 'anon_reader' }));
+    const token = await sign({ role: '' });
+    await expectError(
+      () => a.authenticate(`Bearer ${token}`),
+      'forbidden',
+      'Token\'s "role" claim is an empty string, not a role name.',
+    );
+  });
+
+  it('forbids a number-valued role claim', async () => {
+    const a = createAuthenticator(hs({ defaultRole: 'anon_reader' }));
+    const token = await sign({ role: 42 });
+    await expectError(
+      () => a.authenticate(`Bearer ${token}`),
+      'forbidden',
+      'Token\'s "role" claim is a number, not a role name.',
+    );
+  });
+
+  it('forbids a null role claim', async () => {
+    const a = createAuthenticator(hs({ defaultRole: 'anon_reader' }));
+    const token = await sign({ role: null });
+    await expectError(
+      () => a.authenticate(`Bearer ${token}`),
+      'forbidden',
+      'Token\'s "role" claim is null, not a role name.',
+    );
+  });
+
+  it('forbids an object-valued role claim', async () => {
+    const a = createAuthenticator(hs({ defaultRole: 'anon_reader' }));
+    const token = await sign({ role: { realm: 'app_reader' } });
+    await expectError(
+      () => a.authenticate(`Bearer ${token}`),
+      'forbidden',
+      'Token\'s "role" claim is an object, not a role name.',
+    );
+  });
+
+  it('names the configured claim, not the default one, in the refusal', async () => {
+    const a = createAuthenticator(hs({ roleClaim: 'https://kozou.org/role' }));
+    const token = await sign({ 'https://kozou.org/role': ['a'] });
+    await expectError(
+      () => a.authenticate(`Bearer ${token}`),
+      'forbidden',
+      'Token\'s "https://kozou.org/role" claim is a list, not a role name.',
+    );
+  });
+
+  it('forbids an empty list, the shape a mapper emits for "no roles assigned"', async () => {
+    const a = createAuthenticator(hs({ defaultRole: 'anon_reader' }));
+    const token = await sign({ role: [] });
+    await expectError(
+      () => a.authenticate(`Bearer ${token}`),
+      'forbidden',
+      'Token\'s "role" claim is a list, not a role name.',
+    );
+  });
+
+  it('forbids a boolean role claim, either way round', async () => {
+    const a = createAuthenticator(hs({ defaultRole: 'anon_reader' }));
+    for (const value of [false, true]) {
+      const token = await sign({ role: value });
+      await expectError(
+        () => a.authenticate(`Bearer ${token}`),
+        'forbidden',
+        'Token\'s "role" claim is a boolean, not a role name.',
+      );
+    }
+  });
+
+  it('still falls back to defaultRole when a different claim is present', async () => {
+    // The rule keys on the role claim itself, not on the payload being sparse.
+    const a = createAuthenticator(hs({ defaultRole: 'anon_reader' }));
+    const ctx = await a.authenticate(`Bearer ${await sign({ groups: ['x'], sub: 'y' })}`);
+    expect(ctx.role).toBe('anon_reader');
+  });
+
+  // The presence test is on own properties. Reading it off the prototype chain
+  // would make a roleClaim named after an Object.prototype member read as
+  // present on every token, refusing every request and naming a claim the
+  // token does not carry.
+  it.each(['toString', 'constructor', '__proto__', 'valueOf', 'hasOwnProperty'])(
+    'falls back to defaultRole when the roleClaim is named %s and the token omits it',
+    async (roleClaim) => {
+      const a = createAuthenticator(hs({ roleClaim, defaultRole: 'anon_reader' }));
+      const ctx = await a.authenticate(`Bearer ${await sign({ sub: 'x' })}`);
+      expect(ctx.role).toBe('anon_reader');
+    },
+  );
+
+  it('honours a prototype-named roleClaim the token actually carries', async () => {
+    const a = createAuthenticator(hs({ roleClaim: 'toString', defaultRole: 'anon_reader' }));
+    const ctx = await a.authenticate(`Bearer ${await sign({ toString: 'app_reader' })}`);
+    expect(ctx.role).toBe('app_reader');
+  });
+
+  it('forbids when the claim is absent and defaultRole is an empty string', async () => {
+    // An empty default is not a role; it must not reach SET LOCAL ROLE "".
+    const a = createAuthenticator(hs({ defaultRole: '' }));
+    const token = await sign({ sub: 'x' });
+    await expectError(
+      () => a.authenticate(`Bearer ${token}`),
+      'forbidden',
+      'Token does not specify a role and no default role is configured.',
+    );
   });
 
   it('forbids a role outside the allowlist (forbidden)', async () => {
