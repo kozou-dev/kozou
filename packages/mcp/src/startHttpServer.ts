@@ -396,6 +396,28 @@ function advertisedNoAuthWarning(
   return lines.map((line) => `${prefix} ${line}\n`).join('');
 }
 
+/** OAuth mode on a non-loopback bind. The bind warning is suppressed there for
+ *  good reason — its "NO authentication" line would be false — but suppressing
+ *  it removed the one hazard that OAuth mode adds rather than removes: this
+ *  listener speaks plaintext http, so a token sent straight to the port is not
+ *  encrypted, however the advertised resource URI is spelled.
+ *
+ *  A NOTE, not a WARNING. Loopback-bound-behind-a-TLS-proxy is the documented
+ *  shape and both shipped Compose stacks bind 0.0.0.0 inside a container, so a
+ *  warning here would fire on the sanctioned deployment every time — the same
+ *  desensitization the advertised-value refusals exist to avoid.
+ */
+function oauthPlaintextBindNote(host: string, prefix: string): string {
+  return (
+    `${prefix} NOTE: OAuth mode bound to non-loopback host "${host}". This listener\n` +
+    `${prefix} speaks plaintext http — kozou terminates no TLS of its own — so a bearer\n` +
+    `${prefix} token sent straight to this port crosses the network unencrypted, whatever\n` +
+    `${prefix} scheme the advertised resource URI uses.\n` +
+    `${prefix} Terminate TLS in front of it, and let nothing reach this port except\n` +
+    `${prefix} through that path.\n`
+  );
+}
+
 /** Divergences between the advertised `iss` / `aud` contract and the one
  *  actually verified, formatted for a startup warning. Scoped to those two
  *  claims on purpose — the verification key (`jwt.jwksUri`) can point
@@ -493,6 +515,12 @@ export async function startHttpServer(
 
   if (!isLoopbackHost(host) && auth === undefined) {
     process.stderr.write(nonLoopbackWarning(host, prefix, opts.execution?.role));
+  }
+
+  // The other half of that condition. Authenticating the caller does not encrypt
+  // the socket, and this one never was: kozou serves plain http.
+  if (!isLoopbackHost(host) && auth !== undefined) {
+    process.stderr.write(oauthPlaintextBindNote(host, prefix));
   }
 
   // A separate fact from the bind address, and the one the bind warning cannot

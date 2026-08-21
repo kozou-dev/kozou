@@ -518,6 +518,107 @@ describe('startHttpServer allowedHosts startup refusals', () => {
   });
 });
 
+describe('startHttpServer notes a plaintext listener in OAuth mode', () => {
+  // The bind warning is suppressed in OAuth mode because its "NO
+  // authentication" line would be false there. Suppressing it also removed the
+  // one hazard OAuth mode adds: the socket is still plain http, so a token sent
+  // straight to the port is not encrypted.
+  const AUTH = {
+    resource: 'https://mcp.example.com/mcp',
+    authorizationServers: ['https://idp.example.com/realms/kozou'],
+    jwt: { secret: 'x'.repeat(32) },
+  };
+
+  async function bootChunks(opts: Record<string, unknown>): Promise<string[]> {
+    const writes: string[] = [];
+    const spy = vi.spyOn(process.stderr, 'write').mockImplementation((chunk: unknown) => {
+      writes.push(String(chunk));
+      return true;
+    });
+    const cache = new SchemaCache({ connection: 'postgres://invalid:5432/none' });
+    let handle: HttpServerHandle;
+    try {
+      handle = await startHttpServer(cache, { port: 0, logPrefix: '[test]', ...opts });
+    } finally {
+      spy.mockRestore();
+    }
+    await handle.close();
+    return writes;
+  }
+
+  const NOTE = 'NOTE: OAuth mode bound to non-loopback host';
+
+  /** The note's own lines, prefix stripped. Asserted as exact prose: the message
+   *  is the whole product, so a dropped line or a lost prefix is the defect. */
+  async function noteLines(opts: Record<string, unknown>): Promise<string[]> {
+    const chunk = (await bootChunks(opts)).find((written) => written.includes(NOTE));
+    if (chunk === undefined) return [];
+    return chunk
+      .split('\n')
+      .filter((line) => line !== '')
+      .map((line) => {
+        expect(line.startsWith('[test] '), `every line carries the log prefix: ${line}`).toBe(true);
+        return line.slice('[test] '.length);
+      });
+  }
+
+  it('renders exactly this for a bind-all listener in OAuth mode', async () => {
+    // 0.0.0.0 is what both shipped Compose stacks set, so this is the message
+    // the containerised OAuth deployment actually gets.
+    expect(await noteLines({ host: '0.0.0.0', auth: AUTH })).toEqual([
+      'NOTE: OAuth mode bound to non-loopback host "0.0.0.0". This listener',
+      'speaks plaintext http — kozou terminates no TLS of its own — so a bearer',
+      'token sent straight to this port crosses the network unencrypted, whatever',
+      'scheme the advertised resource URI uses.',
+      'Terminate TLS in front of it, and let nothing reach this port except',
+      'through that path.',
+    ]);
+  });
+
+  it('names the host it was actually bound to', async () => {
+    // A second bindable non-loopback address, so the host is read from the
+    // option rather than hardcoded. A hostname that does not resolve locally
+    // cannot be bound at all, so it cannot be used to test this.
+    const lines = await noteLines({ host: '::', auth: AUTH });
+    expect(lines[0]).toContain('"::"');
+  });
+
+  it('is a NOTE, not a WARNING, and does not claim the endpoint is unauthenticated', async () => {
+    // A warning would fire on the sanctioned containerised shape every time.
+    const out = (await bootChunks({ host: '0.0.0.0', auth: AUTH })).join('');
+    expect(out).toContain(NOTE);
+    expect(out).not.toContain('WARNING: MCP HTTP server bound to non-loopback host');
+    expect(out).not.toContain('has NO authentication');
+  });
+
+  it('stays quiet for a loopback bind in OAuth mode', async () => {
+    expect((await bootChunks({ host: '127.0.0.1', auth: AUTH })).join('')).not.toContain(NOTE);
+  });
+
+  it('stays quiet without auth, where the bind warning speaks instead', async () => {
+    // No bearer token exists to be exposed there, and the existing warning
+    // already names that deployment's hazard. The two are exclusive.
+    const out = (await bootChunks({ host: '0.0.0.0' })).join('');
+    expect(out).not.toContain(NOTE);
+    expect(out).toContain('WARNING: MCP HTTP server bound to non-loopback host');
+  });
+
+  it('is unaffected by allowInsecureHttp, which is about advertised values', async () => {
+    // Waiving the plaintext refusal for an advertised URL says nothing about
+    // whether the socket itself is encrypted.
+    const out = (await bootChunks({
+      host: '0.0.0.0',
+      auth: {
+        resource: 'http://mcp.example.com/mcp',
+        authorizationServers: ['http://idp.example.com/realms/kozou'],
+        jwt: { secret: 'x'.repeat(32) },
+        allowInsecureHttp: true,
+      },
+    })).join('');
+    expect(out).toContain(NOTE);
+  });
+});
+
 describe('startHttpServer warns about a declared off-box address with no auth', () => {
   // The bind-address warning cannot reach this deployment: a tunnel or proxy
   // binds loopback, so the endpoint most exposed to the internet was the one
