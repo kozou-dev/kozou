@@ -21,7 +21,7 @@
   "devDependencies": {
     "kozou": "workspace:*",
     "@kozou/test-utils": "workspace:*",
-    "@testcontainers/postgresql": "^12.0.0",
+    "@testcontainers/postgresql": "^12.1.0",
     "@types/pg": "^8.11.0",
     "tsx": "^4.19.0"
   }
