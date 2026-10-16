@@ -257,12 +257,32 @@ const mcpHttpServerSchema = z
       });
       return;
     }
+    // First, because a value with no scheme still parses — `localhost:4334/mcp`
+    // reads as scheme `localhost:` with an empty host — and the predicate below
+    // would call that empty host bind-all. This refusal quotes the protocol
+    // alone, never the password (for `user:pw@host/mcp` the "protocol" is the
+    // user name).
     if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
       ctx.addIssue({
         code: 'custom',
         message:
           `server.mcp.http.advertisedUrl must be http or https, got ${parsed.protocol}. ` +
           'It is the URL an MCP client registers for the Streamable HTTP transport.',
+        path: ['advertisedUrl'],
+      });
+      return;
+    }
+    // Checked against @kozou/mcp's own predicate: an address no client can
+    // connect to, or one carrying credentials, is the failure this key exists to
+    // prevent rather than a lesser version of it. The value is not echoed —
+    // repeating userinfo into the error would be the leak itself. Checked before
+    // the refusals below for the same reason: they may quote the value, so a
+    // value that reaches them must already be known to carry no userinfo.
+    const unusable = unusableAdvertisedUrlReason(parsed);
+    if (unusable !== undefined) {
+      ctx.addIssue({
+        code: 'custom',
+        message: `server.mcp.http.advertisedUrl is not usable: ${unusable}.`,
         path: ['advertisedUrl'],
       });
       return;
@@ -292,19 +312,6 @@ const mcpHttpServerSchema = z
     // capability limit, not a formatting rule, so the message states the
     // predicate it actually applies rather than a looser one the operator
     // would edit against in vain (issue #266).
-    // Checked against @kozou/mcp's own predicate: an address no client can
-    // connect to, or one carrying credentials, is the failure this key exists to
-    // prevent rather than a lesser version of it. The value is not echoed —
-    // repeating userinfo into the error would be the leak itself.
-    const unusable = unusableAdvertisedUrlReason(parsed);
-    if (unusable !== undefined) {
-      ctx.addIssue({
-        code: 'custom',
-        message: `server.mcp.http.advertisedUrl is not usable: ${unusable}.`,
-        path: ['advertisedUrl'],
-      });
-      return;
-    }
     if (parsed.pathname !== MCP_HTTP_PATH) {
       ctx.addIssue({
         code: 'custom',

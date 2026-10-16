@@ -14,6 +14,7 @@ import {
   KozouConfigError,
 } from '../src/config.js';
 import type { KozouConfig } from '../src/config.js';
+import { formatCliError } from '../src/cli-error.js';
 
 async function makeTempDir(): Promise<string> {
   return mkdtemp(join(tmpdir(), `kozou-config-${randomBytes(4).toString('hex')}-`));
@@ -648,6 +649,49 @@ server:
       },
     });
     expect(JSON.stringify(thrown.issues)).not.toContain('hunter2');
+  });
+
+  it('does not echo the credential when the URL is also wrong in another way', async () => {
+    // Each of these is refused for something else as well, and a refusal may
+    // quote the value it refuses. The userinfo check runs first, so no other
+    // refusal ever sees a value that carries a credential (issue #295).
+    for (const bad of [
+      'https://user:hunter2@mcp.example.com/mcp?t=1',
+      'https://user:hunter2@mcp.example.com/mcp#f',
+      'ftp://user:hunter2@mcp.example.com/mcp',
+      'https://user:hunter2@mcp.example.com/api/mcp',
+      'https://user:hunter2@0.0.0.0:4334/mcp',
+    ]) {
+      const thrown = await captureConfigError({
+        skipFile: true,
+        env: {
+          DATABASE_URL: 'postgres://u:p@localhost:5432/x',
+          KOZOU_MCP_HTTP_ADVERTISED_URL: bad,
+        },
+      });
+      expect(thrown.issues.map((i) => i.path), bad).toContain('server.mcp.http.advertisedUrl');
+      expect(JSON.stringify(thrown.issues), bad).not.toContain('hunter2');
+      // What the CLI actually prints for a refused config.
+      expect(formatCliError(thrown), bad).not.toContain('hunter2');
+    }
+  });
+
+  it('refuses a value with no scheme for its scheme, not as a bind-all address', async () => {
+    // These parse with the text before the first colon as the scheme and an
+    // empty host, which the bind-all predicate would read as bind-all. The
+    // scheme is the fault, so its refusal has to be the one that speaks.
+    for (const bad of ['localhost:4334/mcp', 'mcp.example.com:443/mcp']) {
+      const thrown = await captureConfigError({
+        skipFile: true,
+        env: {
+          DATABASE_URL: 'postgres://u:p@localhost:5432/x',
+          KOZOU_MCP_HTTP_ADVERTISED_URL: bad,
+        },
+      });
+      const messages = thrown.issues.map((i) => i.message).join('\n');
+      expect(messages, bad).toContain('must be http or https');
+      expect(messages, bad).not.toContain('bind-all');
+    }
   });
 
   it('refuses an advertised URL that is not an absolute http(s) URL', async () => {
