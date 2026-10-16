@@ -26,7 +26,10 @@
 //     tokenless requests with 401 + WWW-Authenticate, verifies each
 //     request's bearer token (signature / issuer / audience / role), and
 //     gates the describe and execute tool facets on the token's scopes.
-//     This is the sanctioned posture for a non-loopback bind.
+//     This is the sanctioned posture for a non-loopback bind, together with
+//     TLS terminated in front of it: the listener itself speaks plaintext
+//     http, so authenticating each caller does not encrypt their token, and
+//     a non-loopback bind in this mode prints a note saying so.
 
 import { randomUUID } from 'node:crypto';
 import { createServer, type IncomingMessage, type Server as HttpServer, type ServerResponse } from 'node:http';
@@ -134,10 +137,37 @@ class HttpBodyError extends Error {
   }
 }
 
+/** Bind hosts spelled exactly as one of the loopback names the rebinding guard
+ *  always accepts (`LOOPBACK_HOSTNAMES`), or as the mapped form of one. */
 const LOOPBACK_HOSTS = new Set(['127.0.0.1', '::1', 'localhost', '::ffff:127.0.0.1']);
 
+/** Whether a bind host is the local machine. Answered by the same predicate as
+ *  an advertised or declared URL ({@link isLoopbackUrl}), so one host is never
+ *  loopback in one startup message and off-box in the next: hostnames are
+ *  case-insensitive, a trailing dot names the same host, and all of
+ *  127.0.0.0/8, `::1` and their IPv4-mapped forms are loopback.
+ *
+ *  Not loopback, so a warning gated on this errs toward speaking: a string
+ *  that is not a bare host (it carries a port, brackets, a path or userinfo),
+ *  which cannot be bound; a name the URL parser would rewrite (IPv4 shorthand,
+ *  a leading zero, a full-width character), which a resolver need not read the
+ *  same way; and a value that is not a string at all. */
 export function isLoopbackHost(host: string): boolean {
-  return LOOPBACK_HOSTS.has(host);
+  // Exported, so a plain JavaScript caller can hand it an unset environment
+  // variable; that names no host, and must not throw.
+  if (typeof host !== 'string' || host === '' || /[\s/\\?#@%[\]]/.test(host)) return false;
+  const ipv6 = host.includes(':');
+  let url: URL;
+  try {
+    url = new URL(`http://${ipv6 ? `[${host}]` : host}/`);
+  } catch {
+    return false;
+  }
+  // `0177.0.0.1` is 127.0.0.1 to a URL parser and 177.0.0.1 to the macOS
+  // resolver, so only a name the parser reads back unchanged is trusted. An
+  // IPv6 literal has one reading, so its canonical rewrite is no disagreement.
+  if (!ipv6 && url.hostname !== host.toLowerCase()) return false;
+  return isLoopbackUrl(url);
 }
 
 const BIND_ALL_HOSTS = new Set(['0.0.0.0', '::', '']);
@@ -186,7 +216,10 @@ export function buildRebindingGuard(
   opts: { allowedHosts?: string[]; allowedOrigins?: string[] } = {},
 ): RebindingGuard {
   const hostnames = new Set<string>(LOOPBACK_HOSTNAMES);
-  if (!isLoopbackHost(host) && !BIND_ALL_HOSTS.has(host)) {
+  // A question of spelling, not of locality, so not `isLoopbackHost`: a client
+  // of a `127.0.0.2` bind sends `Host: 127.0.0.2`, which is loopback but is not
+  // one of the names accepted above, so it has to be added like any other.
+  if (!LOOPBACK_HOSTS.has(host) && !BIND_ALL_HOSTS.has(host)) {
     hostnames.add(hostnameOf(host));
   }
   for (const h of opts.allowedHosts ?? []) hostnames.add(hostnameOf(h));
@@ -396,6 +429,29 @@ function advertisedNoAuthWarning(
   return lines.map((line) => `${prefix} ${line}\n`).join('');
 }
 
+/** OAuth mode on a non-loopback bind. The bind warning is suppressed there for
+ *  good reason — its "NO authentication" line would be false — but suppressing
+ *  it removed the one hazard that OAuth mode adds rather than removes: this
+ *  listener speaks plaintext http, so a token sent straight to the port is not
+ *  encrypted, however the advertised resource URI is spelled.
+ *
+ *  A NOTE, not a WARNING. Loopback-bound-behind-a-TLS-proxy is the documented
+ *  shape and both shipped Compose stacks bind 0.0.0.0 inside a container, so a
+ *  deployment built the way this project ships it must not boot into a
+ *  permanent WARNING — the same reason the audience escape hatch is a note
+ *  (`advertisementNote`).
+ */
+function oauthPlaintextBindNote(host: string, prefix: string): string {
+  return (
+    `${prefix} NOTE: OAuth mode bound to non-loopback host "${host}". This listener\n` +
+    `${prefix} speaks plaintext http — kozou terminates no TLS of its own — so a bearer\n` +
+    `${prefix} token sent straight to this port crosses the network unencrypted, whatever\n` +
+    `${prefix} scheme the advertised resource URI uses.\n` +
+    `${prefix} Terminate TLS in front of it, and let nothing reach this port except\n` +
+    `${prefix} through that path.\n`
+  );
+}
+
 /** Divergences between the advertised `iss` / `aud` contract and the one
  *  actually verified, formatted for a startup warning. Scoped to those two
  *  claims on purpose — the verification key (`jwt.jwksUri`) can point
@@ -493,6 +549,12 @@ export async function startHttpServer(
 
   if (!isLoopbackHost(host) && auth === undefined) {
     process.stderr.write(nonLoopbackWarning(host, prefix, opts.execution?.role));
+  }
+
+  // The other half of that condition. Authenticating the caller does not encrypt
+  // the socket, and this one never was: kozou serves plain http.
+  if (!isLoopbackHost(host) && auth !== undefined) {
+    process.stderr.write(oauthPlaintextBindNote(host, prefix));
   }
 
   // A separate fact from the bind address, and the one the bind warning cannot

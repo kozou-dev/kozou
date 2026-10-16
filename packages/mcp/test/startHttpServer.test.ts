@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import pkg from 'pg';
 import { request as httpRequest } from 'node:http';
 import { connect as netConnect } from 'node:net';
+import { networkInterfaces } from 'node:os';
 
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
@@ -13,6 +14,7 @@ import {
   type HttpServerHandle,
 } from '../src/index.js';
 import { buildRebindingGuard, validateRebindingHeaders } from '../src/startHttpServer.js';
+import { isLoopbackUrl } from '../src/httpAuth.js';
 
 /** Write a handcrafted request over a bare socket and return its status. Used
  *  for header shapes Node's http client refuses to emit verbatim (an empty
@@ -70,15 +72,93 @@ import {
 
 describe('isLoopbackHost', () => {
   it('recognises loopback hosts', () => {
-    expect(isLoopbackHost('127.0.0.1')).toBe(true);
-    expect(isLoopbackHost('::1')).toBe(true);
-    expect(isLoopbackHost('localhost')).toBe(true);
+    for (const host of ['127.0.0.1', '::1', 'localhost', '::ffff:127.0.0.1']) {
+      expect(isLoopbackHost(host), host).toBe(true);
+    }
+  });
+
+  it('recognises every spelling of this machine, not only the common four', () => {
+    // Each of these used to be reported as a non-loopback bind, so the startup
+    // messages told a loopback deployment it was reachable from elsewhere.
+    for (const host of [
+      'LOCALHOST',
+      'Localhost',
+      'localhost.',
+      '127.0.0.2',
+      '127.0.0.5',
+      '::ffff:127.0.0.2',
+      '::FFFF:7F00:1',
+    ]) {
+      expect(isLoopbackHost(host), host).toBe(true);
+    }
+  });
+
+  it('gives the same answer as the declared-address check for a canonically spelled host', () => {
+    // One question asked in three places: the bind host, a declared
+    // advertisedUrl, and an advertised OAuth URL. A host must not be loopback
+    // for one of them and off-box for another.
+    for (const host of [
+      '127.0.0.1',
+      'LOCALHOST',
+      'localhost.',
+      '127.0.0.5',
+      '::1',
+      '::ffff:127.0.0.1',
+      '0.0.0.0',
+      '::',
+      '192.168.1.10',
+      'mcp.example.com',
+    ]) {
+      const authority = host.includes(':') ? `[${host}]` : host;
+      expect(isLoopbackHost(host), host).toBe(isLoopbackUrl(new URL(`http://${authority}/`)));
+    }
   });
 
   it('rejects non-loopback hosts', () => {
-    expect(isLoopbackHost('0.0.0.0')).toBe(false);
-    expect(isLoopbackHost('192.168.1.10')).toBe(false);
-    expect(isLoopbackHost('example.com')).toBe(false);
+    for (const host of ['0.0.0.0', '::', '', '192.168.1.10', 'example.com', '::ffff:0.0.0.0']) {
+      expect(isLoopbackHost(host), host).toBe(false);
+    }
+  });
+
+  it('rejects a string that is not a bare host, rather than reading a host out of it', () => {
+    // A URL parser finds a loopback host in every one of these; it silently
+    // drops a tab or newline, so the last two read as `::1`. None of them can be
+    // bound, and a warning gated on this has to err toward speaking.
+    for (const host of [
+      'evil.com@localhost',
+      'localhost/x',
+      '%6Cocalhost',
+      'localhost:3334',
+      '[::1]',
+      '::\t1',
+      '::1\n',
+    ]) {
+      expect(isLoopbackHost(host), host).toBe(false);
+    }
+  });
+
+  it('rejects a host the URL parser would rewrite, which a resolver may read differently', () => {
+    // A URL parser reads `0177.0.0.1` as octal (127.0.0.1); the macOS resolver
+    // reads it as decimal (177.0.0.1) and binds there, or fails. Shorthand and
+    // full-width spellings are rewritten the same way, so none is trusted.
+    for (const host of [
+      '0177.0.0.1',
+      '127.000.0.1',
+      '127.1',
+      '0x7f.1',
+      '2130706433',
+      'ｌｏｃａｌｈｏｓｔ',
+      'local­host',
+    ]) {
+      expect(isLoopbackHost(host), host).toBe(false);
+    }
+  });
+
+  it('answers false rather than throwing for a value that is not a string', () => {
+    // Exported: a plain JavaScript caller can pass an unset environment variable.
+    for (const value of [undefined, null, 3334]) {
+      expect(isLoopbackHost(value as unknown as string), String(value)).toBe(false);
+    }
   });
 });
 
@@ -87,6 +167,26 @@ describe('buildRebindingGuard', () => {
     const guard = buildRebindingGuard('127.0.0.1');
     expect([...guard.hostnames].sort()).toEqual(['127.0.0.1', '::1', 'localhost']);
     expect(guard.allowedOrigins).toBeUndefined();
+  });
+
+  it('accepts exactly the loopback names for a loopback bind spelled as one of them', () => {
+    // Each spelling is already covered by the fixed names, so nothing is added
+    // for it — and the unbracketed IPv6 forms must not be, because the hostname
+    // read out of `::1` is the empty string.
+    for (const host of ['127.0.0.1', '::1', 'localhost', '::ffff:127.0.0.1']) {
+      expect([...buildRebindingGuard(host).hostnames].sort(), host).toEqual([
+        '127.0.0.1',
+        '::1',
+        'localhost',
+      ]);
+    }
+  });
+
+  it('adds a loopback bind host that the fixed names do not spell', () => {
+    // Whether to add the bound host is a question of spelling, not of locality:
+    // `127.0.0.2` is loopback, and its clients send `Host: 127.0.0.2`, which
+    // none of the fixed names matches.
+    expect(buildRebindingGuard('127.0.0.2').hostnames.has('127.0.0.2')).toBe(true);
   });
 
   it('adds the bound hostname for a specific non-loopback bind', () => {
@@ -515,6 +615,156 @@ describe('startHttpServer allowedHosts startup refusals', () => {
   it('accepts a bare hostname and a host:port', async () => {
     const handle = await boot(['tunnel.example.com', 'mcp.internal:3334']);
     await handle.close();
+  });
+});
+
+describe('startHttpServer notes a plaintext listener in OAuth mode', () => {
+  // The bind warning is suppressed in OAuth mode because its "NO
+  // authentication" line would be false there. Suppressing it also removed the
+  // one hazard OAuth mode adds: the socket is still plain http, so a token sent
+  // straight to the port is not encrypted.
+  const AUTH = {
+    resource: 'https://mcp.example.com/mcp',
+    authorizationServers: ['https://idp.example.com/realms/kozou'],
+    jwt: { secret: 'x'.repeat(32) },
+  };
+
+  async function bootChunks(opts: Record<string, unknown>): Promise<string[]> {
+    const writes: string[] = [];
+    const spy = vi.spyOn(process.stderr, 'write').mockImplementation((chunk: unknown) => {
+      writes.push(String(chunk));
+      return true;
+    });
+    const cache = new SchemaCache({ connection: 'postgres://invalid:5432/none' });
+    let handle: HttpServerHandle;
+    try {
+      handle = await startHttpServer(cache, { port: 0, logPrefix: '[test]', ...opts });
+    } finally {
+      spy.mockRestore();
+    }
+    await handle.close();
+    return writes;
+  }
+
+  const NOTE = 'NOTE: OAuth mode bound to non-loopback host';
+
+  /** The note exactly as written: every line carries the prefix and ends in a
+   *  single newline, with no blank line and nothing after the last one. */
+  const expectedNote = (host: string, prefix = '[test]'): string =>
+    [
+      `NOTE: OAuth mode bound to non-loopback host "${host}". This listener`,
+      'speaks plaintext http — kozou terminates no TLS of its own — so a bearer',
+      'token sent straight to this port crosses the network unencrypted, whatever',
+      'scheme the advertised resource URI uses.',
+      'Terminate TLS in front of it, and let nothing reach this port except',
+      'through that path.',
+    ]
+      .map((line) => `${prefix} ${line}\n`)
+      .join('');
+
+  /** Every stderr write that carries the note. Compared whole, as a list: the
+   *  message is the whole product, so a dropped line, a lost prefix, a changed
+   *  line break and a second copy are each the defect, and each survives a
+   *  line-by-line comparison that splits on newlines and drops empty lines. */
+  async function noteChunks(opts: Record<string, unknown>): Promise<string[]> {
+    return (await bootChunks(opts)).filter((written) => written.includes(NOTE));
+  }
+
+  it('renders exactly this for a bind-all listener in OAuth mode', async () => {
+    // 0.0.0.0 is what both shipped Compose stacks set, so this is the message
+    // the containerised OAuth deployment actually gets.
+    expect(await noteChunks({ host: '0.0.0.0', auth: AUTH })).toEqual([expectedNote('0.0.0.0')]);
+  });
+
+  it('names the host it was actually bound to', async () => {
+    // A second bindable non-loopback address, so the host is read from the
+    // option rather than hardcoded. A hostname that does not resolve locally
+    // cannot be bound at all, so it cannot be used to test this.
+    expect(await noteChunks({ host: '::', auth: AUTH })).toEqual([expectedNote('::')]);
+  });
+
+  // Every other off-box bind in this file is a bind-all address, so a condition
+  // that recognised only those would pass them all. A real interface address is
+  // the one specific off-box host every machine running this suite can bind.
+  const interfaceAddress = Object.values(networkInterfaces())
+    .flatMap((infos) => infos ?? [])
+    .find((info) => !info.internal && info.family === 'IPv4')?.address;
+
+  it.skipIf(interfaceAddress === undefined)(
+    'speaks for a specific interface address, not only a bind-all one',
+    async () => {
+      const host = interfaceAddress as string;
+      expect(await noteChunks({ host, auth: AUTH })).toEqual([expectedNote(host)]);
+    },
+  );
+
+  it('speaks with the execution tool enabled too', async () => {
+    // Execution raises what a token is worth here; it must not be the thing
+    // that silences the note.
+    const chunks = await noteChunks({
+      host: '0.0.0.0',
+      auth: { ...AUTH, allowedRoles: ['kozou_agent'] },
+      execution: {
+        pool: {
+          connect: async () => ({
+            query: async () => ({ rows: [], rowCount: 0 }),
+            release: () => {},
+          }),
+        },
+        claimsGuc: 'request.jwt.claims',
+      },
+    });
+    expect(chunks).toEqual([expectedNote('0.0.0.0')]);
+  });
+
+  it('carries the library default prefix when the embedder sets none', async () => {
+    // Every other test here passes a prefix, so a note that read the option
+    // without its default would print `undefined NOTE: …` to an embedder and
+    // still pass them all.
+    expect(await noteChunks({ host: '0.0.0.0', auth: AUTH, logPrefix: undefined })).toEqual([
+      expectedNote('0.0.0.0', '[@kozou/mcp]'),
+    ]);
+  });
+
+  it('is a NOTE, not a WARNING, and does not claim the endpoint is unauthenticated', async () => {
+    // A warning would fire on the sanctioned containerised shape every time.
+    const out = (await bootChunks({ host: '0.0.0.0', auth: AUTH })).join('');
+    expect(out).toContain(NOTE);
+    expect(out).not.toContain('WARNING: MCP HTTP server bound to non-loopback host');
+    expect(out).not.toContain('has NO authentication');
+  });
+
+  it('says nothing either way for a loopback bind, however it is spelled', async () => {
+    // Neither the note (OAuth) nor the bind warning (no auth) may call a
+    // loopback listener non-loopback. Only spellings every platform can bind
+    // are booted here; the rest are covered by the isLoopbackHost tests.
+    for (const host of ['127.0.0.1', 'localhost', 'LOCALHOST', '::1']) {
+      expect((await bootChunks({ host, auth: AUTH })).join(''), host).not.toContain('non-loopback');
+      expect((await bootChunks({ host })).join(''), host).not.toContain('non-loopback');
+    }
+  });
+
+  it('stays quiet without auth, where the bind warning speaks instead', async () => {
+    // No bearer token exists to be exposed there, and the existing warning
+    // already names that deployment's hazard. The two are exclusive.
+    const out = (await bootChunks({ host: '0.0.0.0' })).join('');
+    expect(out).not.toContain(NOTE);
+    expect(out).toContain('WARNING: MCP HTTP server bound to non-loopback host');
+  });
+
+  it('is unaffected by allowInsecureHttp, which is about advertised values', async () => {
+    // Waiving the plaintext refusal for an advertised URL says nothing about
+    // whether the socket itself is encrypted.
+    const out = (await bootChunks({
+      host: '0.0.0.0',
+      auth: {
+        resource: 'http://mcp.example.com/mcp',
+        authorizationServers: ['http://idp.example.com/realms/kozou'],
+        jwt: { secret: 'x'.repeat(32) },
+        allowInsecureHttp: true,
+      },
+    })).join('');
+    expect(out).toContain(NOTE);
   });
 });
 
