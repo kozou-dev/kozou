@@ -914,6 +914,29 @@ describe('startHttpServer advertisedUrl startup refusals', () => {
     }
   });
 
+  // An embedder that serves the transport on another path is reached there, so
+  // that is the path its declared address has to carry.
+  it('accepts an advertisedUrl on a custom mcpPath', async () => {
+    const handle = await startHttpServer(cache(), {
+      port: 0,
+      host: '127.0.0.1',
+      mcpPath: '/custom',
+      advertisedUrl: 'https://mcp.example.com/custom',
+    });
+    await handle.close();
+  });
+
+  it('refuses the default path on a custom mcpPath, naming the path it serves', async () => {
+    await expect(
+      startHttpServer(cache(), {
+        port: 0,
+        host: '127.0.0.1',
+        mcpPath: '/custom',
+        advertisedUrl: 'https://mcp.example.com/mcp',
+      }),
+    ).rejects.toThrow('advertisedUrl must have the path /custom exactly (got "/mcp")');
+  });
+
   it('refuses a non-http(s) advertisedUrl', async () => {
     await expect(
       startHttpServer(cache(), {

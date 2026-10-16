@@ -95,7 +95,8 @@ export type StartHttpServerOptions = {
    *  configured to rewrite it. Without this, a loopback-bound server behind a
    *  `Host`-preserving tunnel or proxy refuses every request. Refused together with `auth`, whose `resource` already declares
    *  the address (and is the one clients obey, since they discover it from the
-   *  endpoint's own metadata). */
+   *  endpoint's own metadata). Its path must be `mcpPath` exactly, the one path
+   *  the MCP transport is served on. */
   advertisedUrl?: string;
   /** Run as an OAuth 2.1 resource server (MCP authorization spec): serve
    *  RFC 9728 protected-resource metadata, require a verified bearer token
@@ -247,11 +248,13 @@ function assertUsableAllowedHosts(entries: readonly string[], prefix: string): v
 
 /** The `advertisedUrl` as a URL, or undefined when it is not set.
  *  Validated here against the same set of refusals the CLI config applies — not
- *  a subset — so a library embedder cannot boot with a value `kozou dev` would
- *  have rejected. The value exists to replace a guess, so a malformed one has
- *  no honest fallback. */
+ *  a subset — except that the path is checked against `mcpPath` rather than
+ *  `/mcp`. The CLI never sets `mcpPath`, so on the default path a library
+ *  embedder cannot boot with a value `kozou dev` would have rejected. The value
+ *  exists to replace a guess, so a malformed one has no honest fallback. */
 function resolveAdvertisedUrl(
   opts: StartHttpServerOptions,
+  mcpPath: string,
   prefix: string,
 ): URL | undefined {
   if (opts.advertisedUrl === undefined) return undefined;
@@ -279,9 +282,12 @@ function resolveAdvertisedUrl(
         'path alone and a fragment never leaves the client.',
     );
   }
-  if (parsed.pathname !== DEFAULT_MCP_PATH) {
+  // The path this server actually serves, not the default: an embedder that sets
+  // `mcpPath` is reached there and only there. The CLI never sets it, which is
+  // why its own config check can name /mcp outright.
+  if (parsed.pathname !== mcpPath) {
     throw new Error(
-      `${prefix} advertisedUrl must have the path ${DEFAULT_MCP_PATH} exactly (got ` +
+      `${prefix} advertisedUrl must have the path ${mcpPath} exactly (got ` +
         `"${parsed.pathname}") — the transport serves that path and no other.`,
     );
   }
@@ -474,7 +480,7 @@ export async function startHttpServer(
   // The declared reachable address of a deployment that runs no OAuth. Both
   // declare the same fact, so both together is a contradiction rather than
   // something to resolve silently.
-  const advertised = resolveAdvertisedUrl(opts, prefix);
+  const advertised = resolveAdvertisedUrl(opts, mcpPath, prefix);
   if (opts.allowedHosts !== undefined) assertUsableAllowedHosts(opts.allowedHosts, prefix);
 
   if (auth !== undefined && auth.insecureHttpUrls.length > 0) {
