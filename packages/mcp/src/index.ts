@@ -14,12 +14,13 @@ export { callTool } from './tools/call.js';
 export { startStdioServer, type StartStdioServerOptions } from './startStdioServer.js';
 export {
   startHttpServer,
-  isLoopbackHost,
   unusableAdvertisedUrlReason,
   unusableAllowedHostReason,
   type StartHttpServerOptions,
   type HttpServerHandle,
 } from './startHttpServer.js';
+// One implementation for every server package; see @kozou/core/net.
+export { isLoopbackHost } from '@kozou/core/net';
 export {
   DEFAULT_DESCRIBE_SCOPE,
   DEFAULT_EXECUTE_SCOPE,

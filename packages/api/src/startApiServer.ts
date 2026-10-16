@@ -13,6 +13,7 @@ import type { AddressInfo } from 'node:net';
 
 import { runInRoleTransaction } from '@kozou/core';
 import type { ConnectionPool, SchemaContext } from '@kozou/core';
+import { isLoopbackHost } from '@kozou/core/net';
 
 import {
   badRequest,
@@ -74,12 +75,6 @@ export type ApiServerHandle = {
 const DEFAULT_PORT = 3335;
 const DEFAULT_HOST = '127.0.0.1';
 const DEFAULT_MAX_BODY_BYTES = 4 * 1024 * 1024; // 4 MiB (write payloads / RPC args)
-
-const LOOPBACK_HOSTS = new Set(['127.0.0.1', '::1', 'localhost', '::ffff:127.0.0.1']);
-
-export function isLoopbackHost(host: string): boolean {
-  return LOOPBACK_HOSTS.has(host);
-}
 
 function nonLoopbackWarning(host: string, prefix: string, authed: boolean): string {
   if (authed) {
