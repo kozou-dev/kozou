@@ -39,13 +39,13 @@ import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/
 import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
 import type { AuthInfo } from '@modelcontextprotocol/sdk/server/auth/types.js';
 import { KozouAuthError } from '@kozou/core/auth';
+import { isLoopbackHost, isLoopbackUrl } from '@kozou/core/net';
 
 import { createMcpServer } from './server.js';
 import type { SchemaCache } from './schemaCache.js';
 import { fixedIdentity, type McpExecution } from './execution.js';
 import {
   authenticateRequest,
-  isLoopbackUrl,
   resolveMcpHttpAuth,
   type McpAuthContext,
   type McpHttpAuth,
@@ -140,35 +140,6 @@ class HttpBodyError extends Error {
 /** Bind hosts spelled exactly as one of the loopback names the rebinding guard
  *  always accepts (`LOOPBACK_HOSTNAMES`), or as the mapped form of one. */
 const LOOPBACK_HOSTS = new Set(['127.0.0.1', '::1', 'localhost', '::ffff:127.0.0.1']);
-
-/** Whether a bind host is the local machine. Answered by the same predicate as
- *  an advertised or declared URL ({@link isLoopbackUrl}), so one host is never
- *  loopback in one startup message and off-box in the next: hostnames are
- *  case-insensitive, a trailing dot names the same host, and all of
- *  127.0.0.0/8, `::1` and their IPv4-mapped forms are loopback.
- *
- *  Not loopback, so a warning gated on this errs toward speaking: a string
- *  that is not a bare host (it carries a port, brackets, a path or userinfo),
- *  which cannot be bound; a name the URL parser would rewrite (IPv4 shorthand,
- *  a leading zero, a full-width character), which a resolver need not read the
- *  same way; and a value that is not a string at all. */
-export function isLoopbackHost(host: string): boolean {
-  // Exported, so a plain JavaScript caller can hand it an unset environment
-  // variable; that names no host, and must not throw.
-  if (typeof host !== 'string' || host === '' || /[\s/\\?#@%[\]]/.test(host)) return false;
-  const ipv6 = host.includes(':');
-  let url: URL;
-  try {
-    url = new URL(`http://${ipv6 ? `[${host}]` : host}/`);
-  } catch {
-    return false;
-  }
-  // `0177.0.0.1` is 127.0.0.1 to a URL parser and 177.0.0.1 to the macOS
-  // resolver, so only a name the parser reads back unchanged is trusted. An
-  // IPv6 literal has one reading, so its canonical rewrite is no disagreement.
-  if (!ipv6 && url.hostname !== host.toLowerCase()) return false;
-  return isLoopbackUrl(url);
-}
 
 const BIND_ALL_HOSTS = new Set(['0.0.0.0', '::', '']);
 const LOOPBACK_HOSTNAMES = ['127.0.0.1', 'localhost', '::1'];

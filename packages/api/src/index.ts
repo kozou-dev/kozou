@@ -6,12 +6,13 @@
 export {
   startApiServer,
   createApiRequestListener,
-  isLoopbackHost,
   type StartApiServerOptions,
   type ApiServerHandle,
   type PoolClient,
   type ConnectionPool,
 } from './startApiServer.js';
+// One implementation for every server package; see @kozou/core/net.
+export { isLoopbackHost } from '@kozou/core/net';
 
 export {
   createAuthenticator,

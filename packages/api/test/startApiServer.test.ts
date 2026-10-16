@@ -1,5 +1,6 @@
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, afterEach, vi } from 'vitest';
 import type { IncomingMessage, ServerResponse } from 'node:http';
+import { isLoopbackHost as coreIsLoopbackHost } from '@kozou/core/net';
 import {
   startApiServer,
   createApiRequestListener,
@@ -14,12 +15,46 @@ const schema = schemaOf([
 ]);
 
 describe('isLoopbackHost', () => {
-  it('recognises loopback and rejects non-loopback hosts', () => {
-    expect(isLoopbackHost('127.0.0.1')).toBe(true);
-    expect(isLoopbackHost('localhost')).toBe(true);
-    expect(isLoopbackHost('::1')).toBe(true);
-    expect(isLoopbackHost('0.0.0.0')).toBe(false);
-    expect(isLoopbackHost('10.0.0.5')).toBe(false);
+  it('is the shared @kozou/core predicate, not a copy of it', () => {
+    // A second copy is how this package and @kozou/mcp came to give two
+    // answers for one host. Its behaviour is tested where it lives.
+    expect(isLoopbackHost).toBe(coreIsLoopbackHost);
+  });
+});
+
+describe('startApiServer bind message', () => {
+  /** Everything written to stderr while a server boots on `host`. */
+  async function bootStderr(host: string, opts: Record<string, unknown> = {}): Promise<string> {
+    const writes: string[] = [];
+    const spy = vi.spyOn(process.stderr, 'write').mockImplementation((chunk: unknown) => {
+      writes.push(String(chunk));
+      return true;
+    });
+    const { db } = recordingDb(() => ({ rows: [], rowCount: 0 }));
+    let handle: ApiServerHandle;
+    try {
+      handle = await startApiServer({ schema, db, host, port: 0, logPrefix: '[test]', ...opts });
+    } finally {
+      spy.mockRestore();
+    }
+    await handle.close();
+    return writes.join('');
+  }
+
+  it('says nothing for a loopback bind, however it is spelled', async () => {
+    // LOCALHOST used to be told it was bound to a non-loopback host; the other
+    // three never were, and must stay quiet. Only spellings every platform can
+    // bind are booted; the rest are covered by the predicate's own tests in
+    // @kozou/core.
+    for (const host of ['127.0.0.1', 'localhost', 'LOCALHOST', '::1']) {
+      expect(await bootStderr(host), host).not.toContain('non-loopback');
+    }
+  });
+
+  it('still speaks for a bind-all address', async () => {
+    expect(await bootStderr('0.0.0.0')).toContain(
+      'WARNING: REST API bound to non-loopback host "0.0.0.0"',
+    );
   });
 });
 
