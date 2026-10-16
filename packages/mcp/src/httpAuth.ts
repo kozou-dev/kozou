@@ -412,9 +412,10 @@ function collectAdvertisementSignals(
  *  127.0.0.0/8 address, and `::1` (a WHATWG URL keeps IPv6 brackets in
  *  `hostname`, so they are stripped first). */
 /** Whether a URL names the local machine. Shared with startHttpServer so the
- *  "is this address off-box?" question has one answer across the two places
- *  that ask it: the plaintext refusal for advertised OAuth URLs, and the
- *  no-authentication warning for a declared reachable address. */
+ *  "is this address off-box?" question has one answer across the places that
+ *  ask it: the plaintext refusal for advertised OAuth URLs, the
+ *  no-authentication warning for a declared reachable address, and the bind
+ *  host itself (`isLoopbackHost`, which asks through this). */
 export function isLoopbackUrl(url: URL): boolean {
   const bracketed =
     url.hostname.startsWith('[') && url.hostname.endsWith(']')
