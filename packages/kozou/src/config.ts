@@ -247,10 +247,14 @@ const mcpHttpServerSchema = z
     try {
       parsed = new URL(http.advertisedUrl);
     } catch {
+      // The value is not quoted (issue #298). One that does not parse has no
+      // parsed form to ask for userinfo, so the userinfo check below cannot
+      // run first, and a credential can be the very reason it does not parse:
+      // `https://user:pw` with the host left off reads the password as a port.
       ctx.addIssue({
         code: 'custom',
         message:
-          `server.mcp.http.advertisedUrl is not an absolute URL: ${http.advertisedUrl}. ` +
+          'server.mcp.http.advertisedUrl is not an absolute URL. ' +
           'Give the full address clients should register, e.g. ' +
           `http://localhost:4334${MCP_HTTP_PATH}.`,
         path: ['advertisedUrl'],

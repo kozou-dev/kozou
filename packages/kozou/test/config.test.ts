@@ -676,6 +676,34 @@ server:
     }
   });
 
+  it('does not echo an advertised URL that does not parse', async () => {
+    // A value the URL parser rejects has no parsed form to ask for userinfo, so
+    // the userinfo check cannot run before this refusal; the refusal must not
+    // quote the value at all (issue #298). The last one has no `@`: with the
+    // host left off, the password reads as a port.
+    for (const bad of [
+      'https://user:hunter2@',
+      'https://user:hunter2@exa mple.com/mcp',
+      'https://user:hunter2@[::1/mcp',
+      'https://user:hunter2',
+    ]) {
+      const thrown = await captureConfigError({
+        skipFile: true,
+        env: {
+          DATABASE_URL: 'postgres://u:p@localhost:5432/x',
+          KOZOU_MCP_HTTP_ADVERTISED_URL: bad,
+        },
+      });
+      const messages = thrown.issues
+        .filter((i) => i.path === 'server.mcp.http.advertisedUrl')
+        .map((i) => i.message)
+        .join('\n');
+      expect(messages, bad).toContain('is not an absolute URL');
+      expect(JSON.stringify(thrown.issues), bad).not.toContain('hunter2');
+      expect(formatCliError(thrown), bad).not.toContain('hunter2');
+    }
+  });
+
   it('refuses a value with no scheme for its scheme, not as a bind-all address', async () => {
     // These parse with the text before the first colon as the scheme and an
     // empty host, which the bind-all predicate would read as bind-all. The

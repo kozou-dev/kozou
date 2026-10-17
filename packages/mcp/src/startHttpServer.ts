@@ -269,9 +269,11 @@ function resolveAdvertisedUrl(
   try {
     parsed = new URL(opts.advertisedUrl);
   } catch {
-    throw new Error(
-      `${prefix} advertisedUrl "${opts.advertisedUrl}" is not an absolute URL.`,
-    );
+    // The value is not quoted (issue #298). One that does not parse has no
+    // parsed form to ask for userinfo, and a credential can be the very reason
+    // it does not parse: `https://user:pw` with the host left off reads the
+    // password as a port.
+    throw new Error(`${prefix} advertisedUrl is not an absolute URL.`);
   }
   if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
     throw new Error(`${prefix} advertisedUrl must be an http(s) URL, got ${parsed.protocol}.`);
