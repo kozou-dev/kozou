@@ -900,6 +900,22 @@ describe('startHttpServer advertisedUrl startup refusals', () => {
     await expect(attempt).rejects.not.toThrow(/secret/);
   });
 
+  it('does not echo an advertisedUrl that does not parse', async () => {
+    // No parsed form to ask for userinfo, so the refusal must not quote the
+    // value at all (issue #298). The last one has no `@`: with the host left
+    // off, the password reads as a port.
+    for (const url of [
+      'https://user:hunter2@',
+      'https://user:hunter2@exa mple.com/mcp',
+      'https://user:hunter2@[::1/mcp',
+      'https://user:hunter2',
+    ]) {
+      const attempt = startHttpServer(cache(), { port: 0, host: '127.0.0.1', advertisedUrl: url });
+      await expect(attempt, url).rejects.toThrow(/is not an absolute URL/);
+      await expect(attempt, url).rejects.not.toThrow(/hunter2/);
+    }
+  });
+
   it('refuses a query, a fragment and a wrong path, as the CLI config does', async () => {
     for (const url of [
       'https://mcp.example.com/mcp?t=1',
