@@ -63,7 +63,7 @@
     "@sveltejs/kit": "^2.69.1",
     "@sveltejs/vite-plugin-svelte": "^7.1.2",
     "@tailwindcss/vite": "^4.3.0",
-    "@testcontainers/postgresql": "^12.0.0",
+    "@testcontainers/postgresql": "^12.1.0",
     "@testing-library/svelte": "^5.2.0",
     "@types/pg": "^8.11.10",
     "jsdom": "^25.0.0",
