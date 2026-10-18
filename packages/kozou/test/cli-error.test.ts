@@ -283,6 +283,20 @@ describe('the CLI entry point, run as a process', () => {
       expect(run.stderr).toContain('auth.authorizationServers[0] must not carry userinfo');
       expect(run.stderr + run.stdout).not.toContain(PASSWORD);
     });
+
+    // Issue #304: an issuer identifier has no query or fragment, and a
+    // regression would publish either in the metadata.
+    it.each([
+      ['a query', `https://as.example.com/realms/kozou?token=${PASSWORD}`],
+      ['a fragment', `https://as.example.com/realms/kozou#${PASSWORD}`],
+    ])('refuses %s in auth.authorizationServers without printing it, exit 1', async (_label, issuer) => {
+      const run = runMcpHttp(await oauthConfig('https://mcp.example.com/mcp', issuer));
+      expect(run.status).toBe(1);
+      expect(run.stderr).toContain(
+        'auth.authorizationServers[0] must not carry a query or fragment',
+      );
+      expect(run.stderr + run.stdout).not.toContain(PASSWORD);
+    });
   });
 
   it('names the environment variable that fed a failing config', async () => {

@@ -176,10 +176,10 @@ export function resolveMcpHttpAuth(opts: McpHttpAuthOptions, mcpPath: string): M
   if (opts.authorizationServers.length === 0) {
     throw new Error(`${errorContext}: auth.authorizationServers must list at least one issuer URL.`);
   }
-  // The refusals up to and including the userinfo check name an entry by its
-  // index rather than quoting it, for the same reason as the resource above.
-  // The plaintext-http refusal in requireSecureTransport does quote it, which
-  // is safe only because it runs after the userinfo check.
+  // The refusals up to and including the query/fragment check name an entry by
+  // its index rather than quoting it, for the same reason as the resource
+  // above. The plaintext-http refusal in requireSecureTransport does quote it,
+  // which is safe only because it runs after both checks.
   for (const [index, issuer] of opts.authorizationServers.entries()) {
     const entry = `auth.authorizationServers[${index}]`;
     let issuerUrl: URL;
@@ -195,6 +195,15 @@ export function resolveMcpHttpAuth(opts: McpHttpAuthOptions, mcpPath: string): M
       throw new Error(
         `${errorContext}: ${entry} must not carry userinfo (credentials): this list is served ` +
           `unauthenticated in the protected-resource metadata.`,
+      );
+    }
+    // RFC 8414 §2: an issuer identifier has no query or fragment, and RFC 9728
+    // `authorization_servers` lists issuer identifiers. Anything carried in
+    // either would be served as given in the metadata (issue #304).
+    if (issuerUrl.hash !== '' || issuerUrl.search !== '') {
+      throw new Error(
+        `${errorContext}: ${entry} must not carry a query or fragment (RFC 8414 issuer ` +
+          `identifier): this list is served unauthenticated in the protected-resource metadata.`,
       );
     }
     requireSecureTransport(issuerUrl, 'auth.authorizationServers entry');
