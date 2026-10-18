@@ -128,14 +128,26 @@ export type McpHttpAuth = {
 export function resolveMcpHttpAuth(opts: McpHttpAuthOptions, mcpPath: string): McpHttpAuth {
   const errorContext = '@kozou/mcp auth';
 
+  // Neither URL is quoted until it is known to carry no userinfo (issue #299):
+  // both are published unauthenticated in the protected-resource metadata, and
+  // the refusals below reach the startup log. One that does not parse is never
+  // quoted at all, because it has no parsed form to ask for userinfo and a
+  // credential can be the very reason it does not parse — `https://user:pw`
+  // with the host left off reads the password as a port.
   let resource: URL;
   try {
     resource = new URL(opts.resource);
   } catch {
-    throw new Error(`${errorContext}: auth.resource "${opts.resource}" is not a valid URL.`);
+    throw new Error(`${errorContext}: auth.resource is not a valid URL.`);
   }
   if (resource.protocol !== 'https:' && resource.protocol !== 'http:') {
     throw new Error(`${errorContext}: auth.resource must be an http(s) URL.`);
+  }
+  if (hasUserinfo(resource)) {
+    throw new Error(
+      `${errorContext}: auth.resource must not carry userinfo (credentials): this URI is served ` +
+        `unauthenticated in the protected-resource metadata.`,
+    );
   }
   if (resource.hash !== '' || resource.search !== '') {
     throw new Error(
@@ -164,18 +176,25 @@ export function resolveMcpHttpAuth(opts: McpHttpAuthOptions, mcpPath: string): M
   if (opts.authorizationServers.length === 0) {
     throw new Error(`${errorContext}: auth.authorizationServers must list at least one issuer URL.`);
   }
-  for (const issuer of opts.authorizationServers) {
+  // The refusals up to and including the userinfo check name an entry by its
+  // index rather than quoting it, for the same reason as the resource above.
+  // The plaintext-http refusal in requireSecureTransport does quote it, which
+  // is safe only because it runs after the userinfo check.
+  for (const [index, issuer] of opts.authorizationServers.entries()) {
+    const entry = `auth.authorizationServers[${index}]`;
     let issuerUrl: URL;
     try {
       issuerUrl = new URL(issuer);
     } catch {
-      throw new Error(
-        `${errorContext}: auth.authorizationServers entry "${issuer}" is not a valid URL.`,
-      );
+      throw new Error(`${errorContext}: ${entry} is not a valid URL.`);
     }
     if (issuerUrl.protocol !== 'https:' && issuerUrl.protocol !== 'http:') {
+      throw new Error(`${errorContext}: ${entry} must be an http(s) URL.`);
+    }
+    if (hasUserinfo(issuerUrl)) {
       throw new Error(
-        `${errorContext}: auth.authorizationServers entry "${issuer}" must be an http(s) URL.`,
+        `${errorContext}: ${entry} must not carry userinfo (credentials): this list is served ` +
+          `unauthenticated in the protected-resource metadata.`,
       );
     }
     requireSecureTransport(issuerUrl, 'auth.authorizationServers entry');
@@ -407,6 +426,13 @@ function collectAdvertisementSignals(
   }
 
   return { divergences, notes };
+}
+
+/** Whether a parsed URL carries userinfo. Asked of the parsed form, not by
+ *  searching the string for `@`: only the parser knows where the authority
+ *  ends, and an `@` after it (in the path, say) is not userinfo. */
+function hasUserinfo(url: URL): boolean {
+  return url.username !== '' || url.password !== '';
 }
 
 function trimTrailingSlash(path: string): string {

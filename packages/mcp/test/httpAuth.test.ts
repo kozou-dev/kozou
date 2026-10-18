@@ -156,6 +156,102 @@ describe('resolveMcpHttpAuth', () => {
     ).toThrow(/http\(s\)/);
   });
 
+  // Issue #299. Both URLs are published unauthenticated in the metadata, so a
+  // credential in either must be refused — and no refusal on the way may quote
+  // it, since each one reaches the startup log.
+  describe('userinfo in auth.resource or auth.authorizationServers', () => {
+    const PASSWORD = 'hunter2';
+    const refusal = (over: Partial<Parameters<typeof resolveMcpHttpAuth>[0]>): string => {
+      try {
+        resolveMcpHttpAuth({ ...base, ...over }, '/mcp');
+      } catch (err) {
+        return (err as Error).message;
+      }
+      throw new Error('expected a refusal');
+    };
+
+    it.each([
+      ['an https resource', `https://user:${PASSWORD}@mcp.example.com/mcp`],
+      ['a plaintext http resource', `http://user:${PASSWORD}@mcp.example.com/mcp`],
+      ['a password alone', `https://:${PASSWORD}@mcp.example.com/mcp`],
+      ['a user name alone (a token passed as one)', `https://${PASSWORD}@mcp.example.com/mcp`],
+      ['userinfo and a query', `https://user:${PASSWORD}@mcp.example.com/mcp?x=1`],
+    ])('refuses %s without quoting it', (_label, resource) => {
+      const message = refusal({ resource });
+      expect(message).toContain('auth.resource must not carry userinfo');
+      expect(message).not.toContain(PASSWORD);
+    });
+
+    // allowInsecureHttp would otherwise advertise the URL and list it in the
+    // startup warning. One URL per case: the resource is checked first, so a
+    // credential in both would leave the entry's check unexercised.
+    it('refuses a resource even with allowInsecureHttp', () => {
+      const message = refusal({
+        resource: `http://user:${PASSWORD}@mcp.internal/mcp`,
+        allowInsecureHttp: true,
+      });
+      expect(message).toContain('auth.resource must not carry userinfo');
+      expect(message).not.toContain(PASSWORD);
+    });
+
+    it('refuses an authorization-server entry even with allowInsecureHttp', () => {
+      const message = refusal({
+        authorizationServers: [`http://user:${PASSWORD}@keycloak.internal/realms/kozou`],
+        allowInsecureHttp: true,
+      });
+      expect(message).toContain('auth.authorizationServers[0] must not carry userinfo');
+      expect(message).not.toContain(PASSWORD);
+    });
+
+    it.each([
+      ['an https entry', `https://user:${PASSWORD}@idp.example.com`],
+      ['a plaintext http entry', `http://user:${PASSWORD}@idp.example.com`],
+      ['a password alone', `https://:${PASSWORD}@idp.example.com`],
+    ])('refuses %s and names it by index', (_label, issuer) => {
+      const message = refusal({ authorizationServers: [...ISSUERS, issuer] });
+      expect(message).toContain('auth.authorizationServers[1] must not carry userinfo');
+      expect(message).not.toContain(PASSWORD);
+    });
+
+    it('quotes nothing for a value that does not parse — the host left off reads the password as a port', () => {
+      for (const message of [
+        refusal({ resource: `https://user:${PASSWORD}@` }),
+        refusal({ resource: `https://user:${PASSWORD}` }),
+        refusal({ authorizationServers: [`https://user:${PASSWORD}@`] }),
+      ]) {
+        expect(message).toMatch(/is not a valid URL\.$/);
+        expect(message).not.toContain(PASSWORD);
+      }
+    });
+
+    it('quotes nothing for a scheme it refuses, which is checked before userinfo', () => {
+      for (const message of [
+        refusal({ resource: `ftp://user:${PASSWORD}@mcp.example.com/mcp` }),
+        // No scheme: `user:` is read as one and the rest as an opaque path.
+        refusal({ resource: `user:${PASSWORD}@mcp.example.com/mcp` }),
+        refusal({ authorizationServers: [`ftp://user:${PASSWORD}@idp.example.com`] }),
+      ]) {
+        expect(message).toMatch(/must be an http\(s\) URL\.$/);
+        expect(message).not.toContain(PASSWORD);
+      }
+    });
+
+    it('accepts an @ after the host, which is not userinfo', () => {
+      const auth = resolveMcpHttpAuth(
+        {
+          ...base,
+          resource: 'https://mcp.example.com/team@kozou/mcp',
+          authorizationServers: ['https://as.example.com/realms/team@kozou'],
+        },
+        '/mcp',
+      );
+      expect(JSON.parse(auth.prmBody)).toMatchObject({
+        resource: 'https://mcp.example.com/team@kozou/mcp',
+        authorization_servers: ['https://as.example.com/realms/team@kozou'],
+      });
+    });
+  });
+
   it('rejects a plaintext http resource or authorization server on a non-loopback host', () => {
     expect(() => resolveMcpHttpAuth({ ...base, resource: 'http://mcp.example.com/mcp' }, '/mcp')).toThrow(
       /plaintext http on a non-loopback host/,
