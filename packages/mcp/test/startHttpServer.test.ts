@@ -528,6 +528,23 @@ describe('startHttpServer allowedHosts startup refusals', () => {
     await expect(boot([''])).rejects.toThrow(/no hostname can be read from it/);
   });
 
+  // Issue #303. The refusal reaches the startup log, so a credential in the URL
+  // that lands here by habit must not be repeated into it.
+  it.each([
+    ['a URL', 'https://user:s3cr3t-pw@mcp.example.com'],
+    ['userinfo without a scheme', 'user:s3cr3t-pw@mcp.example.com'],
+  ])('names a refused entry by its index without quoting %s', async (_label, entry) => {
+    const message = await boot(['tunnel.example.com', entry]).then(
+      async (handle) => {
+        await handle.close();
+        return 'started';
+      },
+      (err: unknown) => (err as Error).message,
+    );
+    expect(message).toContain('allowedHosts[1] is not usable');
+    expect(message).not.toContain('s3cr3t-pw');
+  });
+
   it('accepts a bare hostname and a host:port', async () => {
     const handle = await boot(['tunnel.example.com', 'mcp.internal:3334']);
     await handle.close();

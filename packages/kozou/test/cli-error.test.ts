@@ -299,6 +299,58 @@ describe('the CLI entry point, run as a process', () => {
     });
   });
 
+  // Issue #303. Both refusals come from the config check, so `kozou inspect`
+  // reaches them with no database; the run proves what reaches stderr, from a
+  // file and from the environment variable that feeds the same check.
+  describe('a credential in a value the config check refuses (`kozou inspect`)', () => {
+    const DB = ['database:', '  url: postgres://u:p@db:5432/app'];
+    const httpConfig = (lines: string[]): Promise<string> =>
+      writeConfig([...DB, 'server:', '  mcp:', '    http:', ...lines]);
+
+    it.each([
+      ['a token in the query', 'https://mcp.example.com/mcp?token=s3cr3t-token', 's3cr3t-token'],
+      // No `@` after it, so the password reads as a port and there is no
+      // userinfo to refuse first.
+      ['a password that reads as a port', 'https://user:40961/mcp?t=1', '40961'],
+    ])('refuses an advertisedUrl with %s without printing it, exit 1', async (_label, url, secret) => {
+      const run = runInspect(await httpConfig([`      advertisedUrl: "${url}"`]));
+      expect(run.status).toBe(1);
+      expect(run.stderr).toContain('advertisedUrl must not carry a query or fragment');
+      expect(run.stderr + run.stdout).not.toContain(secret);
+    });
+
+    it('refuses one from KOZOU_MCP_HTTP_ADVERTISED_URL without printing it, exit 1', async () => {
+      const run = runInspect(await writeConfig(DB), {
+        KOZOU_MCP_HTTP_ADVERTISED_URL: 'https://mcp.example.com/mcp?token=s3cr3t-token',
+      });
+      expect(run.status).toBe(1);
+      expect(run.stderr).toContain('advertisedUrl must not carry a query or fragment');
+      expect(run.stderr + run.stdout).not.toContain('s3cr3t-token');
+    });
+
+    it('refuses an allowedHosts entry carrying one, by index, without printing it, exit 1', async () => {
+      const run = runInspect(
+        await httpConfig([
+          '      allowedHosts:',
+          '        - tunnel.example.com',
+          '        - "https://user:s3cr3t-pw@mcp.example.com"',
+        ]),
+      );
+      expect(run.status).toBe(1);
+      expect(run.stderr).toContain('server.mcp.http.allowedHosts[1] is not usable');
+      expect(run.stderr + run.stdout).not.toContain('s3cr3t-pw');
+    });
+
+    it('refuses one from KOZOU_MCP_HTTP_ALLOWED_HOSTS without printing it, exit 1', async () => {
+      const run = runInspect(await writeConfig(DB), {
+        KOZOU_MCP_HTTP_ALLOWED_HOSTS: 'https://user:s3cr3t-pw@mcp.example.com',
+      });
+      expect(run.status).toBe(1);
+      expect(run.stderr).toContain('server.mcp.http.allowedHosts[0] is not usable');
+      expect(run.stderr + run.stdout).not.toContain('s3cr3t-pw');
+    });
+  });
+
   it('names the environment variable that fed a failing config', async () => {
     // The report's case: the file says `enabled: true`, the env turned it off,
     // and the refusal is about the combination. Naming the file alone sent the

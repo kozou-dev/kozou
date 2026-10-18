@@ -347,6 +347,21 @@ server:
     }
   });
 
+  it('names a refused allowedHosts entry by its index without quoting it (issue #303)', async () => {
+    // A URL lands here by habit, and its userinfo would otherwise be repeated
+    // into an error that reaches the terminal or the container log.
+    const thrown = await captureConfigError({
+      skipFile: true,
+      env: {
+        DATABASE_URL: 'postgres://u:p@localhost:5432/x',
+        KOZOU_MCP_HTTP_ALLOWED_HOSTS: 'tunnel.example.com, https://user:s3cr3t-pw@mcp.example.com',
+      },
+    });
+    const messages = thrown.issues.map((i) => i.message).join('\n');
+    expect(messages).toContain('server.mcp.http.allowedHosts[1] is not usable');
+    expect(messages).not.toContain('s3cr3t-pw');
+  });
+
   it('an empty or whitespace-only KOZOU_MCP_HTTP_ALLOWED_HOSTS reads as unset', async () => {
     for (const raw of ['', '   ', ',', ' , ']) {
       const config = await loadConfig({
@@ -571,6 +586,28 @@ server:
         },
       });
       expect(thrown.issues.map((i) => i.path)).toContain('server.mcp.http.advertisedUrl');
+    }
+  });
+
+  it('does not quote an advertised URL it refuses for a query or fragment (issue #303)', async () => {
+    // A query or fragment is where a token usually goes. The last case has no
+    // userinfo to refuse first: with no `@` after it, the password reads as a
+    // port, so only not quoting the value keeps it out of the log.
+    for (const [bad, secret] of [
+      ['https://mcp.example.com/mcp?token=s3cr3t-token', 's3cr3t-token'],
+      ['https://mcp.example.com/mcp#access_token=s3cr3t-token', 's3cr3t-token'],
+      ['https://user:40961/mcp?t=1', '40961'],
+    ] as const) {
+      const thrown = await captureConfigError({
+        skipFile: true,
+        env: {
+          DATABASE_URL: 'postgres://u:p@localhost:5432/x',
+          KOZOU_MCP_HTTP_ADVERTISED_URL: bad,
+        },
+      });
+      const messages = thrown.issues.map((i) => i.message).join('\n');
+      expect(messages).toContain('server.mcp.http.advertisedUrl must not carry a query or fragment');
+      expect(messages).not.toContain(secret);
     }
   });
 
