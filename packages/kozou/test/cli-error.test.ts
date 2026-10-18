@@ -229,6 +229,62 @@ describe('the CLI entry point, run as a process', () => {
     expect(run.stderr.trimEnd().split('\n').at(-1)).toBe(`loaded from: ${file}`);
   });
 
+  // Issue #299. The config schema passes both OAuth URLs through as strings, so
+  // the refusal comes from @kozou/mcp at startup — which is where it has to be
+  // proved not to print the credential. A regression here does not fail fast:
+  // the server would start, print the URL in its startup line, and serve it in
+  // the metadata, so the run is bounded and killed instead.
+  describe('a credential in the OAuth URLs (`kozou mcp --http`)', () => {
+    const PASSWORD = 'hunter2';
+
+    function runMcpHttp(config: string) {
+      return spawnSync(
+        process.execPath,
+        ['--import', 'tsx', CLI, 'mcp', '--http', '--port', '0', '--config', config],
+        {
+          encoding: 'utf8',
+          cwd: fileURLToPath(new URL('..', import.meta.url)),
+          env: { ...process.env, DATABASE_URL: '' },
+          timeout: 15_000,
+        },
+      );
+    }
+
+    async function oauthConfig(resource: string, issuer: string): Promise<string> {
+      return writeConfig([
+        'database:',
+        '  url: postgres://u:p@db:5432/app',
+        'server:',
+        '  mcp:',
+        '    http:',
+        '      auth:',
+        `        resource: ${resource}`,
+        '        authorizationServers:',
+        `          - ${issuer}`,
+        '        jwt:',
+        '          secret: cli-error-test-secret-0123456789abcdef',
+      ]);
+    }
+
+    it('refuses one in auth.resource without printing it, exit 1', async () => {
+      const run = runMcpHttp(
+        await oauthConfig(`https://user:${PASSWORD}@mcp.example.com/mcp`, 'https://as.example.com'),
+      );
+      expect(run.status).toBe(1);
+      expect(run.stderr).toContain('auth.resource must not carry userinfo');
+      expect(run.stderr + run.stdout).not.toContain(PASSWORD);
+    });
+
+    it('refuses one in auth.authorizationServers without printing it, exit 1', async () => {
+      const run = runMcpHttp(
+        await oauthConfig('https://mcp.example.com/mcp', `https://user:${PASSWORD}@as.example.com`),
+      );
+      expect(run.status).toBe(1);
+      expect(run.stderr).toContain('auth.authorizationServers[0] must not carry userinfo');
+      expect(run.stderr + run.stdout).not.toContain(PASSWORD);
+    });
+  });
+
   it('names the environment variable that fed a failing config', async () => {
     // The report's case: the file says `enabled: true`, the env turned it off,
     // and the refusal is about the combination. Naming the file alone sent the
