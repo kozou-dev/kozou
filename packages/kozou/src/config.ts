@@ -173,14 +173,16 @@ const mcpHttpServerSchema = z
     // through the config means the error can name the key and (via envSources)
     // the environment variable that supplied it. The sibling key `advertisedUrl`
     // takes a full URL, so a URL lands here by habit — and an entry that yields
-    // no hostname would otherwise sit in the guard matching nothing.
-    for (const entry of http.allowedHosts ?? []) {
+    // no hostname would otherwise sit in the guard matching nothing. An entry
+    // is named by its index, not quoted (issue #303): a URL that lands here can
+    // carry userinfo, and the refusal reaches the terminal or the container log.
+    for (const [index, entry] of (http.allowedHosts ?? []).entries()) {
       const why = unusableAllowedHostReason(entry);
       if (why !== undefined) {
         ctx.addIssue({
           code: 'custom',
           message:
-            `server.mcp.http.allowedHosts entry "${entry}" is not usable: ${why}. ` +
+            `server.mcp.http.allowedHosts[${index}] is not usable: ${why}. ` +
             'Give a bare hostname, optionally with a port (e.g. mcp.internal or ' +
             'mcp.internal:3334).',
           path: ['allowedHosts'],
@@ -280,8 +282,8 @@ const mcpHttpServerSchema = z
     // connect to, or one carrying credentials, is the failure this key exists to
     // prevent rather than a lesser version of it. The value is not echoed —
     // repeating userinfo into the error would be the leak itself. Checked before
-    // the refusals below for the same reason: they may quote the value, so a
-    // value that reaches them must already be known to carry no userinfo.
+    // the refusals below, so a value carrying credentials is refused as such
+    // rather than for its query or its path.
     const unusable = unusableAdvertisedUrlReason(parsed);
     if (unusable !== undefined) {
       ctx.addIssue({
@@ -294,12 +296,17 @@ const mcpHttpServerSchema = z
     // A query or fragment cannot survive the trip: the fragment never leaves
     // the client, and the transport matches on path alone. Carrying either
     // means the operator believes something is being sent that is not.
+    //
+    // The value is not quoted (issue #303). A query or fragment is where a
+    // token usually goes, and the userinfo check above is no guarantee: a
+    // password made only of digits with no `@` after it (`https://user:4321`)
+    // parses as a port, so there is no userinfo left to refuse.
     if (parsed.search !== '' || parsed.hash !== '') {
       ctx.addIssue({
         code: 'custom',
         message:
-          'server.mcp.http.advertisedUrl must not carry a query or fragment ' +
-          `(got ${http.advertisedUrl}). It is the endpoint address a client registers.`,
+          'server.mcp.http.advertisedUrl must not carry a query or fragment. ' +
+          'It is the endpoint address a client registers.',
         path: ['advertisedUrl'],
       });
       return;

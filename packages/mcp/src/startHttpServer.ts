@@ -237,11 +237,13 @@ export function unusableAllowedHostReason(entry: string): string | undefined {
   return hostnameOf(entry) === '' ? 'no hostname can be read from it' : undefined;
 }
 
+// An entry is named by its index, not quoted (issue #303): a URL lands here by
+// habit, and its userinfo would otherwise be repeated into the startup log.
 function assertUsableAllowedHosts(entries: readonly string[], prefix: string): void {
-  for (const entry of entries) {
+  for (const [index, entry] of entries.entries()) {
     const why = unusableAllowedHostReason(entry);
     if (why !== undefined) {
-      throw new Error(`${prefix} allowedHosts entry "${entry}" is not usable: ${why}.`);
+      throw new Error(`${prefix} allowedHosts[${index}] is not usable: ${why}.`);
     }
   }
 }

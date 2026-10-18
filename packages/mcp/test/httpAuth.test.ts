@@ -252,6 +252,55 @@ describe('resolveMcpHttpAuth', () => {
     });
   });
 
+  // Issue #304. RFC 8414 defines an issuer identifier as having no query or
+  // fragment, and the metadata lists the entries as given, so anything carried
+  // there would be published. The refusal must come before the plaintext-http
+  // one, which quotes the entry.
+  describe('a query or fragment in an auth.authorizationServers entry', () => {
+    const TOKEN = 's3cr3t-token';
+    const refusal = (over: Partial<Parameters<typeof resolveMcpHttpAuth>[0]>): string => {
+      try {
+        resolveMcpHttpAuth({ ...base, ...over }, '/mcp');
+      } catch (err) {
+        return (err as Error).message;
+      }
+      throw new Error('expected a refusal');
+    };
+
+    it.each([
+      ['a query', `https://idp.example.com/realms/kozou?token=${TOKEN}`],
+      ['a fragment', `https://idp.example.com/realms/kozou#${TOKEN}`],
+      ['a query and a fragment', `https://idp.example.com/realms/kozou?a=1#access_token=${TOKEN}`],
+      // Loopback skips the plaintext-http refusal, so this one proves the check
+      // does not ride on it.
+      ['a query on a loopback http entry', `http://127.0.0.1:8080/realms/kozou?token=${TOKEN}`],
+    ])('refuses %s and names the entry by index', (_label, issuer) => {
+      const message = refusal({ authorizationServers: [...ISSUERS, issuer] });
+      expect(message).toContain('auth.authorizationServers[1] must not carry a query or fragment');
+      expect(message).not.toContain(TOKEN);
+    });
+
+    it('refuses it before the plaintext-http refusal, which quotes the entry', () => {
+      const message = refusal({
+        authorizationServers: [`http://idp.example.com/realms/kozou?token=${TOKEN}`],
+      });
+      expect(message).toContain('auth.authorizationServers[0] must not carry a query or fragment');
+      expect(message).not.toContain('plaintext');
+      expect(message).not.toContain(TOKEN);
+    });
+
+    // allowInsecureHttp would otherwise publish the entry and list it in the
+    // startup warning.
+    it('refuses it even with allowInsecureHttp', () => {
+      const message = refusal({
+        authorizationServers: [`http://keycloak.internal:8080/realms/kozou?token=${TOKEN}`],
+        allowInsecureHttp: true,
+      });
+      expect(message).toContain('auth.authorizationServers[0] must not carry a query or fragment');
+      expect(message).not.toContain(TOKEN);
+    });
+  });
+
   it('rejects a plaintext http resource or authorization server on a non-loopback host', () => {
     expect(() => resolveMcpHttpAuth({ ...base, resource: 'http://mcp.example.com/mcp' }, '/mcp')).toThrow(
       /plaintext http on a non-loopback host/,
