@@ -29,18 +29,92 @@ import {
 
 export type AuthErrorKind = 'unauthorized' | 'forbidden';
 
+/** Which check refused a request, for the server's own log — never for the
+ *  caller. The token-level reasons are exactly what the generic "Invalid or
+ *  expired token." hides from the client; returning one would tell a
+ *  token-guesser which check it got past. So an 'unauthorized' reason must
+ *  not change anything the client receives. A 'forbidden' reason may choose
+ *  the wording of a 403, whose message already says what it is about.
+ *
+ *  'unauthorized':
+ *  - `no_token` — no Authorization header (and no anonRole to fall back on)
+ *  - `malformed_header` — a header that is not `Bearer <token>`
+ *  - `malformed_token` — not a well-formed JWT
+ *  - `algorithm_not_allowed` — signed with an algorithm outside `jwt.algorithms`
+ *  - `unknown_key` — no JWKS key matches the token (usually: its `kid` is not
+ *    published)
+ *  - `ambiguous_key` — more than one JWKS key matches, so none is chosen (a
+ *    token without `kid` against several keys, or a repeated `kid`): a fault
+ *    in the key set, not in one token
+ *  - `jwks_unavailable` — the JWKS answered with something unusable: a
+ *    timeout, a non-200 response, a body that is not JSON, or a malformed key
+ *    set. A JWKS that cannot be connected to at all (refused, DNS, TLS) is not
+ *    a KozouAuthError: the fetch error propagates as thrown.
+ *  - `bad_signature` — the signature does not verify against the key
+ *  - `expired` — `exp` is in the past
+ *  - `not_yet_valid` — `nbf` is in the future
+ *  - `issuer_mismatch` / `issuer_missing` — `iss` not accepted / absent
+ *  - `audience_mismatch` / `audience_missing` — `aud` not accepted / absent
+ *  - `claims_invalid` — another registered claim is malformed (a time claim
+ *    that is not a number)
+ *  - `other_token_error` — any other verifier refusal (an unrecognised
+ *    critical header parameter, say)
+ *
+ *  'forbidden':
+ *  - `role_missing` — no role claim and no defaultRole
+ *  - `role_unreadable` — a role claim that is not a non-empty string
+ *  - `role_not_allowed` — a role outside `allowedRoles`
+ *
+ *  Stability: reasons may be added in a minor release; within a major, none
+ *  is renamed, removed, or given a different meaning. Handle a value you do
+ *  not recognise.
+ *
+ *  A token can fail several checks at once; the reason names the first one
+ *  the verifier ran. With jose 6.2.3 that is the signature before any claim,
+ *  then an absent `iss` or `aud` before a wrong one, then `nbf`, then `exp` —
+ *  a description of current behaviour, not part of the contract above. */
+export type AuthFailureReason =
+  | 'no_token'
+  | 'malformed_header'
+  | 'malformed_token'
+  | 'algorithm_not_allowed'
+  | 'unknown_key'
+  | 'ambiguous_key'
+  | 'jwks_unavailable'
+  | 'bad_signature'
+  | 'expired'
+  | 'not_yet_valid'
+  | 'issuer_mismatch'
+  | 'issuer_missing'
+  | 'audience_mismatch'
+  | 'audience_missing'
+  | 'claims_invalid'
+  | 'other_token_error'
+  | 'role_missing'
+  | 'role_unreadable'
+  | 'role_not_allowed';
+
 /** Authentication/authorization failure, independent of transport. `kind`
  *  is 'unauthorized' for any token problem (missing, malformed, expired,
  *  bad signature, …) and 'forbidden' for a role one; the message is safe
  *  to return to the caller (it never names which verification check
- *  failed). */
+ *  failed). `reason` does name it, so it belongs in the server's log and
+ *  never in a response. Every KozouAuthError the authenticator throws
+ *  carries one; it is undefined only on an error constructed without it
+ *  elsewhere.
+ *
+ *  `reason` is not enumerable, like `message`: serialising the error as it
+ *  stands (`JSON.stringify(err)`, `{ ...err }`) must not hand the client the
+ *  one part it is not meant to see. Read it by name. */
 export class KozouAuthError extends Error {
   readonly kind: AuthErrorKind;
+  declare readonly reason: AuthFailureReason | undefined;
 
-  constructor(kind: AuthErrorKind, message: string) {
+  constructor(kind: AuthErrorKind, message: string, reason?: AuthFailureReason) {
     super(message);
     this.name = 'KozouAuthError';
     this.kind = kind;
+    Object.defineProperty(this, 'reason', { value: reason, enumerable: false });
   }
 }
 
@@ -159,7 +233,11 @@ export function createAuthenticator(
         if (header === undefined && config.anonRole !== undefined) {
           return { role: config.anonRole, claims: {} };
         }
-        throw new KozouAuthError('unauthorized', 'Missing or malformed Authorization header.');
+        throw new KozouAuthError(
+          'unauthorized',
+          'Missing or malformed Authorization header.',
+          header === undefined ? 'no_token' : 'malformed_header',
+        );
       }
       let payload: JWTPayload;
       try {
@@ -167,15 +245,55 @@ export function createAuthenticator(
       } catch (err) {
         // Any verification failure (signature, expiry, nbf, iss, aud, alg)
         // is 'unauthorized' with a generic message — never leak which check
-        // failed.
+        // failed. The check is kept as the reason, for the server's log.
         if (err instanceof joseErrors.JOSEError) {
-          throw new KozouAuthError('unauthorized', 'Invalid or expired token.');
+          throw new KozouAuthError(
+            'unauthorized',
+            'Invalid or expired token.',
+            classifyVerifyError(err, hasJwksUri),
+          );
         }
         throw err;
       }
       return { role: resolveRole(payload, roleClaim, config), claims: payload };
     },
   };
+}
+
+/** Which check a jose verification error stands for. Read from the source of
+ *  jose 6.2.3 (the version in the lockfile), not inferred from the class
+ *  names: a required claim that is absent is a JWTClaimValidationFailed whose
+ *  `reason` is 'missing', and the claim checks run in the order presence of
+ *  `iss` then `aud`, value of `iss` then `aud`, then `iat`'s type, `nbf`,
+ *  `exp`. A later 6.x that classifies differently can only make a log line
+ *  less precise: whether the request is refused rests on JOSEError alone.
+ *
+ *  Only the class and the claim *name* are read. A claim error also carries
+ *  the token's payload, which must not travel any further than this. */
+function classifyVerifyError(err: joseErrors.JOSEError, remoteJwks: boolean): AuthFailureReason {
+  if (err instanceof joseErrors.JWTExpired) return 'expired';
+  if (err instanceof joseErrors.JWTClaimValidationFailed) {
+    const missing = err.reason === 'missing';
+    if (err.claim === 'iss') return missing ? 'issuer_missing' : 'issuer_mismatch';
+    if (err.claim === 'aud') return missing ? 'audience_missing' : 'audience_mismatch';
+    if (err.claim === 'nbf' && err.reason === 'check_failed') return 'not_yet_valid';
+    return 'claims_invalid';
+  }
+  if (err instanceof joseErrors.JWSSignatureVerificationFailed) return 'bad_signature';
+  if (err instanceof joseErrors.JOSEAlgNotAllowed) return 'algorithm_not_allowed';
+  if (err instanceof joseErrors.JWKSNoMatchingKey) return 'unknown_key';
+  if (err instanceof joseErrors.JWKSMultipleMatchingKeys) return 'ambiguous_key';
+  if (err instanceof joseErrors.JWKSTimeout || err instanceof joseErrors.JWKSInvalid) {
+    return 'jwks_unavailable';
+  }
+  if (err instanceof joseErrors.JWSInvalid || err instanceof joseErrors.JWTInvalid) {
+    return 'malformed_token';
+  }
+  // jose throws its base class itself only from the remote key set, for a
+  // non-200 response or a body that is not JSON. Every subclass overrides
+  // `code`, so this matches the base class alone.
+  if (remoteJwks && err.code === joseErrors.JOSEError.code) return 'jwks_unavailable';
+  return 'other_token_error';
 }
 
 function extractBearer(header: string | undefined): string | undefined {
@@ -236,6 +354,7 @@ function readRoleClaim(payload: JWTPayload, roleClaim: string): string | undefin
   throw new KozouAuthError(
     'forbidden',
     `Token's "${roleClaim}" claim is ${shapeOf(claimed)}, not a role name.`,
+    'role_unreadable',
   );
 }
 
@@ -245,10 +364,11 @@ function resolveRole(payload: JWTPayload, roleClaim: string, config: AuthConfig)
     throw new KozouAuthError(
       'forbidden',
       'Token does not specify a role and no default role is configured.',
+      'role_missing',
     );
   }
   if (config.allowedRoles !== undefined && !config.allowedRoles.includes(role)) {
-    throw new KozouAuthError('forbidden', `Role "${role}" is not permitted.`);
+    throw new KozouAuthError('forbidden', `Role "${role}" is not permitted.`, 'role_not_allowed');
   }
   return role;
 }
