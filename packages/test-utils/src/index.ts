@@ -191,3 +191,12 @@ COMMENT ON VIEW vw_inventory_for_sale IS 'Inventory items currently available fo
   FROM vw_inventory_for_sale
   ORDER BY author_name, book_title;';
 `;
+
+export {
+  hsToken,
+  refusalCases,
+  startJwksServer,
+  SENTINEL,
+  type JwksServer,
+  type RefusalCase,
+} from './jwt.js';

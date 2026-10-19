@@ -29,7 +29,10 @@
 //     This is the sanctioned posture for a non-loopback bind, together with
 //     TLS terminated in front of it: the listener itself speaks plaintext
 //     http, so authenticating each caller does not encrypt their token, and
-//     a non-loopback bind in this mode prints a note saying so.
+//     a non-loopback bind in this mode prints a note saying so. A request
+//     refused for its token (401, or a 403 over its role or scope) tells the
+//     client as little as ever, but writes one stderr line naming the check
+//     that refused it (see refusalLog.ts).
 
 import { randomUUID } from 'node:crypto';
 import { createServer, type IncomingMessage, type Server as HttpServer, type ServerResponse } from 'node:http';
@@ -51,6 +54,7 @@ import {
   type McpHttpAuth,
   type McpHttpAuthOptions,
 } from './httpAuth.js';
+import { RefusalLog } from './refusalLog.js';
 
 export type StartHttpServerOptions = {
   /** TCP port to listen on. Default: 3334. */
@@ -566,6 +570,9 @@ export async function startHttpServer(
 
   const maxBodyBytes = opts.maxBodyBytes ?? DEFAULT_MAX_BODY_BYTES;
 
+  // Why each OAuth-mode request was refused, on stderr (unused without auth).
+  const refusals = new RefusalLog({ prefix });
+
   const httpServer = createServer((req, res) => {
     handleRequest(
       req,
@@ -577,6 +584,7 @@ export async function startHttpServer(
       guard,
       maxBodyBytes,
       auth,
+      refusals,
       opts.provenance ?? false,
     ).catch(
       (err) => {
@@ -631,6 +639,7 @@ export async function startHttpServer(
       }
       transports.clear();
       await closeServer(httpServer);
+      refusals.close();
     },
   };
 }
@@ -645,6 +654,7 @@ async function handleRequest(
   guard: RebindingGuard,
   maxBodyBytes: number,
   auth: McpHttpAuth | undefined,
+  refusals: RefusalLog,
   provenance: boolean,
 ): Promise<void> {
   // DNS-rebinding guard: reject requests whose Host/Origin is not allowed
@@ -693,10 +703,10 @@ async function handleRequest(
       return;
     }
     if (auth !== undefined) {
-      const ctx = await authenticate(auth, req, res);
+      const ctx = await authenticate(auth, req, res, refusals);
       if (ctx === undefined) return; // response already written
       if (!ctx.scopes.has(auth.scopes.admin)) {
-        respondInsufficientScope(res, auth, auth.scopes.admin);
+        respondInsufficientScope(res, auth, auth.scopes.admin, refusals);
         return;
       }
     }
@@ -709,12 +719,12 @@ async function handleRequest(
   if (url.pathname === mcpPath) {
     let authCtx: McpAuthContext | undefined;
     if (auth !== undefined) {
-      authCtx = await authenticate(auth, req, res);
+      authCtx = await authenticate(auth, req, res, refusals);
       if (authCtx === undefined) return; // response already written
       // A token carrying neither MCP facet scope can do nothing here; refuse
       // up front with the challenge a scope-upgrade-capable client expects.
       if (!authCtx.scopes.has(auth.scopes.describe) && !authCtx.scopes.has(auth.scopes.execute)) {
-        respondInsufficientScope(res, auth, auth.scopes.describe);
+        respondInsufficientScope(res, auth, auth.scopes.describe, refusals);
         return;
       }
       // Hand the verified identity to the SDK transport, which surfaces it to
@@ -728,7 +738,18 @@ async function handleRequest(
         extra: { role: authCtx.role, claims: authCtx.claims },
       };
     }
-    await handleMcp(req, res, cache, transports, execution, maxBodyBytes, auth, authCtx, provenance);
+    await handleMcp(
+      req,
+      res,
+      cache,
+      transports,
+      execution,
+      maxBodyBytes,
+      auth,
+      authCtx,
+      refusals,
+      provenance,
+    );
     return;
   }
 
@@ -739,16 +760,19 @@ async function handleRequest(
  *  including the RFC 9728 WWW-Authenticate challenge pointing at the
  *  protected-resource metadata — is written here and `undefined` is
  *  returned. Messages come from KozouAuthError and are safe by contract
- *  (they never say which verification check failed). */
+ *  (they never say which verification check failed); which check it was
+ *  goes to the server's log instead. */
 async function authenticate(
   auth: McpHttpAuth,
   req: IncomingMessage,
   res: ServerResponse,
+  refusals: RefusalLog,
 ): Promise<McpAuthContext | undefined> {
   try {
     return await authenticateRequest(auth, req);
   } catch (err) {
     if (err instanceof KozouAuthError) {
+      refusals.record(err.reason ?? 'unclassified', { roleClaim: auth.authenticator.roleClaim });
       if (err.kind === 'unauthorized') {
         // RFC 6750: no error attribute when the request had no credentials.
         const hadToken = req.headers.authorization !== undefined;
@@ -756,8 +780,14 @@ async function authenticate(
         return undefined;
       }
       // A role problem (missing claim / not allowed) is forbidden, not a
-      // scope-upgrade situation — no insufficient_scope challenge.
-      respondError(res, 403, err.message);
+      // scope-upgrade situation — no insufficient_scope challenge. The shared
+      // message for a missing role points at a default role, which this surface
+      // deliberately does not have; say only what the token lacks.
+      const message =
+        err.reason === 'role_missing'
+          ? `Token does not specify a role (no "${auth.authenticator.roleClaim}" claim).`
+          : err.message;
+      respondError(res, 403, message);
       return undefined;
     }
     throw err;
@@ -784,7 +814,16 @@ function respondChallenge(res: ServerResponse, status: number, message: string, 
   res.end(JSON.stringify({ error: message }));
 }
 
-function respondInsufficientScope(res: ServerResponse, auth: McpHttpAuth, requiredScope: string): void {
+function respondInsufficientScope(
+  res: ServerResponse,
+  auth: McpHttpAuth,
+  requiredScope: string,
+  refusals: RefusalLog,
+): void {
+  refusals.record('insufficient_scope', {
+    roleClaim: auth.authenticator.roleClaim,
+    scope: requiredScope,
+  });
   respondChallenge(
     res,
     403,
@@ -813,6 +852,7 @@ async function handleMcp(
   maxBodyBytes: number,
   auth: McpHttpAuth | undefined,
   authCtx: McpAuthContext | undefined,
+  refusals: RefusalLog,
   provenance: boolean,
 ): Promise<void> {
   const sessionId = headerValue(req.headers['mcp-session-id']);
@@ -850,7 +890,7 @@ async function handleMcp(
       if (auth !== undefined && authCtx !== undefined) {
         const missing = missingToolScope(body, auth, authCtx);
         if (missing !== undefined) {
-          respondInsufficientScope(res, auth, missing);
+          respondInsufficientScope(res, auth, missing, refusals);
           return;
         }
       }
