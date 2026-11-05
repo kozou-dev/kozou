@@ -56,7 +56,7 @@
   "devDependencies": {
     "@kozou/codegen": "workspace:*",
     "@kozou/test-utils": "workspace:*",
-    "@modelcontextprotocol/sdk": "^1.0.0",
+    "@modelcontextprotocol/sdk": "^1.32.0",
     "@playwright/test": "^1.50.0",
     "@testcontainers/postgresql": "^12.0.0",
     "@types/pg": "^8.11.10",
