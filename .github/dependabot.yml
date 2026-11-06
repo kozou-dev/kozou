@@ -20,6 +20,19 @@ updates:
     commit-message:
       prefix: 'Update'
       include: scope
+    # A group counts as one pull request against open-pull-requests-limit.
+    # Without groups, five unmerged updates stop every further version
+    # update for the ecosystem.
+    groups:
+      # init and analyze are parts of one CodeQL release. Bumped in separate
+      # pull requests, one job runs two versions of the action.
+      codeql:
+        patterns:
+          - 'github/codeql-action/*'
+      actions-minor-patch:
+        update-types:
+          - minor
+          - patch
 
   - package-ecosystem: npm
     directory: /
@@ -37,3 +50,16 @@ updates:
       include: scope
     # Cover every package in the workspace (root + packages/*).
     versioning-strategy: increase
+    # Major updates stay in pull requests of their own, for manual review.
+    groups:
+      # The E2E setup passes a testcontainers network into
+      # @testcontainers/postgresql, which carries its own testcontainers.
+      # Bumping one without the other fails typecheck.
+      testcontainers:
+        patterns:
+          - 'testcontainers'
+          - '@testcontainers/*'
+      npm-minor-patch:
+        update-types:
+          - minor
+          - patch
