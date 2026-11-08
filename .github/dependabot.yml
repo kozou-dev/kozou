@@ -33,6 +33,12 @@ updates:
         update-types:
           - minor
           - patch
+        # Dependabot puts a dependency in every group that contains it, but a
+        # group with patterns gives it up when another such group scores
+        # higher, and a group without patterns outranks a wildcard pattern.
+        # Without this exclusion, the CodeQL actions never reach codeql.
+        exclude-patterns:
+          - 'github/codeql-action/*'
 
   - package-ecosystem: npm
     directory: /
@@ -50,7 +56,8 @@ updates:
       include: scope
     # Cover every package in the workspace (root + packages/*).
     versioning-strategy: increase
-    # Major updates stay in pull requests of their own, for manual review.
+    # Major updates come as pull requests of their own, for manual review;
+    # a testcontainers major comes as one pull request for the pair.
     groups:
       # The E2E setup passes a testcontainers network into
       # @testcontainers/postgresql, which carries its own testcontainers.
@@ -63,3 +70,11 @@ updates:
         update-types:
           - minor
           - patch
+        # Same rule: without the exclusion, the testcontainers group gives up
+        # @testcontainers/postgresql (a wildcard match) to this group but
+        # keeps testcontainers (an exact match), so the two are bumped
+        # separately. Excluding testcontainers as well keeps the pair from
+        # depending on the order of the groups.
+        exclude-patterns:
+          - 'testcontainers'
+          - '@testcontainers/*'
