@@ -13,7 +13,10 @@ updates:
       day: monday
       time: '09:00'
       timezone: 'Asia/Tokyo'
-    open-pull-requests-limit: 5
+    # Major updates outside a group come one pull request each and stay open
+    # until they are reviewed. The limit leaves room for several of them, so
+    # they do not take every slot and keep a group pull request from opening.
+    open-pull-requests-limit: 10
     labels:
       - dependencies
       - github-actions
@@ -21,8 +24,8 @@ updates:
       prefix: 'Update'
       include: scope
     # A group counts as one pull request against open-pull-requests-limit.
-    # Without groups, five unmerged updates stop every further version
-    # update for the ecosystem.
+    # Without groups, once open pull requests reach the limit they stop
+    # every further version update for the ecosystem.
     groups:
       # init and analyze are parts of one CodeQL release. Bumped in separate
       # pull requests, one job runs two versions of the action.
@@ -47,7 +50,10 @@ updates:
       day: monday
       time: '09:00'
       timezone: 'Asia/Tokyo'
-    open-pull-requests-limit: 5
+    # Same reason as for actions: major updates outside a group stay open one
+    # pull request each until they are reviewed, and the limit leaves room for
+    # them beside the groups.
+    open-pull-requests-limit: 15
     labels:
       - dependencies
       - npm
