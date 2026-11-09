@@ -47,7 +47,7 @@
     "@kozou/introspect": "workspace:*",
     "@kozou/ui-core": "workspace:*",
     "@lucide/svelte": "^1.70.0",
-    "@tanstack/table-core": "^8.21.3",
+    "@tanstack/table-core": "^9.3.1",
     "bits-ui": "^2.20.6",
     "clsx": "^2.1.1",
     "formsnap": "^2.1.0",
