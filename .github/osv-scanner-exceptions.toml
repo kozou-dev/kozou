@@ -42,58 +42,6 @@
 # expired date, that failure is always fixable here, by deleting the entry.
 
 [[IgnoredVulns]]
-id = "GHSA-pxg6-pf52-xh8x"
-# Reached by anyone installing @kozou/svelte-ui, via sveltekit-superforms ->
-# peer @sveltejs/kit -> cookie. Surfaced by this gate on its first run; the
-# old workspace-lockfile scan could not see it, because pnpm.overrides pinned
-# cookie to 0.7.2 here while adopters still resolve 0.6.0.
-reason = """
-Unfixable from here: @sveltejs/kit 2.70.1 declares cookie: ^0.6.0, and 0.6.0 \
-is the only release in that range - the fix landed in 0.7.0, outside it. A \
-pnpm override cannot help, because overrides are workspace-local and never \
-reach a consumer's resolver. Severity is low (out-of-bounds characters \
-accepted in cookie name/path/domain). \
-Removes itself when @sveltejs/kit widens its cookie range to include 0.7.x.
-"""
-
-[[IgnoredVulns]]
-id = "GHSA-27mw-82g8-phjj"
-# Reached by anyone installing @kozou/svelte-ui, via sveltekit-superforms ->
-# peer @sveltejs/kit, and via bits-ui -> runed -> optional peer @sveltejs/kit.
-reason = """
-Unfixable from here: the advisory lists @sveltejs/kit < 3.0.0 as affected, and \
-two peers in the @kozou/svelte-ui consumer tree hold a consumer's resolver on \
-2.x. sveltekit-superforms 2.x, which @kozou/svelte-ui depends on, declares \
-@sveltejs/kit 1.x || 2.x. runed 0.35, which bits-ui brings in directly and \
-through svelte-toolbelt, declares an optional @sveltejs/kit peer of ^2.21.0, \
-and npm satisfies it with a nested 2.x copy even when the top-level kit is \
-3.x. Moving to sveltekit-superforms 3 alone therefore still resolves 2.x. \
-Severity is low (XSS via an untrusted cache-control header in a prerendered \
-page). @sveltejs/kit 2.70.4 ships a change described as escaping \
-cache-control headers in prerendered HTML, but the advisory has not been \
-amended to name it. \
-Removes itself when the advisory is amended to include a 2.x fix, or when \
-both peers admit 3.x: @kozou/svelte-ui moves to sveltekit-superforms 3 \
-(peer ^2.12.0 || ^3.0.0), and bits-ui and svelte-toolbelt move to a runed \
-whose kit peer admits 3.x (runed 0.38 declares ^3.0.0).
-"""
-
-[[IgnoredVulns]]
-id = "GHSA-pfhg-q3qv-9q6r"
-# Same paths as GHSA-27mw-82g8-phjj above.
-reason = """
-Unfixable from here, for the same reason as GHSA-27mw-82g8-phjj: affected is \
-@sveltejs/kit < 3.0.0, and two peers keep a consumer on 2.x - the \
-sveltekit-superforms 2.x peer (1.x || 2.x) and the optional peer of runed 0.35 \
-(^2.21.0, via bits-ui and svelte-toolbelt). Severity is low (URL redirection \
-to an untrusted site via enhanced form submission). \
-Removes itself under the same conditions as GHSA-27mw-82g8-phjj: the advisory \
-is amended to include a 2.x fix, or @kozou/svelte-ui moves to \
-sveltekit-superforms 3 and bits-ui and svelte-toolbelt move to a runed whose \
-kit peer admits 3.x.
-"""
-
-[[IgnoredVulns]]
 id = "GHSA-gcqx-w48m-w2h4"
 # Reached by anyone installing @kozou/svelte-ui, via peer @sveltejs/kit ->
 # peer @sveltejs/vite-plugin-svelte -> deepmerge.
