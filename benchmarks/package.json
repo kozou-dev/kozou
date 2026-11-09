@@ -14,15 +14,15 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^0.110.0",
     "@modelcontextprotocol/sdk": "^1.32.2",
-    "pg": "^8.13.0",
-    "yaml": "^2.9.0",
+    "pg": "^8.23.1",
+    "yaml": "^2.9.1",
     "zod": "^4.6.7"
   },
   "devDependencies": {
     "kozou": "workspace:*",
     "@kozou/test-utils": "workspace:*",
     "@testcontainers/postgresql": "^12.0.0",
-    "@types/pg": "^8.11.0",
-    "tsx": "^4.19.0"
+    "@types/pg": "^8.23.1",
+    "tsx": "^4.23.15"
   }
 }

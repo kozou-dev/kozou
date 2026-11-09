@@ -37,10 +37,10 @@
   },
   "dependencies": {
     "@kozou/core": "workspace:*",
-    "pg": "^8.13.0"
+    "pg": "^8.23.1"
   },
   "devDependencies": {
     "@kozou/test-utils": "workspace:*",
-    "@types/pg": "^8.11.0"
+    "@types/pg": "^8.23.1"
   }
 }
