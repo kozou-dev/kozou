@@ -49,18 +49,18 @@
     "@kozou/mcp": "workspace:*",
     "@kozou/svelte-ui": "workspace:*",
     "commander": "^14.0.0",
-    "pg": "^8.13.0",
-    "yaml": "^2.9.0",
+    "pg": "^8.23.1",
+    "yaml": "^2.9.1",
     "zod": "^4.6.7"
   },
   "devDependencies": {
     "@kozou/codegen": "workspace:*",
     "@kozou/test-utils": "workspace:*",
     "@modelcontextprotocol/sdk": "^1.32.2",
-    "@playwright/test": "^1.64.1",
+    "@playwright/test": "^1.65.0",
     "@testcontainers/postgresql": "^12.0.0",
-    "@types/pg": "^8.11.10",
+    "@types/pg": "^8.23.1",
     "testcontainers": "^12.0.0",
-    "tsx": "^4.19.0"
+    "tsx": "^4.23.15"
   }
 }
