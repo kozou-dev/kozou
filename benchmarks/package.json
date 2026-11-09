@@ -12,7 +12,7 @@
     "emit-schema": "tsx src/schema/emit.ts"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.110.0",
+    "@anthropic-ai/sdk": "^1.6.0",
     "@modelcontextprotocol/sdk": "^1.32.2",
     "pg": "^8.23.1",
     "yaml": "^2.9.1",
