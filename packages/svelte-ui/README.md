@@ -17,8 +17,8 @@ the default is Kozou's bundled in-house REST backend (`@kozou/api`).
 | Framework | SvelteKit 2.6+ / Svelte 5.55+ |
 | Adapter | `@sveltejs/adapter-node` |
 | Styling | Tailwind v4 + shadcn-svelte design tokens |
-| Forms | `sveltekit-superforms` + `formsnap` + `zod` (4.4) |
-| Tables | `@tanstack/table-core` (Svelte 5 wrapper internalised) |
+| Forms | `sveltekit-superforms` + `zod` 4 |
+| Tables | Plain `<table>` markup; sort and pagination links from `@kozou/ui-core` |
 | HTTP | `fetch` via the `DataAdapter` interface from `@kozou/core` |
 
 ## Routes
