@@ -81,8 +81,9 @@ jobs:
   # failure rate tracked npm's advisory publication rate rather than kozou's
   # risk. It also under-reported, which is the worse half: `pnpm.overrides`
   # reshape that lockfile, and overrides are workspace-local. They never reach
-  # a consumer's resolver. `cookie` is the live example - pinned to 0.7.2 here,
-  # still 0.6.0 for every adopter, and invisible to a workspace scan.
+  # a consumer's resolver. `cookie` was the live example when this split was
+  # made - pinned to 0.7.2 here, still 0.6.0 for every adopter, and invisible
+  # to a workspace scan.
 
   dependency-scan:
     name: Dependency CVE (OSV-Scanner)
