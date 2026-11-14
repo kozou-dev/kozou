@@ -13,7 +13,7 @@
 # So a finding here means an adopter is exposed, full stop - there is no
 # scope judgement left to make, and therefore no list of packages to exclude.
 #
-# That is why this file holds only [[IgnoredVulns]] and no [[PackageOverrides]].
+# That is why any entry here is [[IgnoredVulns]], never [[PackageOverrides]].
 # Dev tooling, build tooling, examples/ and benchmarks/ never enter the gate's
 # input in the first place, so they need no exclusion. They are still scanned,
 # unfiltered, by the non-blocking `dependency-scan-report` job.
@@ -40,18 +40,3 @@
 # osv-scanner reports `has unused ignores`. The blocking job treats that as a
 # failure, so a stale exception cannot accumulate quietly - and unlike an
 # expired date, that failure is always fixable here, by deleting the entry.
-
-[[IgnoredVulns]]
-id = "GHSA-gcqx-w48m-w2h4"
-# Reached by anyone installing @kozou/svelte-ui, via peer @sveltejs/kit ->
-# peer @sveltejs/vite-plugin-svelte -> deepmerge.
-reason = """
-Unfixable from here: no patched release exists. The advisory lists deepmerge \
->= 4.2.0, <= 4.3.1 as affected with no fixed version, and 4.3.1 is the latest \
-release. Severity is low (prototype poisoning of objects returned by \
-mergeObject()). \
-Removes itself when a deepmerge release above 4.3.1 lands inside the ^4.3.1 \
-range @sveltejs/vite-plugin-svelte declares (a fix published only as 5.x \
-would not reach a consumer's resolver), or when @sveltejs/vite-plugin-svelte \
-stops depending on deepmerge.
-"""
