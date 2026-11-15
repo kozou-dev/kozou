@@ -95,7 +95,7 @@ jobs:
         #   adapter type is the documented option)
         # - TOML (pyproject.toml is verified separately above)
         # - GitHub Actions workflow files (including this one)
-        # - .eslintrc.cjs (mentions PostgREST only inside the defensive
+        # - eslint.config.mjs (mentions PostgREST only inside the defensive
         #   rule)
         # - packages/kozou/src/config.ts (the adapter.type literal is
         #   the discriminator value 'postgrest'; it identifies the
@@ -150,7 +150,7 @@ jobs:
           if git grep -i -n -E 'postgrest|pgrst|agpl|gnu affero|gpl-3|gnu general public' \
              -- '*.ts' '*.tsx' '*.js' '*.cjs' '*.mjs' '*.svelte' '*.sql' \
              ':(exclude).github/workflows/*.yml' \
-             ':(exclude).eslintrc.cjs' \
+             ':(exclude)eslint.config.mjs' \
              ':(exclude)packages/kozou/src/config.ts' \
              ':(exclude)packages/kozou/test/config.test.ts' \
              ':(exclude)packages/ui-core/src/index.ts' \

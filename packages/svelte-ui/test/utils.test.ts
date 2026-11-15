@@ -13,7 +13,7 @@ describe('cn', () => {
   });
 
   it('drops falsy fragments before delegating to tailwind-merge', () => {
-    expect(cn('foo', false && 'bar', null, undefined, 'baz')).toBe('foo baz');
+    expect(cn('foo', false, null, undefined, 'baz')).toBe('foo baz');
   });
 
   it('lets tailwind-merge collapse conflicting utilities', () => {

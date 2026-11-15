@@ -169,7 +169,7 @@ a PostgreSQL and a PostgREST pointed at it:
 
 Route code (`src/routes/**`) never imports `PostgrestDataAdapter`
 directly. The eslint config in the repository root
-(`.eslintrc.cjs`) enforces this: routes that try to hardcode a
+(`eslint.config.mjs`) enforces this: routes that try to hardcode a
 PostgREST URL, dereference a `PGRST_*` env var, or reference
 PostgREST by name fail lint. Routes go through `getAdapter()` in
 `src/lib/server/adapter.ts`, which constructs the configured
