@@ -185,8 +185,13 @@ jobs:
             echo
             echo 'Includes dev tooling, build tooling and examples/, which never'
             echo 'enter the blocking `dependency-scan` job - that one scans the'
-            echo 'trees adopters actually install. Findings here do not reach'
-            echo 'users through a published package.'
+            echo 'trees adopters actually install. Findings against dev tooling,'
+            echo 'build tooling and examples/ do not reach users through a'
+            echo 'published package, with one exception: what `@kozou/svelte-ui`'
+            echo 'inlines into its published `build/` (SvelteKit, Svelte and'
+            echo 'Superforms among them) ships at the versions the workspace'
+            echo 'lockfile resolves, and the blocking job does not scan inlined'
+            echo 'code - so a finding here against one of those can reach users.'
             echo
             if [ -f "$RUNNER_TEMP/osv-report.md" ]; then
               cat "$RUNNER_TEMP/osv-report.md"

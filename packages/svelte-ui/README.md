@@ -14,7 +14,7 @@ the default is Kozou's bundled in-house REST backend (`@kozou/api`).
 
 | Layer | Pick |
 |-------|------|
-| Framework | SvelteKit 2.6+ / Svelte 5.55+ |
+| Framework | SvelteKit 2 / Svelte 5 |
 | Adapter | `@sveltejs/adapter-node` |
 | Styling | Tailwind v4 + shadcn-svelte design tokens |
 | Forms | `sveltekit-superforms` + `zod` 4 |
