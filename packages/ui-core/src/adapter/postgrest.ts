@@ -428,7 +428,7 @@ async function readJson(response: Response, url: string): Promise<unknown> {
 
 async function assertOk(response: Response, url: string): Promise<void> {
   if (response.ok) return;
-  let body: string | null = null;
+  let body: string | null;
   try {
     body = await response.text();
   } catch {
