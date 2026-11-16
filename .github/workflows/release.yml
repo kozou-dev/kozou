@@ -461,7 +461,9 @@ jobs:
     needs: [publish-npm, publish-cli]
     if: ${{ inputs.dry_run != true && github.event_name == 'push' }}
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    # The bump step alone may poll npm for about 10 minutes before it
+    # installs anything; leave room for that plus the install and gen:docs.
+    timeout-minutes: 20
     continue-on-error: true
     permissions:
       contents: read
@@ -526,9 +528,39 @@ jobs:
             echo "changed=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          # Retry: npm needs a moment to propagate the freshly published version.
           # @kozou/core feeds the version regions; kozou (the CLI) feeds the
           # generated CLI reference. Both publish together from this release.
+          #
+          # Wait until npm serves both before installing them. `npm publish`
+          # returning is not the moment the registry serves the version: on
+          # v1.21.2 the kozou CLI's publish step finished at 10:24:56Z, npm
+          # recorded kozou@1.21.2 as published at 10:28:04Z, and the
+          # one-minute retry below had already given up at 10:26:10Z. Poll
+          # with the same `npm view <pkg>@<version> version` probe the publish
+          # jobs above use (it exits non-zero while the version is missing,
+          # and `npm view` always revalidates against the registry, so a miss
+          # is not served from npm's cache), every 20s for about 10 minutes.
+          for check in $(seq 1 30); do
+            missing=""
+            for pkg in "@kozou/core" "kozou"; do
+              if ! npm view "${pkg}@${version}" version >/dev/null 2>&1; then
+                missing="${missing} ${pkg}@${version}"
+              fi
+            done
+            if [ -z "$missing" ]; then
+              echo "npm serves @kozou/core@${version} and kozou@${version}."
+              break
+            fi
+            if [ "$check" -eq 30 ]; then
+              echo "::error::npm still does not serve${missing} after about 10 minutes of polling."
+              exit 1
+            fi
+            echo "Check ${check}/30: npm does not serve${missing} yet; waiting 20s..."
+            sleep 20
+          done
+          # Keep a short retry around the install itself: `npm view` reads the
+          # full package document, while pnpm resolves from the abbreviated
+          # one the registry serves separately, so the two can briefly disagree.
           for attempt in 1 2 3 4 5; do
             if pnpm add -E "@kozou/core@${version}" "kozou@${version}"; then
               break
@@ -537,7 +569,7 @@ jobs:
               echo "::error::@kozou/core@${version} / kozou@${version} are not installable after retries."
               exit 1
             fi
-            echo "Attempt ${attempt} failed; waiting for npm to propagate ${version}..."
+            echo "Install attempt ${attempt} failed; retrying in 15s..."
             sleep 15
           done
           pnpm gen:docs
