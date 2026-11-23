@@ -43,6 +43,6 @@
     "@kozou/introspect": "workspace:*",
     "@kozou/test-utils": "workspace:*",
     "@types/pg": "^8.23.1",
-    "jose": "^6.2.15"
+    "jose": "^6.2.18"
   }
 }
