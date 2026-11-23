@@ -25,7 +25,7 @@
     "test": "pnpm -r --if-present test"
   },
   "devDependencies": {
-    "@testcontainers/postgresql": "^12.2.1",
+    "@testcontainers/postgresql": "^12.2.2",
     "@eslint/js": "^10.0.1",
     "@types/node": "^26.6.6",
     "@vitest/coverage-v8": "^4.1.12",
